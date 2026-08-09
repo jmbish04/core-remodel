@@ -1,7 +1,7 @@
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 import { driveRoots } from "./drive_roots";
 
@@ -50,6 +50,16 @@ export const driveFolders = sqliteTable(
   (t) => ({
     byRootActive: index("drive_folders_root_active_idx").on(t.rootId, t.isActive),
     byDriveId: index("drive_folders_drive_id_idx").on(t.driveId),
+    /** Walking a supersede chain backwards was a table scan without this. */
+    bySupersededBy: index("drive_folders_superseded_by_idx").on(t.supersededById),
+    /**
+     * At most ONE live row per Drive id per root. The ingester is written not
+     * to duplicate, but the indexes here are non-unique, so any path that ever
+     * did would corrupt the tree silently. This makes it fail loudly instead.
+     */
+    oneActivePerDriveId: uniqueIndex("drive_folders_active_drive_id_uidx")
+      .on(t.rootId, t.driveId)
+      .where(sql`${t.isActive} = 1`),
   }),
 );
 

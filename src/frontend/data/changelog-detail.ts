@@ -118,13 +118,14 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     branch: "feat/drive-ingestion-service",
     prNumber: 374,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/374",
-    subtitle: "PR 1 of 3 · the catalogue the vendor-email and research-indexing features both sit on",
+    subtitle:
+      "PR 1 of 3 · the catalogue the vendor-email and research-indexing features both sit on",
     introduction:
       "Point this service at a Google Drive folder, tell it what the folder is FOR, and it keeps D1 in step with Drive every night. Adding another folder later is a row insert rather than a code change.",
     problem:
       "Two things happen constantly and the platform supported neither.\n\nEmailing a vendor project material went through the generic claude.ai Gmail connector, which knows nothing about the project, the boilerplate, or the files — this repo's MCP registry had **126 tools and not one of them could send email**. And a research corpus sitting in Drive was entirely invisible to the app.\n\nBoth need the same thing underneath: a service that ingests a Drive folder into D1, keyed by what the content is for.\n\n### What the folders actually contain\n\nBoth were walked in full before any code was written, and the measurements changed the design:\n\n| Root | Reality |\n| --- | --- |\n| Onboarding materials | 72 nodes — ~55 images, 4 PDFs, 1 `.skp`, **zero** Google Docs |\n| Deep research findings | 87 nodes — ~46 Google Docs, 26 generated HTML, 12 topic folders |\n\nThe onboarding folder is a photo library, not a document library, so its value is sending files — which needs **sizes and links**, not a text-extraction pipeline. That inverted the original plan.\n\nA near-miss worth recording: an earlier draft pointed at a different folder that turned out to be **~99% machine-generated processing logs** — 4,972 of 5,000 nodes in one subfolder. Ingesting that would have put thousands of debug files in D1 and, in PR 3, embedded all of them. The root was corrected, but per-root exclusions stayed in the schema, because the hazard is real and the guard is cheap.",
     approach:
-      "### The service\n\n`ingestDriveFolder(env, rootId)` walks a root recursively, applying that root's exclusions **during descent** so an excluded subtree costs one membership check rather than thousands of API reads. The flat node list then goes through a **pure** classifier — no network, no database — that emits create / supersede / delete / unchanged, which is what makes the interesting cases unit-testable at all.\n\n### Change detection, and the asymmetry in it\n\nBinary files carry Drive's own md5. **Google-native files (Docs, Sheets, Slides) carry no `md5Checksum` at all**, so they are hashed over their exported text, and `hashSource` records which method was used so a hash is never compared across kinds. This is not academic: the research corpus contains six separate Docs sharing a title and near-identical content.\n\nEqual hashes deliberately do **not** merge two files. Identity is the Drive id. Collapsing those six would destroy real rows, and there is a test asserting it does not happen.\n\n### Two flags, not one\n\n`isActive = false` means superseded by a rename or move — a new row carries the current state and `supersededById` links them into a revision chain. `isDeleted = true` means gone from Drive. Nothing is ever hard-deleted. A file can be superseded without being deleted, and deleted without ever having been superseded; one flag would lose the difference between \"this moved\" and \"this is gone\".\n\n### Sharing state, and why it earns a column\n\nDrive v3 has no access-level field — it returns a `permissions[]` array and leaves the interpretation to you. The five Apps Script values are derived from it, and the derivation has one trap that has its own test: **Drive omits `allowFileDiscovery` when it is false**, so an absent key must read as false. Reading it as true would label a link-shared file as publicly discoverable, and that value decides whether a Drive link gets emailed to an outside vendor.\n\n### Reuse instead of new tables\n\nThe nightly scan records itself in the existing **`agent_runs`** ledger — one run, one step per root — so it appears at `/admin/system/agents` with timing and errors and no bespoke scan-run table. `drive_documents` is deliberately its own table rather than folded into `supporting_documents`: that table means records about specific purchased things, Drive material is high-level, and a schema boundary beats a `tier` column every future query has to remember to filter.",
+      '### The service\n\n`ingestDriveFolder(env, rootId)` walks a root recursively, applying that root\'s exclusions **during descent** so an excluded subtree costs one membership check rather than thousands of API reads. The flat node list then goes through a **pure** classifier — no network, no database — that emits create / supersede / delete / unchanged, which is what makes the interesting cases unit-testable at all.\n\n### Change detection, and the asymmetry in it\n\nBinary files carry Drive\'s own md5. **Google-native files (Docs, Sheets, Slides) carry no `md5Checksum` at all**, so they are hashed over their exported text, and `hashSource` records which method was used so a hash is never compared across kinds. This is not academic: the research corpus contains six separate Docs sharing a title and near-identical content.\n\nEqual hashes deliberately do **not** merge two files. Identity is the Drive id. Collapsing those six would destroy real rows, and there is a test asserting it does not happen.\n\n### Two flags, not one\n\n`isActive = false` means superseded by a rename or move — a new row carries the current state and `supersededById` links them into a revision chain. `isDeleted = true` means gone from Drive. Nothing is ever hard-deleted. A file can be superseded without being deleted, and deleted without ever having been superseded; one flag would lose the difference between "this moved" and "this is gone".\n\n### Sharing state, and why it earns a column\n\nDrive v3 has no access-level field — it returns a `permissions[]` array and leaves the interpretation to you. The five Apps Script values are derived from it, and the derivation has one trap that has its own test: **Drive omits `allowFileDiscovery` when it is false**, so an absent key must read as false. Reading it as true would label a link-shared file as publicly discoverable, and that value decides whether a Drive link gets emailed to an outside vendor.\n\n### Reuse instead of new tables\n\nThe nightly scan records itself in the existing **`agent_runs`** ledger — one run, one step per root — so it appears at `/admin/system/agents` with timing and errors and no bespoke scan-run table. `drive_documents` is deliberately its own table rather than folded into `supporting_documents`: that table means records about specific purchased things, Drive material is high-level, and a schema boundary beats a `tier` column every future query has to remember to filter.',
     apiChanges: [
       "GET /api/admin/drive/roots — every configured root with its use-case key, active flag and last-scanned timestamp.",
       "POST /api/admin/drive/roots — register a new root against a use case.",
@@ -209,40 +210,69 @@ export async function contentHashFor(env: Env, node: DriveNode) {
       qcScript: "scripts/qc/pr_374.mjs",
       command: "node scripts/qc/pr_374.mjs --preview   (and without --preview for production)",
       ranAt: "2026-08-08",
-      source: `// The load-bearing assertion. A scan that created rows every night would
-// silently multiply the catalogue, and nothing else would catch it.
+      source: `// The load-bearing assertion, now with the duplicate-row invariant the
+// final review round added: a delete-marked row used to be invisible to the
+// next diff, so anything that came back was re-CREATED as a SECOND active row
+// for one Drive id — silently, because the drive_id indexes are non-unique.
 const second = await client.post("/api/admin/drive/ingest", { rootId });
 const s2 = second.json?.summaries?.[0];
 checks.ok(
   "second scan is a no-op (idempotent) — the load-bearing assertion",
-  s2?.created === 0 && s2?.superseded === 0 && s2?.deleted === 0,
+  s2?.created === 0 && s2?.superseded === 0 && s2?.deleted === 0 && s2?.undeleted === 0,
   \`created \${s2?.created}, superseded \${s2?.superseded}, deleted \${s2?.deleted}\`,
-);`,
+);
+const driveIds = list.map((d) => d.driveId);
+const dupes = driveIds.filter((id, i) => driveIds.indexOf(id) !== i);
+checks.ok(
+  "every live document row has a distinct Drive id (no duplicate active rows)",
+  driveIds.length > 0 && driveIds.every(Boolean) && dupes.length === 0,
+  \`rows \${driveIds.length}, duplicated ids: \${[...new Set(dupes)].join(", ") || "none"}\`,
+);
+
+// And the scan lease, fired concurrently: exactly one of the two may take it.
+const [a, b] = await Promise.all([
+  client.post("/api/admin/drive/ingest", { rootId }),
+  client.post("/api/admin/drive/ingest", { rootId }),
+]);`,
       output: `$ node scripts/qc/pr_374.mjs --preview
 
-  \u2713 target reachable (https://wcrp-feat-drive-ingestion-service.hacolby.workers.dev)
-  \u2713 both roots are seeded
-  \u2713 onboarding root maps to EMAIL_ONBOARDING_MATERIALS
-  \u2713 research root maps to DEEP_RESEARCH_FINDINGS
-  \u2713 POST /ingest with a wrong-typed rootId returns 400 (Zod), not a 500
-  \u2713 POST /ingest with a well-shaped but nonexistent rootId returns 404
-  \u2713 POST /ingest with an empty body ingests ALL active roots
-  \u2713 scan by real rootId ingests the onboarding folder: 72 nodes (61 docs + 11 folders)
-  \u2713 second scan is a no-op (idempotent) — the load-bearing assertion
-  \u2713 documents are listed with a joined folder name, count == 61
-  \u2713 the 1971 Blueprints PDF is catalogued with a non-zero size
-  \u2713 the Floor Plans with Measurements PDF is catalogued with a non-zero size
-  \u2713 sharing is recorded on every document from the allowed vocabulary
-  \u2713 GET /documents accepts a numeric folderId filter and narrows the result set
-  \u2713 GET /documents rejects a non-numeric folderId with 400
+PR #374 QC — Drive ingestion service
+  target: https://wcrp-feat-drive-ingestion-service.hacolby.workers.dev
 
-15 passed, 0 failed
+  ✓ target reachable (https://wcrp-feat-drive-ingestion-service.hacolby.workers.dev)
+  ✓ GET /api/admin/drive/roots returns 200 (the surface is expected to exist on this target)
+  ✓ both roots are seeded
+  ✓ onboarding root maps to EMAIL_ONBOARDING_MATERIALS
+  ✓ research root maps to DEEP_RESEARCH_FINDINGS
+  ✓ POST /ingest with a wrong-typed rootId returns 400 (Zod), not a 500
+  ✓ POST /ingest with a well-shaped but nonexistent rootId returns 404
+  ✓ POST /ingest with an empty body ingests ALL active roots
+  ✓ scan by real rootId ingests the onboarding folder: 72 nodes (61 docs + 11 folders)
+    seen=72 created=0 superseded=0 deleted=0
+  ✓ second scan is a no-op (idempotent) — the load-bearing assertion
+  ✓ re-ingest does not grow the catalogue (no duplicate rows from a second scan)
+  ✓ every live document row has a distinct Drive id (no duplicate active rows)
+  ✓ documents are listed with a joined folder name, count == 61
+  ✓ the 1971 Blueprints PDF is catalogued with a non-zero size
+  ✓ the Floor Plans with Measurements PDF is catalogued with a non-zero size
+  ✓ sharing is recorded on every document from the allowed vocabulary
+  ✓ GET /documents?folderId= returns only that folder's rows, and fewer than the unfiltered total
+  ✓ GET /documents rejects a non-numeric folderId with 400
+  ✓ POST /roots rejects a driveFolderId with an illegal charset (400, no row created)
+  ✓ two concurrent scans of one root: one 200, one 409 (the scan lease holds)
+  ✓ the lease is released when a scan finishes (the next scan runs, not 409)
+
+21 passed, 0 failed
 
 
 $ node scripts/qc/pr_374.mjs      # production regression guard, pre-merge
 
-  \u2713 target reachable (https://core-remodel.hacolby.workers.dev)
-    new routes 404 on production — pending merge/deploy, reported rather than failed
+PR #374 QC — Drive ingestion service
+  target: https://core-remodel.hacolby.workers.dev
+
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
+    pending merge/deploy — GET /api/admin/drive/roots returned 404. Expected on
+    production pre-merge; every assertion below is skipped rather than failed.
 
 1 passed, 0 failed`,
       migrations: [
@@ -250,6 +280,11 @@ $ node scripts/qc/pr_374.mjs      # production regression guard, pre-merge
           tag: "0174_nifty_miek",
           appliedRemote: true,
           note: "Applied via pnpm run migrate:remote and verified: all six drive_* tables present on the remote DB, and the pre-existing drive_list* tables (driving routes, an unrelated feature) untouched.",
+        },
+        {
+          tag: "0175_curved_anthem",
+          appliedRemote: true,
+          note: "Review fixes: drive_roots.scan_started_at, a partial UNIQUE index on (root_id, drive_id) WHERE is_active = 1, and a superseded_by_id index — the last two on BOTH drive_folders and drive_documents. Production was checked for duplicate active rows FIRST, because the unique index cannot apply over one: there were none (26 folder rows, 137 document rows, 0 duplicated active drive_ids), so the migration needed no cleanup step. Applied via pnpm run migrate:remote; all four indexes confirmed present in sqlite_master on the remote DB.",
         },
       ],
     },
@@ -263,7 +298,7 @@ $ node scripts/qc/pr_374.mjs      # production regression guard, pre-merge
     introduction:
       "The claude.ai MCP connector kept going offline, could not be brought back by re-authorizing, and then could not be re-added either. Two separate defects, found in that order — one about how long credentials live, one about a single malformed field in the registration response. Both are fixed here.",
     problem:
-      "## Defect 2 (found second, blocks everything): dynamic client registration\n\nRe-adding the connector failed outright:\n\n> Couldn't register with core-remodel's sign-in service. You can try again, or add an OAuth Client ID in the connector settings.\n\nThat message is claude.ai saying **dynamic client registration failed**, so it is offering the fallback of a manually pre-registered client id. It never reaches a login screen.\n\nWhat makes this one nasty is that the server is not failing. `POST /oauth/register` returns **201**, writes `client:<id>` into `OAUTH_KV`, and a `curl` probe of it looks perfectly healthy — which is exactly why it survived every server-side check. The failure is in the client's *parse* of a valid-looking response.\n\n`workers-oauth-provider@0.8.1` builds one field by concatenating the configured option verbatim:\n\n```ts\nregistration_client_uri: `${this.options.clientRegistrationEndpoint}/${clientId}`\n```\n\nWe pass that option as the **path** `/oauth/register`, so the provider serves the endpoint correctly at any hostname (production, and every branch preview). But it means the field ships as:\n\n```json\n\"registration_client_uri\": \"/oauth/register/JE9ecrEFq84lZUgV\"\n```\n\nRFC 7591 §3.2.1 requires a fully qualified URL there. A client that does `new URL(registration_client_uri)` throws, and registration is abandoned.\n\nConfirmed by differential against a connector on the same account that *does* connect — `codra` omits the field entirely; core-remodel was the only one emitting a relative value.\n\n## Defect 1 (found first): every lifetime on a library default\n\nBefore that, the connector would simply report itself as needing authorization, and re-authorizing did not reliably fix it.\n\nThe `OAuthProvider` in `src/_worker.ts` passed no TTL options, so every default from `@cloudflare/workers-oauth-provider@0.8.1` applied:\n\n| Option | Default in use | Consequence |\n| --- | --- | --- |\n| `accessTokenTTL` | 3600s (1 hour) | the access token dies hourly; the client must refresh to keep working |\n| `refreshTokenTTL` | 30 days | the grant dies after 30 days without a refresh |\n| `clientRegistrationTTL` | 90 days | **the `client:<id>` record is deleted from `OAUTH_KV`** |\n\nThe third one is the connector-killer, and it is not obvious from the symptom. It does not expire a token — it deletes the client registration itself. A connector still holding that `client_id` then gets `invalid_client` on refresh *and* on a fresh authorization attempt, because the client it is identifying as no longer exists. Re-authorizing cannot help; only deleting and re-adding the connector can, because that triggers a new dynamic client registration.\n\n`OAUTH_KV` carried the fingerprint of exactly this loop — 77 `client:` records and 70 `grant:` records for a single operator, the debris of repeated reconnects. The same namespace also holds grants from another worker that runs year-long lifetimes, and those stay connected:\n\n```\n364.58d  grant:mcp-user-a706e218-…    ← other worker, still connected\n 27.5d   grant:justin:…               ← core-remodel, 30d default\n```\n\nBefore changing anything, the whole flow was driven against production to establish that the server was healthy and this really was only about lifetimes — register → authorize → approve → code exchange → MCP `initialize` → refresh → MCP `initialize`, every step 200.",
+      '## Defect 2 (found second, blocks everything): dynamic client registration\n\nRe-adding the connector failed outright:\n\n> Couldn\'t register with core-remodel\'s sign-in service. You can try again, or add an OAuth Client ID in the connector settings.\n\nThat message is claude.ai saying **dynamic client registration failed**, so it is offering the fallback of a manually pre-registered client id. It never reaches a login screen.\n\nWhat makes this one nasty is that the server is not failing. `POST /oauth/register` returns **201**, writes `client:<id>` into `OAUTH_KV`, and a `curl` probe of it looks perfectly healthy — which is exactly why it survived every server-side check. The failure is in the client\'s *parse* of a valid-looking response.\n\n`workers-oauth-provider@0.8.1` builds one field by concatenating the configured option verbatim:\n\n```ts\nregistration_client_uri: `${this.options.clientRegistrationEndpoint}/${clientId}`\n```\n\nWe pass that option as the **path** `/oauth/register`, so the provider serves the endpoint correctly at any hostname (production, and every branch preview). But it means the field ships as:\n\n```json\n"registration_client_uri": "/oauth/register/JE9ecrEFq84lZUgV"\n```\n\nRFC 7591 §3.2.1 requires a fully qualified URL there. A client that does `new URL(registration_client_uri)` throws, and registration is abandoned.\n\nConfirmed by differential against a connector on the same account that *does* connect — `codra` omits the field entirely; core-remodel was the only one emitting a relative value.\n\n## Defect 1 (found first): every lifetime on a library default\n\nBefore that, the connector would simply report itself as needing authorization, and re-authorizing did not reliably fix it.\n\nThe `OAuthProvider` in `src/_worker.ts` passed no TTL options, so every default from `@cloudflare/workers-oauth-provider@0.8.1` applied:\n\n| Option | Default in use | Consequence |\n| --- | --- | --- |\n| `accessTokenTTL` | 3600s (1 hour) | the access token dies hourly; the client must refresh to keep working |\n| `refreshTokenTTL` | 30 days | the grant dies after 30 days without a refresh |\n| `clientRegistrationTTL` | 90 days | **the `client:<id>` record is deleted from `OAUTH_KV`** |\n\nThe third one is the connector-killer, and it is not obvious from the symptom. It does not expire a token — it deletes the client registration itself. A connector still holding that `client_id` then gets `invalid_client` on refresh *and* on a fresh authorization attempt, because the client it is identifying as no longer exists. Re-authorizing cannot help; only deleting and re-adding the connector can, because that triggers a new dynamic client registration.\n\n`OAUTH_KV` carried the fingerprint of exactly this loop — 77 `client:` records and 70 `grant:` records for a single operator, the debris of repeated reconnects. The same namespace also holds grants from another worker that runs year-long lifetimes, and those stay connected:\n\n```\n364.58d  grant:mcp-user-a706e218-…    ← other worker, still connected\n 27.5d   grant:justin:…               ← core-remodel, 30d default\n```\n\nBefore changing anything, the whole flow was driven against production to establish that the server was healthy and this really was only about lifetimes — register → authorize → approve → code exchange → MCP `initialize` → refresh → MCP `initialize`, every step 200.',
     approach:
       "## The registration fix\n\n`withAbsoluteRegistrationUri` (`src/backend/mcp/absolute-registration-uri.ts`) wraps the worker's `fetch`. On a successful `POST /oauth/register` it resolves `registration_client_uri` against **the origin the request actually arrived on**, and leaves an already-absolute value untouched.\n\nThe obvious alternative — passing absolute URLs as the provider's endpoint options — was rejected: it would bake the production origin into the config, so every branch preview would advertise the production host and its own OAuth would break. Deriving per request is host-agnostic, and the no-op-when-absolute guard means the wrapper simply stops doing anything if the library is fixed upstream.\n\n## The lifetime fix\n\nThree options on the existing `OAuthProvider`, plus a shared `ONE_YEAR_SECONDS` constant. No behavioural code changed and no schema moved — that part of the diff is 12 lines.\n\nWhy a year for all three rather than only the client registration:\n\n- **`clientRegistrationTTL: 365d`** is the actual fix for the unrepairable state described above.\n- **`refreshTokenTTL: 365d`** stops a connector that sits unused for a month from silently losing its grant. The TTL is rolled forward on every refresh, so in practice this only matters for idle periods — which is exactly when the failure was landing.\n- **`accessTokenTTL: 365d`** removes the hourly refresh entirely. Refresh works correctly (the QC run proves rotation still issues a new pair), but every refresh is one more chance for a client to end up wedged, and this connector has no reason to churn tokens hourly.\n\nThe security trade is deliberate and worth stating plainly: a year-long bearer token with the full `remodel` scope is a long-lived credential. This is a single-operator connector whose consent screen is gated on `WORKER_API_KEY`, and revocation is still available two ways — delete the `grant:` record from `OAUTH_KV`, or use the revocation endpoint the provider already serves at `/oauth/token`. For a multi-user surface these numbers would be wrong.\n\n**One thing this does not do:** it cannot resurrect a connector that is already broken. An existing claude.ai connector whose `client:` record was already reaped still has to be removed and re-added once after this deploys; from then on the registration lives a year.\n\nOne thing worth following up separately — `OAUTH_KV` (namespace `859ea6b9…`) appears to be shared with at least one other worker, judging by the `mcp-user-*` grants sitting alongside the `justin` ones. Two OAuth issuers sharing one token store is not something this PR touches, but it deserves its own look.",
     apiChanges: [

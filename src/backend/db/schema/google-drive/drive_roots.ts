@@ -14,6 +14,14 @@ export const driveRoots = sqliteTable("drive_roots", {
     .references(() => driveUseCases.id),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   lastScannedAt: integer("last_scanned_at", { mode: "timestamp" }),
+  /**
+   * Scan lease. Set when a scan starts, cleared when it ends; a lease older
+   * than the staleness window is ignored so a crashed run self-heals. The
+   * 11:00 cron and a manual POST /api/admin/drive/ingest are otherwise the
+   * same unserialized path — two overlapping runs both read the pre-write
+   * snapshot and both insert.
+   */
+  scanStartedAt: integer("scan_started_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

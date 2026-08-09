@@ -423,8 +423,40 @@ export const CHANGELOG: ChangelogEntry[] = [
         kind: "changed",
         text: "drive.readonly added to the Gmail service account's requested scopes, after the human granted it in domain-wide delegation. The first attempt proved it was NOT delegated: Google rejects the entire JWT-bearer exchange on one undelegated scope, so every Gmail call failed, not just Drive. Proven and reverted on a preview worker; production never exposed.",
       },
+      {
+        kind: "migration",
+        text: "0175_curved_anthem (review fixes): drive_roots.scan_started_at (the scan lease), a partial UNIQUE index on (root_id, drive_id) WHERE is_active = 1 for both drive_folders and drive_documents, and an index on superseded_by_id for both. Production had ZERO duplicate active rows, so the unique index applied cleanly with no cleanup. Applied and verified on remote D1.",
+      },
+      {
+        kind: "fixed",
+        text: "A file that came back created a DUPLICATE active row. Both existing-row queries filtered is_deleted = false, so a delete-marked row was invisible to the next diff and the file re-read as new — and the drive_id indexes were non-unique, so it corrupted silently. Delete-marked rows now stay in the diff and a returning file un-deletes the SAME row; the new partial unique index makes any remaining path fail loudly instead.",
+      },
+      {
+        kind: "fixed",
+        text: "Multi-parent items were walked once per parent (listChildren runs per parent, supportsAllDrives is on), yielding two DriveNodes with one Drive id — two creates in one batch, and for folders a nondeterministic drive-id→row-id map. The walk now dedupes by Drive id, first parent wins, with a unit test: QC cannot catch this because neither configured root is a Shared Drive.",
+      },
+      {
+        kind: "fixed",
+        text: "Renaming ONE folder superseded every document inside it: the document's stored folderId was resolved through active folder rows only, so the renamed folder's old id vanished from the map and every child read as moved. Resolution now covers every folder row, and a superseded folder's children are repointed at the live row.",
+      },
+      {
+        kind: "fixed",
+        text: "revisionNumber was hardcoded to 1 (the column default) on every supersede, so a five-deep chain read 'revision 1' throughout. It now carries the previous row's number + 1.",
+      },
+      {
+        kind: "fixed",
+        text: "hashSource was never compared, so a transient Drive export failure fell back to a metadata hash, superseded the doc, and the next good scan superseded it back — revision churn from nothing, on a root that is almost entirely Google-native Docs. A failed export now THROWS instead of degrading: the node is recorded in errors and skipped for that run (and explicitly not read as deleted), and hashes are only ever compared within the same source.",
+      },
+      {
+        kind: "added",
+        text: "Scan lease: drive_roots.scan_started_at, taken with one conditional UPDATE ... RETURNING (D1 has no transactions, so read-then-write would leave the race open) and released in a finally. A lease older than 30 minutes is ignored so a crashed run self-heals. POST /ingest returns 409 while a scan is running; the 11:00 cron skips that root and records it in the ledger step rather than counting it as a failure.",
+      },
+      {
+        kind: "changed",
+        text: "Folders now supersede on a MOVE as well as a rename, matching the spec and the document path — reparenting in place left no record that the tree changed shape. Also: driveFolderId is charset-validated at the route (it is interpolated into the Drive q parameter), summary.errors is capped at 50 with a trailing count marker because it is written verbatim into the agent-run ledger, and the synchronous-scan subrequest ceiling (~1000 files) is documented on the route with its Workflow upgrade path.",
+      },
     ],
-    migrations: ["0174_nifty_miek"],
+    migrations: ["0174_nifty_miek", "0175_curved_anthem"],
     status: "staged",
   },
   {

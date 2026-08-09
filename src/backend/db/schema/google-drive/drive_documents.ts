@@ -1,7 +1,7 @@
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 import { driveFolders } from "./drive_folders";
 import { driveRoots } from "./drive_roots";
@@ -78,6 +78,15 @@ export const driveDocuments = sqliteTable(
     byFolder: index("drive_documents_folder_idx").on(t.folderId),
     byDriveId: index("drive_documents_drive_id_idx").on(t.driveId),
     byHash: index("drive_documents_content_hash_idx").on(t.contentHash),
+    /** Walking a supersede chain backwards was a table scan without this. */
+    bySupersededBy: index("drive_documents_superseded_by_idx").on(t.supersededById),
+    /**
+     * At most ONE live row per Drive id per root — see the same index on
+     * `drive_folders`. A duplicate active row is silent corruption otherwise.
+     */
+    oneActivePerDriveId: uniqueIndex("drive_documents_active_drive_id_uidx")
+      .on(t.rootId, t.driveId)
+      .where(sql`${t.isActive} = 1`),
   }),
 );
 

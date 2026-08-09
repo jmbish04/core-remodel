@@ -130,11 +130,31 @@ async function listChildren(env: Env, folderId: string): Promise<DriveNode[]> {
 }
 
 /**
+ * Collapse a walk to one node per Drive id, FIRST PARENT WINS.
+ *
+ * Drive items can have several parents (and `supportsAllDrives` makes that
+ * routine on a Shared Drive), so a breadth-first walk yields one `DriveNode`
+ * per parent edge. The diff keys by Drive id, so two nodes sharing an id both
+ * miss the lookup and both emit `create` — two active rows for one file, and
+ * for folders a nondeterministic drive-id→row-id map that attaches documents
+ * to an arbitrary twin. Deduping here keeps the whole pipeline single-valued.
+ */
+export function dedupeByDriveId(nodes: DriveNode[]): DriveNode[] {
+  const byDriveId = new Map<string, DriveNode>();
+  for (const node of nodes) {
+    if (!byDriveId.has(node.driveId)) byDriveId.set(node.driveId, node);
+  }
+  return [...byDriveId.values()];
+}
+
+/**
  * Walk a root recursively, breadth-first.
  *
  * Exclusions are applied DURING descent, so an excluded subtree costs one
  * membership check rather than a full traversal. That is the difference
  * between one check and thousands of API reads on a log folder.
+ *
+ * The result is deduped by Drive id — see `dedupeByDriveId`.
  */
 export async function listFolderRecursive(
   env: Env,
@@ -156,7 +176,7 @@ export async function listFolderRecursive(
       }
     }
   }
-  return all;
+  return dedupeByDriveId(all);
 }
 
 /** Google-native export mime for text extraction. Null = not exportable. */
@@ -200,6 +220,14 @@ export async function exportFileText(
  * which is also what makes a pure-formatting edit a no-op. A file we can
  * neither checksum nor export falls back to metadata, which is weaker but
  * still detects the common case.
+ *
+ * A failed export THROWS rather than degrading to the metadata hash. Silently
+ * writing a weaker hash flips `hashSource` on a transient 429/500 and flaps a
+ * revision for nothing (the research root is almost entirely Google-native
+ * Docs). The caller records the error and skips the node for this run, which
+ * leaves the previous row untouched — the correct outcome for "we could not
+ * read it this time". Same rule as the repo's never-degrade-a-failed-parse
+ * doctrine for AI output.
  */
 export async function contentHashFor(
   env: Env,
@@ -207,7 +235,7 @@ export async function contentHashFor(
 ): Promise<{ hash: string; source: "drive_md5" | "exported_text" | "metadata" }> {
   if (node.md5Checksum) return { hash: node.md5Checksum, source: "drive_md5" };
 
-  const text = await exportFileText(env, node.driveId, node.mimeType).catch(() => null);
+  const text = await exportFileText(env, node.driveId, node.mimeType);
   if (text != null) {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");

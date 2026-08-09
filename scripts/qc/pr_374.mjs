@@ -116,16 +116,40 @@ async function main() {
     `seen=${s1?.seen} created=${s1?.created} superseded=${s1?.superseded} deleted=${s1?.deleted}`,
   );
 
+  const afterFirst = await client.get(`/api/admin/drive/documents?rootId=${onboarding?.id}`);
+  const countAfterFirst = afterFirst.json?.documents?.length;
+
   const second = await client.post("/api/admin/drive/ingest", { rootId: onboarding?.id });
   const s2 = second.json?.summaries?.[0];
   checks.ok(
     "second scan is a no-op (idempotent) — the load-bearing assertion",
-    s2?.created === 0 && s2?.superseded === 0 && s2?.deleted === 0,
-    `created ${s2?.created}, superseded ${s2?.superseded}, deleted ${s2?.deleted}`,
+    s2?.created === 0 && s2?.superseded === 0 && s2?.deleted === 0 && s2?.undeleted === 0,
+    `created ${s2?.created}, superseded ${s2?.superseded}, deleted ${s2?.deleted}, undeleted ${s2?.undeleted}`,
   );
 
   const docs = await client.get(`/api/admin/drive/documents?rootId=${onboarding?.id}`);
   const list = docs.json?.documents ?? [];
+
+  // --- Critical 1: one live row per Drive id, across repeated scans ---------
+  // A delete-marked row used to be invisible to the next diff, so anything
+  // that came back (an exclusion added then removed, a trash-then-restore)
+  // was re-CREATED — a second is_active row for the same Drive id, silently,
+  // because the drive_id indexes are non-unique. The catalogue must not grow
+  // between two scans of an unchanged folder, and no Drive id may appear on
+  // two live rows. A partial unique index now enforces the second half in D1;
+  // this proves it end to end.
+  checks.ok(
+    "re-ingest does not grow the catalogue (no duplicate rows from a second scan)",
+    countAfterFirst === list.length,
+    `after first scan ${countAfterFirst}, after second ${list.length}`,
+  );
+  const driveIds = list.map((d) => d.driveId);
+  const dupes = driveIds.filter((id, i) => driveIds.indexOf(id) !== i);
+  checks.ok(
+    "every live document row has a distinct Drive id (no duplicate active rows)",
+    driveIds.length > 0 && driveIds.every(Boolean) && dupes.length === 0,
+    `rows ${driveIds.length}, duplicated ids: ${[...new Set(dupes)].join(", ") || "none"}`,
+  );
   checks.ok(
     "documents are listed with a joined folder name, count == 61",
     list.length === 61 && typeof list[0]?.folderName === "string",
@@ -179,6 +203,44 @@ async function main() {
     "GET /documents rejects a non-numeric folderId with 400",
     badFolderId.status === 400,
     `status ${badFolderId.status}`,
+  );
+
+  // --- charset validation on the Drive folder id ----------------------------
+  // The id is interpolated into the Drive `q` parameter, so it is validated at
+  // the entry point rather than escaped downstream.
+  const badRoot = await client.post("/api/admin/drive/roots", {
+    driveFolderId: "not a drive id' or '1'='1",
+    label: "qc-invalid",
+    useCaseKey: "DEEP_RESEARCH_FINDINGS",
+  });
+  checks.ok(
+    "POST /roots rejects a driveFolderId with an illegal charset (400, no row created)",
+    badRoot.status === 400,
+    `status ${badRoot.status}, body ${JSON.stringify(badRoot.json)}`,
+  );
+
+  // --- concurrency: the scan lease -----------------------------------------
+  // The 11:00 cron and a manual POST are the same unserialized path. Two
+  // overlapping scans both read the pre-write snapshot and both insert. Fire
+  // two at once: exactly one must take the lease, the other must get a 409.
+  const [a, b] = await Promise.all([
+    client.post("/api/admin/drive/ingest", { rootId: onboarding?.id }),
+    client.post("/api/admin/drive/ingest", { rootId: onboarding?.id }),
+  ]);
+  const statuses = [a.status, b.status].sort();
+  checks.ok(
+    "two concurrent scans of one root: one 200, one 409 (the scan lease holds)",
+    statuses[0] === 200 && statuses[1] === 409,
+    `statuses ${statuses.join(", ")}`,
+  );
+
+  // The lease must be RELEASED, not left held — a stuck lease would block the
+  // nightly cron for the whole staleness window.
+  const afterConflict = await client.post("/api/admin/drive/ingest", { rootId: onboarding?.id });
+  checks.ok(
+    "the lease is released when a scan finishes (the next scan runs, not 409)",
+    afterConflict.status === 200,
+    `status ${afterConflict.status}, body ${JSON.stringify(afterConflict.json).slice(0, 200)}`,
   );
 
   checks.finish();

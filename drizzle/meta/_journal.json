@@ -526,6 +526,13 @@
       "when": 1786249280628,
       "tag": "0174_nifty_miek",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "6",
+      "when": 1786255744226,
+      "tag": "0175_curved_anthem",
+      "breakpoints": true
     }
   ]
 }

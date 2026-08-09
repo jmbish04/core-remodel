@@ -23,8 +23,10 @@ import { ingestInboxLabel } from "./backend/services/gmail/inbox-label";
 import { runIngestGate } from "./backend/services/gmail/ingest-gate";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
 import {
+  emptySummary,
   ingestDriveFolder,
   listActiveRootsForCron,
+  ScanInProgressError,
   type IngestSummary,
 } from "./backend/services/google/drive-ingest";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
@@ -487,17 +489,13 @@ const legacyHandler: ExportedHandler<Env> = {
                   await run.step(`root:${root.label}`, () => ingestDriveFolder(env, root.id)),
                 );
               } catch (err) {
-                failures++;
-                summaries.push({
-                  rootId: root.id,
-                  label: root.label,
-                  seen: 0,
-                  created: 0,
-                  superseded: 0,
-                  deleted: 0,
-                  unchanged: 0,
-                  errors: [err instanceof Error ? err.message : String(err)],
-                });
+                // A root whose lease is already held (a manual scan is running)
+                // is SKIPPED, not failed — run.step has already recorded the
+                // message against this root's own ledger step.
+                if (!(err instanceof ScanInProgressError)) failures++;
+                const summary = emptySummary(root.id, root.label);
+                summary.errors.push(err instanceof Error ? err.message : String(err));
+                summaries.push(summary);
               }
             }
             if (roots.length > 0 && failures === roots.length) {

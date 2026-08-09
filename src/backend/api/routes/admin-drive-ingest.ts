@@ -3,7 +3,11 @@
  * trigger a scan by hand, and read the catalogue.
  */
 import { driveDocuments, driveFolders, driveRoots, driveUseCases } from "@backend/db";
-import { ingestAllActiveRoots, ingestDriveFolder } from "@backend/services/google/drive-ingest";
+import {
+  ingestAllActiveRoots,
+  ingestDriveFolder,
+  ScanInProgressError,
+} from "@backend/services/google/drive-ingest";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -13,7 +17,11 @@ export const driveIngestRouter = new Hono<{ Bindings: Env }>();
 
 /** Hand-written Zod (never drizzle-zod — it breaks the esbuild build). */
 const createRootSchema = z.object({
-  driveFolderId: z.string().min(10),
+  // Drive file ids are base64url-ish. Validate the charset HERE, at the trust
+  // boundary: the id is interpolated straight into the Drive `q` parameter
+  // (`'<id>' in parents`), so an unvalidated quote or space would rewrite that
+  // query rather than fail.
+  driveFolderId: z.string().regex(/^[A-Za-z0-9_-]{10,}$/, "not a Drive folder id"),
   label: z.string().min(1),
   useCaseKey: z.enum(["EMAIL_ONBOARDING_MATERIALS", "DEEP_RESEARCH_FINDINGS"]),
 });
@@ -60,6 +68,21 @@ driveIngestRouter.post("/roots", async (c) => {
   return c.json({ id: row?.id }, 201);
 });
 
+/**
+ * Trigger a scan.
+ *
+ * ponytail: the scan runs SYNCHRONOUSLY inside this request. Known ceiling —
+ * a Worker allows ~1000 subrequests per invocation, and a scan costs one
+ * Drive `files.list` per folder plus one export per Google-native file with no
+ * `driveModifiedAt` short-circuit. The two configured roots are 72 and 87
+ * nodes, so this is comfortably fine today and a request is far the simplest
+ * thing that works. A root over ~1000 files WILL blow the subrequest limit and
+ * fail the scan wholesale, not partially. Upgrade path when that day comes:
+ * move the body of `ingestDriveFolder` into a Cloudflare Workflow (one step per
+ * folder page) and make this route enqueue it and return 202 — the scan lease
+ * added below already makes a long-running background scan safe to overlap
+ * with the cron.
+ */
 driveIngestRouter.post("/ingest", async (c) => {
   const parsed = ingestBodySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
@@ -80,7 +103,14 @@ driveIngestRouter.post("/ingest", async (c) => {
     .limit(1);
   if (!root) return c.json({ error: `no drive root with id ${rootId}` }, 404);
 
-  return c.json({ summaries: [await ingestDriveFolder(c.env, rootId)] });
+  try {
+    return c.json({ summaries: [await ingestDriveFolder(c.env, rootId)] });
+  } catch (err) {
+    // Another scan (the 11:00 cron, or a second click) holds this root's lease.
+    // That is a conflict, not a server fault.
+    if (err instanceof ScanInProgressError) return c.json({ error: err.message }, 409);
+    throw err;
+  }
 });
 
 driveIngestRouter.get("/documents", async (c) => {
@@ -106,6 +136,9 @@ driveIngestRouter.get("/documents", async (c) => {
   const rows = await db
     .select({
       id: driveDocuments.id,
+      // The row's own Drive id. Returned so a caller (and the QC harness) can
+      // check the one-live-row-per-Drive-id invariant from outside.
+      driveId: driveDocuments.driveId,
       name: driveDocuments.name,
       mimeType: driveDocuments.mimeType,
       sizeBytes: driveDocuments.sizeBytes,
