@@ -331,6 +331,15 @@ async function syncDocuments(
   summary.unchanged += actions.filter((a) => a.kind === "unchanged").length;
 }
 
+/** Active roots, for a caller that wants to wrap each scan in its own step. */
+export async function listActiveRootsForCron(env: Env): Promise<{ id: number; label: string }[]> {
+  const db = drizzle(env.DB);
+  return db
+    .select({ id: driveRoots.id, label: driveRoots.label })
+    .from(driveRoots)
+    .where(eq(driveRoots.isActive, true));
+}
+
 /** Every active root, sequentially. One root's failure must not stop the rest. */
 export async function ingestAllActiveRoots(env: Env): Promise<IngestSummary[]> {
   const db = drizzle(env.DB);
