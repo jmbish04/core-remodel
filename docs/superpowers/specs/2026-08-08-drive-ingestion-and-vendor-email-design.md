@@ -20,13 +20,15 @@ Both need the same substrate: a service that ingests a Drive folder into D1, key
 
 Both were walked in full before this design was written. This materially changed the plan, so it is recorded here rather than assumed.
 
-**Onboarding materials** — `1ZUJ_taFjsdWUusVZtng8ZzUAX5BFVMxU`, 71 nodes, 12 folders:
+**Onboarding materials** — `1ZUJ_taFjsdWUusVZtng8ZzUAX5BFVMxU`, 72 nodes, 12 folders:
 
 | Type | Count |
 | --- | --- |
 | Images (jpg / HEIC / Google pic) | ~55 |
 | PDFs | 4 |
 | SketchUp `.skp` | 1 |
+
+(An earlier draft said 71; the breakdown sums to 72. The live ingest catalogued 72 — 61 files + 11 subfolders — which reconciles exactly. The stray node was `cabinets/v1`, a PDF with no extension.)
 | Google Docs / Sheets / Office | **0** |
 
 Named PDFs: `1971 Blueprints`, `23. Floor Plans with Measurements`, `126 Colby St Design Jul 16 2026`, `cabinets/v1`.
