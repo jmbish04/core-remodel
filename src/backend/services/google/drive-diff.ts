@@ -23,12 +23,23 @@ export interface ExistingRow {
   /** Delete-marked rows STAY in `existing` so a returning file un-deletes. */
   isDeleted: boolean;
   revisionNumber: number;
+  /**
+   * Current sharing level (ANYONE / ANYONE_WITH_LINK / DOMAIN / DOMAIN_WITH_LINK
+   * / PRIVATE). Compared so a Drive permission change with no rename/move/edit
+   * is not silently dropped — this value gates whether a link can be emailed to
+   * an outside vendor, so a stale copy is a real hazard, not cosmetic.
+   */
+  sharing: string;
 }
 
 export type DiffAction =
   | { kind: "create"; node: DriveNode }
   | { kind: "supersede"; existingId: number; node: DriveNode; revisionNumber: number }
   | { kind: "undelete"; existingId: number }
+  // Permissions changed but content/name/parent did not: update the SAME row in
+  // place. Superseding would be wrong — the file did not change, so it would
+  // mint a bogus revision and (in the research pipeline) force a re-embed.
+  | { kind: "metadata-update"; existingId: number; node: DriveNode }
   | { kind: "delete"; existingId: number }
   | { kind: "unchanged"; existingId: number };
 
@@ -73,6 +84,8 @@ export function diffNodes(
     const changed =
       row.name !== node.name || row.folderDriveId !== node.parentDriveId || contentChanged;
     if (changed) {
+      // A supersede's replacement row carries the node's current sharing, so no
+      // separate metadata-update is needed on this path.
       actions.push({
         kind: "supersede",
         existingId: row.id,
@@ -80,7 +93,12 @@ export function diffNodes(
         revisionNumber: row.revisionNumber + 1,
       });
     } else if (row.isDeleted) {
+      // Returning file — un-delete the same row. Any sharing drift on it is
+      // picked up by the metadata-update branch on the NEXT scan (this row is
+      // active again after this one), which keeps the un-delete a cheap bulk op.
       actions.push({ kind: "undelete", existingId: row.id });
+    } else if (row.sharing !== node.sharing) {
+      actions.push({ kind: "metadata-update", existingId: row.id, node });
     } else {
       actions.push({ kind: "unchanged", existingId: row.id });
     }

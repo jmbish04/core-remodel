@@ -125,6 +125,14 @@ driveIngestRouter.get("/documents", async (c) => {
     if (!Number.isFinite(folderId)) return c.json({ error: "folderId must be numeric" }, 400);
   }
 
+  // Bounded read. The research root already carries ~75 docs and will grow, so
+  // returning the whole catalogue in one body is a latent problem; default to a
+  // page and let a caller walk it with limit/offset.
+  const limitParam = Number(c.req.query("limit") ?? 200);
+  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 500) : 200;
+  const offsetParam = Number(c.req.query("offset") ?? 0);
+  const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0;
+
   const conditions = [
     eq(driveDocuments.rootId, rootId),
     eq(driveDocuments.isActive, true),
@@ -151,6 +159,8 @@ driveIngestRouter.get("/documents", async (c) => {
     })
     .from(driveDocuments)
     .innerJoin(driveFolders, eq(driveDocuments.folderId, driveFolders.id))
-    .where(and(...conditions));
-  return c.json({ documents: rows });
+    .where(and(...conditions))
+    .limit(limit)
+    .offset(offset);
+  return c.json({ documents: rows, limit, offset });
 });
