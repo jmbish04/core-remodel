@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "feat/drive-ingestion-service",
+    title: "Drive ingestion service — catalogue any Google Drive folder into D1",
+    summary:
+      "A generic ingestDriveFolder(env, rootId) service: point it at a Drive folder with a use case and it walks the tree, hashes every file, and keeps D1 in step with Drive — new files created, renames and moves superseded into a revision chain, deletions marked rather than removed, and sharing state (ANYONE / ANYONE_WITH_LINK / DOMAIN / DOMAIN_WITH_LINK / PRIVATE) recorded per node. Adding another folder later is a row insert, not a code change. This is PR 1 of 3; PR 2 is vendor email with Drive attachments and PR 3 is research indexing. The blocker found first: drive.readonly was not in the service account's domain-wide delegation, and requesting it made Google reject the whole token exchange — taking every Gmail call down with it. That was caught on a preview worker before production ever saw it.",
+    date: "2026-08-08",
+    status: "staged",
+    prNumber: 374,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/374",
+  },
+  {
     branch: "fix/mcp-oauth-one-year-ttls",
     title: "MCP connector fixed: absolute registration_client_uri + one-year OAuth lifetimes",
     summary:
@@ -380,6 +390,75 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "drive-ingestion-service",
+    branch: "feat/drive-ingestion-service",
+    date: "2026-08-08",
+    area: "Drive",
+    title: "Drive ingestion service — catalogue any folder into D1",
+    summary:
+      "One reusable service ingests any Google Drive folder into D1, keyed by what the content is for. Renames and moves supersede into a revision chain, deletions are marked not removed, and per-file sharing state is captured because it decides whether a Drive link can be emailed to an outside vendor at all. Verified against the real folder: 72 nodes catalogued, and a second scan is a genuine no-op.",
+    changes: [
+      {
+        kind: "migration",
+        text: "0174_nifty_miek: six new tables — drive_use_cases (definition table), drive_roots, drive_root_exclusions, drive_folders, drive_documents, drive_document_links. Additive; applied and verified on remote D1. drive_documents is deliberately separate from supporting_documents, which keeps its existing meaning (manuals, tech sheets, contracts tied to a purchased thing); drive_document_links bridges the rare file that is both.",
+      },
+      {
+        kind: "added",
+        text: "ingestDriveFolder(env, rootId) and ingestAllActiveRoots(env) — recursive Drive v3 walk with exclusions applied DURING descent (an excluded subtree is never traversed), content hashing that falls back to a hash of exported text for Google-native files because Drive returns no md5Checksum for those, and a pure diff classifier covering create / supersede / delete / unchanged.",
+      },
+      {
+        kind: "added",
+        text: "Admin API: GET+POST /api/admin/drive/roots, POST /api/admin/drive/ingest (400 on a malformed rootId, 404 on a well-shaped id that matches no row, 200 and ingest-all when omitted), GET /api/admin/drive/documents?rootId=&folderId= with the folder name resolved by JOIN rather than stored.",
+      },
+      {
+        kind: "added",
+        text: "Daily 11:00 UTC cron that records each scan in the existing agent_runs ledger — one run, one step per root, with per-root error isolation so one failing root cannot cost the night. No bespoke scan-run table; it shows up at /admin/system/agents for free.",
+      },
+      {
+        kind: "added",
+        text: "GET /api/admin/drive-auth-probe — mints a token AND performs a real Drive read, distinguishing a rejected token mint (a delegation problem) from a Drive call that failed after a good mint. This is the retest tool for any future scope change.",
+      },
+      {
+        kind: "changed",
+        text: "drive.readonly added to the Gmail service account's requested scopes, after the human granted it in domain-wide delegation. The first attempt proved it was NOT delegated: Google rejects the entire JWT-bearer exchange on one undelegated scope, so every Gmail call failed, not just Drive. Proven and reverted on a preview worker; production never exposed.",
+      },
+      {
+        kind: "migration",
+        text: "0175_curved_anthem (review fixes): drive_roots.scan_started_at (the scan lease), a partial UNIQUE index on (root_id, drive_id) WHERE is_active = 1 for both drive_folders and drive_documents, and an index on superseded_by_id for both. Production had ZERO duplicate active rows, so the unique index applied cleanly with no cleanup. Applied and verified on remote D1.",
+      },
+      {
+        kind: "fixed",
+        text: "A file that came back created a DUPLICATE active row. Both existing-row queries filtered is_deleted = false, so a delete-marked row was invisible to the next diff and the file re-read as new — and the drive_id indexes were non-unique, so it corrupted silently. Delete-marked rows now stay in the diff and a returning file un-deletes the SAME row; the new partial unique index makes any remaining path fail loudly instead.",
+      },
+      {
+        kind: "fixed",
+        text: "Multi-parent items were walked once per parent (listChildren runs per parent, supportsAllDrives is on), yielding two DriveNodes with one Drive id — two creates in one batch, and for folders a nondeterministic drive-id→row-id map. The walk now dedupes by Drive id, first parent wins, with a unit test: QC cannot catch this because neither configured root is a Shared Drive.",
+      },
+      {
+        kind: "fixed",
+        text: "Renaming ONE folder superseded every document inside it: the document's stored folderId was resolved through active folder rows only, so the renamed folder's old id vanished from the map and every child read as moved. Resolution now covers every folder row, and a superseded folder's children are repointed at the live row.",
+      },
+      {
+        kind: "fixed",
+        text: "revisionNumber was hardcoded to 1 (the column default) on every supersede, so a five-deep chain read 'revision 1' throughout. It now carries the previous row's number + 1.",
+      },
+      {
+        kind: "fixed",
+        text: "hashSource was never compared, so a transient Drive export failure fell back to a metadata hash, superseded the doc, and the next good scan superseded it back — revision churn from nothing, on a root that is almost entirely Google-native Docs. A failed export now THROWS instead of degrading: the node is recorded in errors and skipped for that run (and explicitly not read as deleted), and hashes are only ever compared within the same source.",
+      },
+      {
+        kind: "added",
+        text: "Scan lease: drive_roots.scan_started_at, taken with one conditional UPDATE ... RETURNING (D1 has no transactions, so read-then-write would leave the race open) and released in a finally. A lease older than 30 minutes is ignored so a crashed run self-heals. POST /ingest returns 409 while a scan is running; the 11:00 cron skips that root and records it in the ledger step rather than counting it as a failure.",
+      },
+      {
+        kind: "changed",
+        text: "Folders now supersede on a MOVE as well as a rename, matching the spec and the document path — reparenting in place left no record that the tree changed shape. Also: driveFolderId is charset-validated at the route (it is interpolated into the Drive q parameter), summary.errors is capped at 50 with a trailing count marker because it is written verbatim into the agent-run ledger, and the synchronous-scan subrequest ceiling (~1000 files) is documented on the route with its Workflow upgrade path.",
+      },
+    ],
+    migrations: ["0174_nifty_miek", "0175_curved_anthem"],
+    status: "staged",
+  },
   {
     id: "mcp-oauth-one-year-ttls",
     branch: "fix/mcp-oauth-one-year-ttls",

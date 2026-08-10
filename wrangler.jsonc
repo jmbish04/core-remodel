@@ -178,7 +178,7 @@
     // 0 9 * * 1 — weekly provider price refresh (0029). Published list prices
 // change without notice; without a refreshed catalog every cost number on
 // /admin/system/agents/usage is a guess.
-    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1", "0 9 * * 1"],
+    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1", "0 9 * * 1", "0 11 * * *"],
   },
   "kv_namespaces": [
     {
