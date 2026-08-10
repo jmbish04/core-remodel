@@ -53,6 +53,8 @@ export interface IngestSummary {
   superseded: number;
   /** Rows that were delete-marked and came back — same row, flag cleared. */
   undeleted: number;
+  /** Rows whose permissions (sharing) changed with no content/name/parent change. */
+  metadataUpdated: number;
   deleted: number;
   unchanged: number;
   errors: string[];
@@ -68,6 +70,7 @@ export function emptySummary(rootId: number, label: string): IngestSummary {
     created: 0,
     superseded: 0,
     undeleted: 0,
+    metadataUpdated: 0,
     deleted: 0,
     unchanged: 0,
     errors: [],
@@ -96,13 +99,25 @@ function pushError(summary: IngestSummary, message: string): void {
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
- * Take this root's scan lease, atomically.
+ * Take this root's scan lease, atomically, and return the lease TOKEN so the
+ * holder can prove ownership when it releases.
  *
  * One conditional UPDATE, not read-then-write: D1 has no transactions, so a
- * separate read would leave exactly the race this is here to close. An empty
- * RETURNING means someone else holds a lease that has not gone stale.
+ * separate read would leave exactly the race this is here to close. `null`
+ * means someone else holds a lease that has not gone stale.
+ *
+ * The token is the `scanStartedAt` value actually written, read back via
+ * RETURNING so it matches the DB's own second-granularity storage exactly.
+ * Release is conditional on it (see the `finally` in ingestDriveFolder): a scan
+ * that ran past the staleness window and had its lease legitimately stolen must
+ * NOT clear the thief's newer lease on its way out — otherwise a third scan can
+ * start while the second is still running, which is the whole thing the lease
+ * exists to prevent.
  */
-async function acquireScanLease(db: ReturnType<typeof drizzle>, rootId: number): Promise<boolean> {
+async function acquireScanLease(
+  db: ReturnType<typeof drizzle>,
+  rootId: number,
+): Promise<Date | null> {
   const staleBefore = new Date(Date.now() - SCAN_LEASE_MS);
   const claimed = await db
     .update(driveRoots)
@@ -113,8 +128,8 @@ async function acquireScanLease(db: ReturnType<typeof drizzle>, rootId: number):
         or(isNull(driveRoots.scanStartedAt), lt(driveRoots.scanStartedAt, staleBefore)),
       ),
     )
-    .returning({ id: driveRoots.id });
-  return claimed.length > 0;
+    .returning({ scanStartedAt: driveRoots.scanStartedAt });
+  return claimed[0]?.scanStartedAt ?? null;
 }
 
 export async function ingestDriveFolder(env: Env, rootId: number): Promise<IngestSummary> {
@@ -123,7 +138,8 @@ export async function ingestDriveFolder(env: Env, rootId: number): Promise<Inges
   const [root] = await db.select().from(driveRoots).where(eq(driveRoots.id, rootId)).limit(1);
   if (!root) throw new Error(`drive-ingest: no root ${rootId}`);
 
-  if (!(await acquireScanLease(db, rootId))) {
+  const leaseToken = await acquireScanLease(db, rootId);
+  if (!leaseToken) {
     throw new ScanInProgressError(
       `drive-ingest: root ${rootId} (${root.label}) is already being scanned ` +
         `(lease taken ${root.scanStartedAt?.toISOString() ?? "recently"})`,
@@ -186,8 +202,14 @@ export async function ingestDriveFolder(env: Env, rootId: number): Promise<Inges
     return summary;
   } finally {
     // Release the lease whatever happened, so a thrown scan does not block the
-    // root for the full staleness window.
-    await db.update(driveRoots).set({ scanStartedAt: null }).where(eq(driveRoots.id, rootId));
+    // root for the full staleness window — but ONLY if we still hold it. The
+    // `eq(scanStartedAt, leaseToken)` guard means a scan whose lease was stolen
+    // after going stale clears nothing: it matches zero rows rather than wiping
+    // the newer holder's lease and letting a third scan run concurrently.
+    await db
+      .update(driveRoots)
+      .set({ scanStartedAt: null })
+      .where(and(eq(driveRoots.id, rootId), eq(driveRoots.scanStartedAt, leaseToken)));
   }
 }
 
@@ -210,6 +232,7 @@ async function syncFolders(
       parentFolderId: driveFolders.parentFolderId,
       isActive: driveFolders.isActive,
       isDeleted: driveFolders.isDeleted,
+      sharing: driveFolders.sharing,
     })
     .from(driveFolders)
     .where(eq(driveFolders.rootId, root.id));
@@ -233,6 +256,7 @@ async function syncFolders(
 
   const byDriveId = new Map(existing.map((f) => [f.driveId, f]));
   const undeleteIds: number[] = [];
+  const sharingUpdates: { id: number; sharing: string }[] = [];
 
   for (const part of chunk(live)) {
     const creates: (typeof driveFolders.$inferInsert)[] = [];
@@ -262,6 +286,14 @@ async function syncFolders(
           .update(driveFolders)
           .set({ isActive: false, updatedAt: new Date() })
           .where(eq(driveFolders.id, row.id));
+
+        // Same two-failure-point split as the document supersede: reactivating
+        // the old row is only safe when the INSERT failed (no replacement yet).
+        // Once the replacement is active, a reactivation collides with the
+        // partial unique index `(root_id, drive_id) WHERE is_active = 1` and
+        // would throw out of the catch, aborting the scan. So the insert is
+        // compensated; the link + child-reparent that follow are not.
+        let insertedFolderId: number | null = null;
         try {
           const [inserted] = await db
             .insert(driveFolders)
@@ -275,31 +307,51 @@ async function syncFolders(
               driveModifiedAt: node.modifiedAt,
             })
             .returning({ id: driveFolders.id });
-          if (inserted) {
-            await db
-              .update(driveFolders)
-              .set({ supersededById: inserted.id })
-              .where(eq(driveFolders.id, row.id));
-            // Move the children onto the live row. Documents keep pointing at
-            // the superseded folder otherwise, so /documents would join the
-            // stale name. This is a reparent, NOT a revision: the documents
-            // themselves did not change.
-            await db
-              .update(driveDocuments)
-              .set({ folderId: inserted.id })
-              .where(eq(driveDocuments.folderId, row.id));
-            driveIdById.set(inserted.id, node.driveId);
-          }
-          summary.superseded++;
+          insertedFolderId = inserted?.id ?? null;
         } catch (err) {
-          // Compensating write: never leave a row deactivated with no replacement.
           await db.update(driveFolders).set({ isActive: true }).where(eq(driveFolders.id, row.id));
-          pushError(summary, `supersede folder ${node.name} (${node.driveId}): ${errText(err)}`);
+          pushError(
+            summary,
+            `supersede folder ${node.name} (${node.driveId}): insert failed: ${errText(err)}`,
+          );
+          continue;
+        }
+
+        summary.superseded++;
+        if (insertedFolderId == null) continue;
+        try {
+          await db
+            .update(driveFolders)
+            .set({ supersededById: insertedFolderId })
+            .where(eq(driveFolders.id, row.id));
+          // Move the children onto the live row. Documents keep pointing at
+          // the superseded folder otherwise, so /documents would join the
+          // stale name. This is a reparent, NOT a revision: the documents
+          // themselves did not change.
+          await db
+            .update(driveDocuments)
+            .set({ folderId: insertedFolderId })
+            .where(eq(driveDocuments.folderId, row.id));
+          driveIdById.set(insertedFolderId, node.driveId);
+        } catch (err) {
+          // Replacement folder is live and correct; only the back-link and/or
+          // the child reparent failed. Reactivating the old row here would fail
+          // the unique index and kill the scan, so leave it. Children still on
+          // the old folder id keep a resolvable (superseded) folder row, and the
+          // next scan re-runs the reparent. Record and continue.
+          driveIdById.set(insertedFolderId, node.driveId);
+          pushError(
+            summary,
+            `supersede folder ${node.name} (${node.driveId}): replacement written but link/reparent failed: ${errText(err)}`,
+          );
         }
       } else if (row.isDeleted) {
         // Back from the dead: same row, flag cleared. Creating a new row here
         // is what produced duplicate active rows for one Drive id.
         undeleteIds.push(row.id);
+      } else if (row.sharing !== node.sharing) {
+        // Permissions changed with no rename/move: update in place, no revision.
+        sharingUpdates.push({ id: row.id, sharing: node.sharing });
       } else {
         summary.unchanged++;
       }
@@ -318,6 +370,25 @@ async function syncFolders(
       .set({ isDeleted: false, updatedAt: new Date() })
       .where(inArray(driveFolders.id, part));
     summary.undeleted += part.length;
+  }
+
+  // Folder permission drift: update in place, grouped by new value (one bulk
+  // UPDATE per distinct value), chunked at 20 for the D1 bound-parameter cap.
+  const folderBySharing = new Map<string, number[]>();
+  for (const u of sharingUpdates) {
+    const list = folderBySharing.get(u.sharing) ?? [];
+    list.push(u.id);
+    folderBySharing.set(u.sharing, list);
+  }
+  for (const [sharing, ids] of folderBySharing) {
+    for (const part of chunk(ids)) {
+      if (part.length === 0) continue;
+      await db
+        .update(driveFolders)
+        .set({ sharing, updatedAt: new Date() })
+        .where(inArray(driveFolders.id, part));
+      summary.metadataUpdated += part.length;
+    }
   }
 
   // Reparent pass: parents are only resolvable once every folder row exists.
@@ -375,6 +446,7 @@ async function syncDocuments(
       folderId: driveDocuments.folderId,
       isDeleted: driveDocuments.isDeleted,
       revisionNumber: driveDocuments.revisionNumber,
+      sharing: driveDocuments.sharing,
     })
     .from(driveDocuments)
     .where(and(eq(driveDocuments.rootId, root.id), eq(driveDocuments.isActive, true)));
@@ -387,6 +459,7 @@ async function syncDocuments(
     hashSource: r.hashSource,
     isDeleted: r.isDeleted,
     revisionNumber: r.revisionNumber,
+    sharing: r.sharing,
     folderDriveId: folderDriveIdById.get(r.folderId) ?? null,
   }));
 
@@ -483,6 +556,15 @@ async function syncDocuments(
       .update(driveDocuments)
       .set({ isActive: false, updatedAt: new Date() })
       .where(eq(driveDocuments.id, action.existingId));
+
+    // The insert and the back-link are two SEPARATE failure points and only ONE
+    // of them can be compensated by reactivating the old row. If the INSERT
+    // fails, no replacement exists, so reactivating is right. If the insert
+    // SUCCEEDS and only the link fails, a new active row already exists — and
+    // the partial unique index `(root_id, drive_id) WHERE is_active = 1` would
+    // REJECT a reactivation, throwing out of a naive catch and aborting the
+    // whole scan. So the two are handled apart.
+    let insertedId: number | null = null;
     try {
       const [inserted] = await db
         .insert(driveDocuments)
@@ -490,20 +572,35 @@ async function syncDocuments(
         // "revision 1" while this was hardcoded (also the column default).
         .values({ ...rowFor(action.node, folderId), revisionNumber: action.revisionNumber })
         .returning({ id: driveDocuments.id });
-      if (inserted) {
-        await db
-          .update(driveDocuments)
-          .set({ supersededById: inserted.id })
-          .where(eq(driveDocuments.id, action.existingId));
-      }
-      summary.superseded++;
+      insertedId = inserted?.id ?? null;
     } catch (err) {
-      // Compensating write: never leave a row deactivated with no replacement.
+      // Insert failed → the old row is stranded (deactivated, no replacement).
+      // Reactivating is safe here precisely because no active row exists to
+      // collide with the unique index.
       await db
         .update(driveDocuments)
         .set({ isActive: true })
         .where(eq(driveDocuments.id, action.existingId));
-      pushError(summary, `supersede ${action.node.name}: ${errText(err)}`);
+      pushError(summary, `supersede ${action.node.name}: insert failed: ${errText(err)}`);
+      continue;
+    }
+
+    summary.superseded++;
+    if (insertedId == null) continue;
+    try {
+      await db
+        .update(driveDocuments)
+        .set({ supersededById: insertedId })
+        .where(eq(driveDocuments.id, action.existingId));
+    } catch (err) {
+      // Link failed but the replacement is live and correct. Do NOT reactivate
+      // the old row (that would fail the unique index and kill the scan). The
+      // only casualty is the revision back-pointer; the next scan reconciles
+      // against the new active row regardless. Record it and move on.
+      pushError(
+        summary,
+        `supersede ${action.node.name}: replacement written but link failed: ${errText(err)}`,
+      );
     }
   }
 
@@ -517,6 +614,28 @@ async function syncDocuments(
       .set({ isDeleted: false, updatedAt: new Date() })
       .where(inArray(driveDocuments.id, part));
     summary.undeleted += part.length;
+  }
+
+  // Metadata-only update: permissions changed with no content/name/parent
+  // change, so update the SAME row in place (superseding would mint a bogus
+  // revision). Grouped by the new sharing value so each distinct value is one
+  // bulk UPDATE, then chunked at 20 for the D1 bound-parameter cap.
+  const bySharing = new Map<string, number[]>();
+  for (const action of actions) {
+    if (action.kind !== "metadata-update") continue;
+    const list = bySharing.get(action.node.sharing) ?? [];
+    list.push(action.existingId);
+    bySharing.set(action.node.sharing, list);
+  }
+  for (const [sharing, ids] of bySharing) {
+    for (const part of chunk(ids)) {
+      if (part.length === 0) continue;
+      await db
+        .update(driveDocuments)
+        .set({ sharing, updatedAt: new Date() })
+        .where(inArray(driveDocuments.id, part));
+      summary.metadataUpdated += part.length;
+    }
   }
 
   const deletes = actions.filter((a) => a.kind === "delete").map((a) => a.existingId);

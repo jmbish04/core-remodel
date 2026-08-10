@@ -31,6 +31,7 @@ const row = (o: Partial<ExistingRow> & { id: number; driveId: string }): Existin
   hashSource: "drive_md5",
   isDeleted: false,
   revisionNumber: 1,
+  sharing: "PRIVATE",
   ...o,
 });
 
@@ -119,6 +120,39 @@ assert.deepEqual(
   assert.deepEqual(diffNodes([live], [row({ id: 1, driveId: "A", revisionNumber: 2 })], hashOf), [
     { kind: "supersede", existingId: 1, node: live, revisionNumber: 3 },
   ]);
+}
+
+// ── sharing (metadata-only) ────────────────────────────────────────────────
+// Permissions changed, nothing else did → update the SAME row in place, no
+// supersede. This is the value that decides whether a Drive link can be emailed
+// to a vendor, so a stale copy is a real hazard, not cosmetic.
+{
+  const live = node({ driveId: "A", sharing: "ANYONE_WITH_LINK" });
+  assert.deepEqual(diffNodes([live], [row({ id: 1, driveId: "A", sharing: "PRIVATE" })], hashOf), [
+    { kind: "metadata-update", existingId: 1, node: live },
+  ]);
+}
+// A sharing change that RIDES ALONG with a content change is just a supersede —
+// the replacement row carries the new sharing, so no separate metadata-update.
+{
+  const live = node({ driveId: "A", md5Checksum: "zzz", sharing: "ANYONE" });
+  assert.deepEqual(
+    diffNodes(
+      [live],
+      [row({ id: 1, driveId: "A", sharing: "PRIVATE", revisionNumber: 2 })],
+      hashOf,
+    ),
+    [{ kind: "supersede", existingId: 1, node: live, revisionNumber: 3 }],
+  );
+}
+// A delete-marked row that returns with new sharing un-deletes first; the
+// sharing refresh is left to the next scan (keeps the un-delete a cheap bulk op).
+{
+  const live = node({ driveId: "A", sharing: "ANYONE_WITH_LINK" });
+  assert.deepEqual(
+    diffNodes([live], [row({ id: 1, driveId: "A", isDeleted: true, sharing: "PRIVATE" })], hashOf),
+    [{ kind: "undelete", existingId: 1 }],
+  );
 }
 
 // Two files with identical content are NOT deduped — they are distinct rows.

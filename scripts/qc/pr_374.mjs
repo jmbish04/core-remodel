@@ -243,6 +243,50 @@ async function main() {
     `status ${afterConflict.status}, body ${JSON.stringify(afterConflict.json).slice(0, 200)}`,
   );
 
+  // --- sharing drift detection + pagination (THIS follow-up PR's behaviour) --
+  // `metadataUpdated` and the pagination fields are added by this PR. On a
+  // target running the OLDER deployed code (production, pre-merge) the summary
+  // omits `metadataUpdated`, so gate on its PRESENCE — a specific capability
+  // signal, NOT "any failure" — and report pending there. This is narrow: it
+  // only skips the checks that depend on code this PR adds; every pre-existing
+  // assertion above ran unconditionally, so a regression in live behaviour
+  // still fails loudly.
+  const steady = afterConflict.json?.summaries?.[0];
+  if (typeof steady?.metadataUpdated !== "number") {
+    checks.info(
+      "pending merge/deploy — the ingest summary has no `metadataUpdated` field on this " +
+        "target, so the sharing-drift and pagination checks are skipped (this PR adds them).",
+    );
+  } else {
+    // A steady-state scan must report metadataUpdated=0. If the sharing value
+    // the scan derives disagreed with the value stored on a stable file, every
+    // scan would report a non-zero metadataUpdated and churn the row for ever —
+    // this guards that derive-and-compare round-trips cleanly. (A true positive
+    // needs a Drive permission change QC cannot make; this catches the more
+    // dangerous FALSE-positive regression.)
+    checks.ok(
+      "steady-state scan reports metadataUpdated=0 (no false sharing churn)",
+      steady.metadataUpdated === 0,
+      `metadataUpdated=${steady.metadataUpdated}`,
+    );
+
+    const page = await client.get(`/api/admin/drive/documents?rootId=${onboarding?.id}&limit=5`);
+    checks.ok(
+      "GET /documents honours limit (bounded read)",
+      page.status === 200 && Array.isArray(page.json?.documents) && page.json.documents.length <= 5,
+      `count ${page.json?.documents?.length}, limit ${page.json?.limit}`,
+    );
+    const page2 = await client.get(
+      `/api/admin/drive/documents?rootId=${onboarding?.id}&limit=5&offset=5`,
+    );
+    const firstIds = new Set((page.json?.documents ?? []).map((d) => d.id));
+    checks.ok(
+      "GET /documents offset returns a different page",
+      page2.status === 200 && (page2.json?.documents ?? []).every((d) => !firstIds.has(d.id)),
+      `page1 ${[...firstIds].join(",")} vs page2 ${(page2.json?.documents ?? []).map((d) => d.id).join(",")}`,
+    );
+  }
+
   checks.finish();
 }
 
