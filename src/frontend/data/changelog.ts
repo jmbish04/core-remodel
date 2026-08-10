@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "fix/drive-ingestion-review-followups",
+    title: "Drive ingestion — three review findings from an independent reviewer",
+    summary:
+      "An independent code review (Cursor, gpt-5.6-sol-high) run over the merged PR #374 found three real defects that the build's own multi-agent review chain missed — two of them interactions between fixes rather than defects in any one change. (1) The scan lease was released unconditionally, so a scan whose stale lease was legitimately stolen would clear the thief's newer lease on exit, letting a third scan run concurrently. (2) The supersede compensating write could no longer run: the partial unique index added in the same fix wave rejects the reactivation once the replacement row is active, so a transient link failure threw out of the catch and aborted the scan. (3) Sharing changes were never detected — the diff compared name, parent and content hash but not sharing, so a Drive permission change with no rename/move/edit left a stale value that decides whether a link can be emailed to a vendor. Also paginated the documents route. No migration.",
+    date: "2026-08-10",
+    status: "staged",
+    prNumber: 376,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/376",
+  },
+  {
     branch: "feat/drive-ingestion-service",
     title: "Drive ingestion service — catalogue any Google Drive folder into D1",
     summary:
@@ -390,6 +400,34 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "drive-ingestion-review-followups",
+    branch: "fix/drive-ingestion-review-followups",
+    date: "2026-08-10",
+    area: "Drive",
+    title: "Drive ingestion — three review findings fixed",
+    summary:
+      "An independent reviewer (Cursor, gpt-5.6-sol-high) over merged PR #374 found three real defects the build's own reviews missed — two are interactions BETWEEN fixes, which a diff-scoped review structurally cannot see. Fixed the scan-lease ownership check, the compensating write that the new unique index had silently disabled, and the missing sharing-change detection. No migration.",
+    changes: [
+      {
+        kind: "fixed",
+        text: "Critical — scan lease released unconditionally. A scan that ran past the 30-min staleness window and had its lease legitimately stolen would clear the THIEF's newer lease on exit, letting a third scan run concurrently. acquireScanLease now returns the lease token (the scanStartedAt it wrote, read back to match D1's second granularity) and release is conditional on eq(scanStartedAt, token).",
+      },
+      {
+        kind: "fixed",
+        text: "Critical — the supersede compensating write could not run. The partial UNIQUE (root_id, drive_id) WHERE is_active=1 index, added in the SAME fix wave as the compensation, rejects a reactivation once the replacement row is active — so a transient failure of the supersededById link threw out of the catch and aborted the whole scan. Insert-failure (reactivate, safe) and link-failure (leave it, replacement is live) are now handled apart, on both the document and folder supersede paths.",
+      },
+      {
+        kind: "fixed",
+        text: "Important — sharing changes were invisible. The diff compared name, parent and content hash but not sharing, so a Drive permission change with no rename/move/edit was classified unchanged and D1 kept the stale value for ever. That value gates whether a Drive link can be emailed to an outside vendor. A new metadata-update action updates the row IN PLACE (no bogus revision, no re-embed) for both documents and folders; a metadataUpdated counter surfaces it in the ingest summary.",
+      },
+      {
+        kind: "changed",
+        text: "GET /api/admin/drive/documents is now paginated (limit default 200, max 500; offset) instead of an unbounded read.",
+      },
+    ],
+    status: "staged",
+  },
   {
     id: "drive-ingestion-service",
     branch: "feat/drive-ingestion-service",
