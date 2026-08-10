@@ -634,6 +634,43 @@ After the PR is open and conflict-free:
 > only changes when someone runs `pnpm run deploy` or the `Deploy (manual)` Action.
 > See "Deploy topology & previews" below.
 
+### 2b. Deploying — the `Deploy (manual)` GitHub Action (PREFERRED)
+
+`.github/workflows/deploy.yml` runs the same steps as `pnpm run deploy`, in the
+one safe order — **build → `migrate:remote` → `migrate:tesla:remote` → `wrangler
+deploy`** — so new code never reaches production ahead of its columns. Prefer it
+over the local script: it pins wrangler (`WRANGLER_VERSION`), serialises deploys
+through a `production-deploy` concurrency group so two runs cannot race onto
+prod, and needs no local wrangler auth.
+
+It is **`workflow_dispatch` only**. It never runs on push or PR — that is
+deliberate, and it is the whole reason the Cloudflare↔GitHub Workers Builds
+integration was disconnected (see "Deploy topology & previews"). Do not add a
+push trigger.
+
+From an agent session:
+
+```bash
+gh workflow run "Deploy (manual)" --ref main \
+  -f confirm=deploy -f run_migrations=true
+
+gh run list --workflow "Deploy (manual)" --limit 1     # grab the run id
+gh run watch <run-id> --exit-status                    # non-zero if it fails
+```
+
+Inputs, and what they mean:
+
+| Input | Use |
+| --- | --- |
+| `confirm` | Must be the literal string `deploy`. A typo aborts the run — that is the point. |
+| `run_migrations` | Leave `true`. Set `false` only when you have already applied the migrations by hand AND verified them. |
+| `allow_non_main` | Leave `false`. Deploying a non-`main` ref puts unreviewed code on production. |
+
+**Always deploy from `main`, after merging.** If the Action fails, read the log
+before retrying — a failed deploy usually means a migration did not apply, and
+re-running without fixing that ships code whose tables do not exist, which
+surfaces as 500s on exactly the routes that query them.
+
 ### 3. Migrations — always apply to remote when the PR changes schema
 
 If the PR adds or changes a drizzle schema, run `pnpm run migrate:remote` (never
