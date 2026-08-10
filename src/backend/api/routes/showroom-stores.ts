@@ -59,6 +59,11 @@ import {
   scheduleShowroomEnrichment,
 } from "@backend/services/showroom/onboarding";
 import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
+import {
+  loadStoreLocationCities,
+  loadStoreLocationCounts,
+  loadStoreLocations,
+} from "@backend/services/showroom/locations";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
   deriveIsOpenWeekends,
@@ -1293,6 +1298,13 @@ showroomStoresRouter.get("/", async (c) => {
   // plus the derived legacy flat URL fields for back-compat with card UIs.
   const linksMap = await getStoreLinksMap(db, storeIds);
 
+  // Multi-location summary for the directory card (0045/0047 locations). Always computed —
+  // one grouped read each, cheap — so every card can show the count + sorted city chips.
+  const [locationCounts, locationCities] = await Promise.all([
+    loadStoreLocationCounts(db, storeIds),
+    loadStoreLocationCities(db, storeIds),
+  ]);
+
   return c.json({
     stores: rows.map((r) => {
       const links = linksMap.get(r.store.id) ?? [];
@@ -1330,6 +1342,9 @@ showroomStoresRouter.get("/", async (c) => {
         typeKey: r.typeKey ?? null,
         typeName: r.typeName ?? null,
         typeColor: r.typeColor ?? null,
+        // Multi-location summary — count + unique cities sorted asc (for the card chips).
+        locationCount: locationCounts.get(r.store.id) ?? 0,
+        locationCities: locationCities.get(r.store.id) ?? [],
       };
 
       if (includes.has("categories")) {
@@ -1537,6 +1552,12 @@ showroomStoresRouter.get("/:id", async (c) => {
   // External links (URL source of truth) + derived legacy flat URL fields.
   const links = await getStoreLinks(db, storeId);
 
+  // Multi-location summary so the viewport's "Locations" spot renders without a second call.
+  const [detailLocCount, detailLocCities] = await Promise.all([
+    loadStoreLocationCounts(db, [storeId]),
+    loadStoreLocationCities(db, [storeId]),
+  ]);
+
   const detailDerived =
     store.store.hubRoute == null
       ? classifyBayAreaRegion({
@@ -1575,6 +1596,60 @@ showroomStoresRouter.get("/:id", async (c) => {
       tagColor: r.tag.color,
     })),
     brands: brandsWithImages,
+    locationCount: detailLocCount.get(storeId) ?? 0,
+    locationCities: detailLocCities.get(storeId) ?? [],
+  });
+});
+
+/**
+ * GET /:id/locations — every physical site of a showroom business, for the viewport's
+ * Locations modal (0045/0047). Reuses `loadStoreLocations` (derived address, city, coords,
+ * placeId, googleMapsLink, hub, isPrimary), sorted by city ascending, and returns the
+ * business-level phone + website + active POCs so each city tab can show contacts. Fetched
+ * lazily by the modal on first open — never on page load.
+ */
+showroomStoresRouter.get("/:id/locations", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json({ error: "Invalid store id" }, 400);
+  }
+
+  const [store] = await db
+    .select({ id: showroomStores.id, phoneNumber: showroomStores.phoneNumber })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) return c.json({ error: "Store not found" }, 404);
+
+  const locations = (await loadStoreLocations(db, [storeId]))
+    .get(storeId)
+    ?.slice()
+    .sort((a, b) => (a.city ?? "").localeCompare(b.city ?? "")) ?? [];
+
+  const links = await getStoreLinks(db, storeId);
+  const { websiteUrl } = linksToLegacyUrls(links);
+
+  const pocs = await db
+    .select()
+    .from(showroomPocs)
+    .where(and(eq(showroomPocs.showroomId, storeId), eq(showroomPocs.isActive, true)))
+    .all();
+
+  return c.json({
+    locations,
+    storePhone: store.phoneNumber,
+    storeWebsite: websiteUrl,
+    pocs: pocs.map((p) => ({
+      id: p.id,
+      fullName: p.fullName,
+      title: p.title,
+      company: p.company,
+      phone: p.phone,
+      email: p.email,
+      website: p.website,
+      address: p.address,
+    })),
   });
 });
 

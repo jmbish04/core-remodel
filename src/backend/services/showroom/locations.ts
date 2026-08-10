@@ -215,6 +215,41 @@ export async function loadStoreLocationCounts(
   return counts;
 }
 
+/**
+ * Unique non-empty `city` per store, sorted ascending — for the directory card's city chips.
+ * One grouped read, chunked at 20 store ids. Empty cities are dropped so a blank chip never
+ * shows.
+ */
+export async function loadStoreLocationCities(
+  db: RemodelDb,
+  storeIds: number[],
+): Promise<Map<number, string[]>> {
+  const ids = Array.from(new Set(storeIds)).filter((id) => Number.isInteger(id));
+  const byStore = new Map<number, Set<string>>();
+  if (ids.length === 0) return new Map();
+
+  for (const part of chunk(ids)) {
+    const rows = await db
+      .select({ storeId: showroomStoreLocations.storeId, city: showroomStoreLocations.city })
+      .from(showroomStoreLocations)
+      .where(inArray(showroomStoreLocations.storeId, part))
+      .all();
+    for (const r of rows) {
+      const city = r.city?.trim();
+      if (!city) continue;
+      const set = byStore.get(r.storeId) ?? new Set<string>();
+      set.add(city);
+      byStore.set(r.storeId, set);
+    }
+  }
+
+  const out = new Map<number, string[]>();
+  for (const [storeId, set] of Array.from(byStore.entries())) {
+    out.set(storeId, Array.from(set).sort((a, b) => a.localeCompare(b)));
+  }
+  return out;
+}
+
 /** The PlateJS notes triple as it arrives from a write tool — every key optional. */
 export interface ShowroomNotesTriple {
   notes?: string | null;
