@@ -16,7 +16,7 @@
  * unavailable, the pane still shows the address, contacts and the "Open in Google Maps" link.
  */
 import { Building2, ExternalLink, Mail, MapPin, Phone, User } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,14 +67,37 @@ interface LocationsPayload {
   pocs: LocationPoc[];
 }
 
-// ─── Google Maps Embed key (fetched once, cached module-wide) ────────────────────────────
+// ─── Google Maps Embed key (fetched once, but only a SUCCESS is cached) ──────────────────
+// A failed/empty fetch is NOT memoized — otherwise a transient 401/network blip would poison
+// the map for the whole session with no way to recover but a full reload (codra/cursor P2).
 let mapsKeyPromise: Promise<string | null> | null = null;
 function getMapsKey(): Promise<string | null> {
-  mapsKeyPromise ??= fetch("/api/places/maps-js-key", { credentials: "include" })
+  if (mapsKeyPromise) return mapsKeyPromise;
+  const p = fetch("/api/places/maps-js-key", { credentials: "include" })
     .then((r) => (r.ok ? (r.json() as Promise<{ key?: string }>) : null))
     .then((j) => j?.key ?? null)
     .catch(() => null);
-  return mapsKeyPromise;
+  mapsKeyPromise = p;
+  // Drop the cache when it resolves to null, so the next tab that needs a map retries.
+  void p.then((key) => {
+    if (key == null && mapsKeyPromise === p) mapsKeyPromise = null;
+  });
+  return p;
+}
+
+/**
+ * Return `url` only if it is a well-formed http(s) URL — otherwise null. Guards every href we
+ * render from a stored value against `javascript:`/`data:` schemes (cursor P2): the website is
+ * only length-validated on write, so a hostile value could otherwise reach an anchor here.
+ */
+function safeHttpUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Build the Embed `q` for a location: place_id → coords → address. */
@@ -87,7 +110,8 @@ function embedQuery(loc: StoreLocation): string | null {
 
 /** A best-effort Google Maps deep link for the "Open in Google Maps" button. */
 function mapsHref(loc: StoreLocation): string | null {
-  if (loc.googleMapsLink) return loc.googleMapsLink;
+  const gmap = safeHttpUrl(loc.googleMapsLink);
+  if (gmap) return gmap;
   const q = embedQuery(loc);
   if (!q) return null;
   const term = q.startsWith("place_id:")
@@ -173,6 +197,7 @@ function LocationPane({
   }, [pocs, location.city, location.streetName]);
 
   const href = mapsHref(location);
+  const website = safeHttpUrl(storeWebsite);
 
   return (
     <div className="flex h-full flex-col gap-4 lg:flex-row">
@@ -201,15 +226,15 @@ function LocationPane({
               {formatPhoneDisplay(storePhone)}
             </a>
           )}
-          {storeWebsite && (
+          {website && (
             <a
-              href={storeWebsite}
+              href={website}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
             >
               <ExternalLink className="size-4" aria-hidden />
-              {storeWebsite.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+              {website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
             </a>
           )}
           {href && (
@@ -292,21 +317,32 @@ export function LocationsModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState(0);
-  const fetched = useRef(false);
+  const loadingRef = useRef(false);
 
-  // Lazy: load on first open only.
-  useEffect(() => {
-    if (!open || fetched.current) return;
-    fetched.current = true;
+  const load = useCallback(() => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
+    setError(null);
     fetch(`/api/showroom-stores/${storeId}/locations`, { credentials: "include" })
       .then((r) =>
         r.ok ? (r.json() as Promise<LocationsPayload>) : Promise.reject(new Error(`HTTP ${r.status}`)),
       )
       .then((j) => setData(j))
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"))
-      .finally(() => setLoading(false));
-  }, [open, storeId]);
+      .finally(() => {
+        loadingRef.current = false;
+        setLoading(false);
+      });
+  }, [storeId]);
+
+  // Lazy: fetch when the modal opens and we have no data yet. A failed load is NOT retried in
+  // a loop (the effect only fires on `open` flipping), but re-opening — or the Retry button —
+  // fetches again, so a transient failure is recoverable without a page reload (cursor P2).
+  useEffect(() => {
+    if (open && !data && !loadingRef.current) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const locations = data?.locations ?? [];
   const activeLoc = locations[Math.min(active, Math.max(0, locations.length - 1))];
@@ -328,8 +364,11 @@ export function LocationsModal({
           </div>
         )}
         {error && !loading && (
-          <div className="flex flex-1 items-center justify-center text-sm text-destructive">
-            {error}
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-destructive">
+            <span>Couldn&apos;t load locations — {error}</span>
+            <Button variant="outline" size="sm" onClick={load}>
+              Retry
+            </Button>
           </div>
         )}
 
@@ -405,13 +444,16 @@ export function LocationsSpot({
     [locationCities],
   );
 
-  // Single (or zero) location: concise static text, no modal.
+  // Zero or one location: concise static text, no modal. Distinguish the two — "Single
+  // location" is misleading when there are actually none on file (cursor P3).
   if (locationCount <= 1) {
     return (
       <div className="flex items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
         <MapPin className="size-4 shrink-0" aria-hidden />
         <span>
-          Single location{cities[0] ? ` · ${cities[0]}` : ""}
+          {locationCount === 0
+            ? "No locations on file"
+            : `Single location${cities[0] ? ` · ${cities[0]}` : ""}`}
         </span>
       </div>
     );
