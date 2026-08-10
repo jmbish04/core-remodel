@@ -59,8 +59,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "An independent code review (Cursor, gpt-5.6-sol-high) run over the merged PR #374 found three real defects that the build's own multi-agent review chain missed — two of them interactions between fixes rather than defects in any one change. (1) The scan lease was released unconditionally, so a scan whose stale lease was legitimately stolen would clear the thief's newer lease on exit, letting a third scan run concurrently. (2) The supersede compensating write could no longer run: the partial unique index added in the same fix wave rejects the reactivation once the replacement row is active, so a transient link failure threw out of the catch and aborted the scan. (3) Sharing changes were never detected — the diff compared name, parent and content hash but not sharing, so a Drive permission change with no rename/move/edit left a stale value that decides whether a link can be emailed to a vendor. Also paginated the documents route. No migration.",
     date: "2026-08-10",
     status: "staged",
-    prNumber: 376,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/376",
+    prNumber: 377,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/377",
   },
   {
     branch: "feat/drive-ingestion-service",
