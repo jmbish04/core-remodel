@@ -95,6 +95,7 @@ import {
   UploadPhotoModal,
   type StoreCategoryChip,
 } from "./hero";
+import { LocationsSpot } from "./locations/LocationsModal";
 import { asLinkType } from "./intake/LinksField";
 import { absoluteHref } from "./hero/SocialLinks";
 import type { HoursJson } from "./intake/hours-types";
@@ -150,6 +151,9 @@ interface StoreDetail {
   name: string;
   description: string | null;
   pricePoint: string | null;
+  /** Multi-location summary (0045/0047) — count + unique cities sorted asc. */
+  locationCount?: number;
+  locationCities?: string[];
   // Business-model type (joined from showroom_store_type on GET /:id).
   typeId: number | null;
   typeName: string | null;
@@ -1293,6 +1297,16 @@ export function StoreViewportApp({
             />
           </div>
           </div>
+
+        {/* Locations spot — count + city chips, opens the locations modal (0045/0047). */}
+        <div className="mt-4">
+          <LocationsSpot
+            storeId={store.id}
+            storeName={store.name}
+            locationCount={store.locationCount ?? 0}
+            locationCities={store.locationCities ?? []}
+          />
+        </div>
 
         {/* Visit rating + context note. */}
         {store.rating !== null || store.ratingContextHtml ? (

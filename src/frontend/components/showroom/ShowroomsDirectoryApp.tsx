@@ -114,6 +114,9 @@ interface Store {
   pricePoint: "$" | "$$" | "$$$" | "$$$$" | null;
   inventoryFocus: string | null;
   cityName: string | null;
+  /** Multi-location summary (0045/0047) — count + unique cities sorted asc, from the list API. */
+  locationCount?: number;
+  locationCities?: string[];
   hubRoute: string | null;
   hubName: string | null;
   /** Captured coordinates — power the individual map markers when zoomed in. */
