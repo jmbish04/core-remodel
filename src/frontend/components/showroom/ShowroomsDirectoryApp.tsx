@@ -391,8 +391,16 @@ function CategoryTags({ categories, max = 3 }: { categories: string[]; max?: num
   const overflow = categories.length - max;
   return (
     <div className="flex flex-wrap gap-1">
-      {shown.map((c) => (
-        <Badge key={c} variant="secondary" className="px-1.5 py-0 text-[9px] font-normal">
+      {shown.map((c, i) => (
+        // categories[0] is the PRIMARY (feed orders is_primary first) — tint it
+        // so the primary category reads distinctly from the secondary badges.
+        <Badge
+          key={c}
+          variant="secondary"
+          className={`px-1.5 py-0 text-[9px] font-normal${
+            i === 0 ? " bg-primary/15 text-primary" : ""
+          }`}
+        >
           {c}
         </Badge>
       ))}
@@ -1240,8 +1248,13 @@ function groupStores(stores: Store[], groupBy: GroupBy, pst: PstNow): [string, S
 
   if (groupBy === "category") {
     for (const s of stores) {
+      // A store appears ONCE, under its PRIMARY category only. The list feed
+      // orders `categories` with the is_primary category first (backend #395/#396),
+      // so categories[0] is the primary. All categories still show as badges on
+      // the card — so Argo Tile & Stone lists once under Tile but badges Tile +
+      // Flooring. (Was: pushed into every category group → duplicate rows.)
       if (s.categories.length === 0) push("Uncategorized", s);
-      else for (const c of s.categories) push(c, s);
+      else push(s.categories[0], s);
     }
     return Array.from(map.entries()).sort((a, b) => {
       if ((a[0] === "Uncategorized") !== (b[0] === "Uncategorized"))
@@ -1446,11 +1459,13 @@ function StoreDetailModal({
               )}
               {s.categories.length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {s.categories.map((c) => (
+                  {s.categories.map((c, i) => (
                     <Badge
                       key={c}
                       variant="secondary"
-                      className="px-1.5 py-0 text-[10px] font-normal"
+                      className={`px-1.5 py-0 text-[10px] font-normal${
+                        i === 0 ? " bg-primary/15 text-primary" : ""
+                      }`}
                     >
                       {c}
                     </Badge>
