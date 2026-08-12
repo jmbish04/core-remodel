@@ -7,6 +7,8 @@ import { linkBudgetItemToRoom } from "./link_budget_item_to_room";
 import { listBudgetItems } from "./list_budget_items";
 import { listExpenses } from "./list_expenses";
 import { listFundingAccounts } from "./list_funding_accounts";
+import { listReconciliationQueue } from "./list_reconciliation_queue";
+import { reconcileEstimateLine } from "./reconcile_estimate_line";
 import { recordExpense } from "./record_expense";
 import { setFundingAccount } from "./set_funding_account";
 import { unlinkBudgetItemFromRoom } from "./unlink_budget_item_from_room";
@@ -24,4 +26,6 @@ export const budgetTools: RemodelTool[] = [
   listFundingAccounts,
   setFundingAccount,
   getBudgetGrid,
+  listReconciliationQueue,
+  reconcileEstimateLine,
 ];
