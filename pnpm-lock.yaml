@@ -314,6 +314,9 @@ importers:
       '@ai-sdk/provider':
         specifier: ^3.0.14
         version: 3.0.14
+      '@google/jules-sdk':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@mermaid-js/parser':
         specifier: ^1.2.0
         version: 1.2.0
@@ -1796,6 +1799,9 @@ packages:
     peerDependenciesMeta:
       '@modelcontextprotocol/sdk':
         optional: true
+
+  '@google/jules-sdk@0.2.0':
+    resolution: {integrity: sha512-fKutNR8VvzsxqKA4uYkkJUZauXhiuIu9aVpjgeMuFADKt95y7oQbRJX/QmOS74fy2yAsY6SwKnIY6cJaaG6kpQ==}
 
   '@hono/node-server@1.19.14':
     resolution: {integrity: sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw==}
@@ -9385,6 +9391,11 @@ snapshots:
       - bufferutil
       - supports-color
       - utf-8-validate
+
+  '@google/jules-sdk@0.2.0':
+    dependencies:
+      yaml: 2.8.4
+      zod: 3.25.76
 
   '@hono/node-server@1.19.14(hono@4.12.16)':
     dependencies:

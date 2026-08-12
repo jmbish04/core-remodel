@@ -450,6 +450,13 @@
         "name": "DISCOVERY_HUB",
         "class_name": "DiscoveryHub",
       },
+      {
+        // 0038 Phase B/C: drives a repoless Jules session as the PRIMARY
+        // clearance extractor. Native-alarm batch loop; job state in KV, not DO
+        // SQLite; alarm deleted when the sweep finishes (dormant ~$0).
+        "name": "JULES_CLEARANCE_AGENT",
+        "class_name": "JulesClearanceAgent",
+      },
     ],
   },
   "migrations": [
@@ -529,6 +536,12 @@
       // 0032 D2 discovery-finder realtime fan-out DO.
       "tag": "v17",
       "new_sqlite_classes": ["DiscoveryHub"],
+    },
+    {
+      // 0038 Jules clearance-analysis DO. Uses native alarms only; job state in
+      // KV, so this is nominally a sqlite class but stores nothing of size.
+      "tag": "v18",
+      "new_sqlite_classes": ["JulesClearanceAgent"],
     },
   ],
   "worker_loaders": [

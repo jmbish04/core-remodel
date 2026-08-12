@@ -48,6 +48,9 @@ export interface ChangelogEntry {
   changes: ChangelogChange[];
   migrations?: string[];
   status: "shipped" | "staged";
+  /** PR that carried this entry, when one exists. */
+  prNumber?: number;
+  prUrl?: string;
 }
 
 /** Branches / PRs, newest first. */
@@ -68,6 +71,14 @@ export const BRANCHES: ChangelogBranch[] = [
     summary:
       "PLAN ONLY. A 6-agent audit of showroom_stores against live prod: the location→child-table refactor is already 100% mirrored (233/233 stores have location rows; the 16 flat columns are redundant copies), the contact side is barely started (0 GENERAL_CONTACT rows; 72 pocs + 5 main_poc unmigrated), and NOTHING can drop yet because intake writes zero child rows and ~35 placeId + all geo readers still read flat columns. Ships the staged expand→contract plan plus the intake-normalization + 50-mile sibling-discovery feature preview. No source changed except this changelog + the plan doc.",
     date: "2026-08-09",
+    status: "staged",
+  },
+  {
+    branch: "feat/jules-clearance-extraction",
+    title: "Jules-powered clearance extraction + plain-fetch link discovery (0038 Phase B/C)",
+    summary:
+      "The weekly showroom sale/clearance sweep now hands its pages to a repoless Google Jules session as the PRIMARY extractor, using the paid subscription's ~1M-token context for the heavy analysis. A new native-alarm Durable Object (JulesClearanceAgent) stands the session up, waits for the VM to boot, then feeds scraped pages in small batches and reads back one JSON reply per batch — so the sweep is no longer bound by the ~15-minute scheduled-invocation wall that was truncating it. Cost is bounded like TeslaStreamDO: job state lives in KV (never DO SQLite), each alarm fire does at most a few pages, and the alarm is deleted the instant the job finishes so the DO goes dormant. Workers-AI is the fallback on any Jules outage or unparseable reply, moved off kimi-k2.6 (a reasoning model that returns empty content for structured output — the reason most snapshots were empty) to kimi-k2.7-code with thinking disabled. The SDK itself can't run on Workers (its bundle statically imports node:fs/os), so we call the Jules REST API directly; @google/jules-sdk stays a dev dependency for its types. Also closes the coverage gap: plain-fetch sitemap/homepage discovery finds and registers clearance links across all stores, not just the 6 a shallow scrape happened to crawl.",
+    date: "2026-08-11",
     status: "staged",
   },
   {
@@ -473,6 +484,50 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         kind: "added",
         text: "Full prod DB archive as a restore point (git-ignored, not committed): db-archive/full-dump-20260810.sql (57MB, whole DB via wrangler d1 export) + json/ (25 showroom-cluster tables). Row baselines: 244 stores, 248 locations, 12 contacts vs 72 pocs, 242 images, 479 photo mappings.",
+      },
+    ],
+    status: "staged",
+  },
+  {
+    id: "jules-clearance-extraction",
+    branch: "feat/jules-clearance-extraction",
+    date: "2026-08-11",
+    area: "Shopping",
+    title: "Jules-powered clearance extraction + plain-fetch link discovery (0038 Phase B/C)",
+    summary:
+      "The weekly clearance sweep now uses a repoless Google Jules session as the primary extractor via a native-alarm Durable Object, with Workers-AI (kimi-k2.7-code with thinking disabled, off the broken kimi-k2.6) as the fallback. Job state is in KV, not DO SQLite; the DO goes dormant when done. Also adds plain-fetch sitemap/homepage discovery that registers clearance links across all stores, closing the coverage gap where only 6 of 233 were tracked.",
+    changes: [
+      {
+        kind: "added",
+        text: "JulesClearanceAgent Durable Object (DO migration tag v18, native ctx.storage.setAlarm only) — creates a repoless Jules session, polls until the VM is ready (approving a generated plan if one appears), then scrapes + change-detects + batches pages to Jules and persists one snapshot per changed link. Bounded per alarm fire; job document (session id, link queue, results) stored in AGENT_ADHOC_MEMORY_KV, never DO SQLite, per cost directive.",
+      },
+      {
+        kind: "added",
+        text: "Jules REST client (services/jules/client.ts) — a thin fetch wrapper over https://jules.googleapis.com/v1alpha (X-Goog-Api-Key auth): createRepolessSession, getSession, sendMessage, approvePlan, listActivities, latestAgentReplyAfter. We do NOT import @google/jules-sdk at runtime: its single ESM bundle statically imports node:fs/os/readline, which Cloudflare nodejs_compat does not polyfill, so it fails to load on Workers (the liteparse trap). The SDK stays a devDependency for types.",
+      },
+      {
+        kind: "added",
+        text: "Batch instruction contract (services/jules/clearance-prompts.ts) — a system prompt pinning a linkId-keyed JSON envelope mirroring ClearanceDetails, a per-batch message builder, and a defensive parser (first-brace to last-brace slice) that returns null (never {}) on garbage so the caller falls back instead of blanking a snapshot.",
+      },
+      {
+        kind: "changed",
+        text: "Weekly cron (30 13 * * 1) and POST /api/showroom-sales/sweep now route through startClearanceSweep → the Jules DO; the old synchronous Workers-AI sweep is the fallback (also reachable via ?inline=1). New GET /api/showroom-sales/sweep/status?jobId= reads a DO job's progress. Fixed the cron comment: Cloudflare day-of-week is 1=Sunday, so it fires Sunday, not Monday (matching the observed run history).",
+      },
+      {
+        kind: "fixed",
+        text: "Fallback clearance extraction model moved from the broken @cf/moonshotai/kimi-k2.6 to @cf/moonshotai/kimi-k2.7-code (262k context, more reliable JSON-schema structured output than gpt-oss-120b). k2.6 returned empty content for structured output (documented in ai/health.ts), which is why 10 of 14 current snapshots had items: [] despite live sales. k2.7-code exposes a configurable thinking mode; the extraction call pins thinking: false so the answer lands in content rather than a reasoning field, which is exactly the trap k2.6 fell into.",
+      },
+      {
+        kind: "changed",
+        text: "sales.ts refactored into reusable helpers (scrapeClearanceMarkdown, computeClearanceHash, isClearanceUnchanged, persistSaleSnapshot, collectClearanceLinks, touchClearanceLink, exported extractClearance) so the Jules DO and the Workers-AI sweep share one snapshot-persistence + change-detection path. No behaviour change to the fallback sweep beyond the model swap.",
+      },
+      {
+        kind: "added",
+        text: "Clearance-link DISCOVERY (services/showroom/clearance-discovery.ts) — closes the coverage gap where only 6 of 233 stores had a clearance link because discovery was passive. Plain worker fetch (NOT Browser Rendering) of each active store's sitemap.xml (robots.txt Sitemap: lines + conventional guesses, following a sitemap index one level, gunzipping .gz), falling back to fetching the homepage and scanning its <a href> links when a site has no sitemap. Classifies every URL with the shared classifySiteLink (own-domain, matches clearance/sale/outlet/closeout/last-chance, vetoes bot-challenge junk), keeps shallow landing pages (≤2 path segments, not deep product URLs), dedupes against existing links, and registers new WEBSITE_CLEARANCE links. Bounded concurrency 8, idempotent, safe to run weekly.",
+      },
+      {
+        kind: "changed",
+        text: "The weekly cron now runs discovery FIRST, then the sweep, so newly-found clearance pages are covered the same run. New POST /api/showroom-sales/discover runs it on demand; POST /sweep stays fast by default (discovery opt-in via ?discover=1).",
       },
     ],
     status: "staged",
