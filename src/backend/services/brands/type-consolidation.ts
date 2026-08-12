@@ -21,13 +21,13 @@
  * mappings. Every merge repoints first, then deletes the now-orphan type.
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-
-import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
-import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { generateStructuredOutput } from "@backend/ai/providers";
+import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
+import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
+import { SpendBlockedError } from "@backend/services/usage/metered-ai";
 import { z } from "@hono/zod-openapi";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 /**
  * Survivor name → the synonym/plural names folded into it.
@@ -79,7 +79,12 @@ const COMPOUND_SPLITS: Record<string, string[]> = {
 };
 
 export interface ConsolidationReport {
-  merges: Array<{ survivor: string; absorbed: string; remapped: number; collisionsDropped: number }>;
+  merges: Array<{
+    survivor: string;
+    absorbed: string;
+    remapped: number;
+    collisionsDropped: number;
+  }>;
   splits: Array<{ compound: string; into: string[]; brands: number; mappingsAdded: number }>;
   typesBefore: number;
   typesAfter: number;
@@ -143,10 +148,7 @@ async function mergeType(
 }
 
 /** Resolve a type by name, creating it if absent. Returns its id. */
-async function ensureType(
-  db: ReturnType<typeof drizzle>,
-  name: string,
-): Promise<number> {
+async function ensureType(db: ReturnType<typeof drizzle>, name: string): Promise<number> {
   const [existing] = await db
     .select({ id: brandTypesDef.id })
     .from(brandTypesDef)
@@ -182,9 +184,7 @@ async function splitType(
   const brandIds = brandRows.map((r) => r.brandId);
 
   if (brandIds.length > 0) {
-    const rows = brandIds.flatMap((brandId) =>
-      atomicIds.map((typeId) => ({ brandId, typeId })),
-    );
+    const rows = brandIds.flatMap((brandId) => atomicIds.map((typeId) => ({ brandId, typeId })));
     // Chunk at 20 rows: D1 caps a statement at 100 bound params and each row
     // binds 2 columns, so 20 rows = 40 params stays well clear.
     let added = 0;
@@ -346,6 +346,9 @@ Return every type you were given, keyed by its exact name.`;
           temperature: 0,
         });
       } catch (err) {
+        // See assign-primary-type: a spend block applies to every remaining
+        // batch, so continuing only repeats the same refusal.
+        if (err instanceof SpendBlockedError) throw err;
         console.error(
           `[type-consolidation] description backfill failed for batch ${i / DESCRIBE_CHUNK}:`,
           err,
@@ -353,9 +356,7 @@ Return every type you were given, keyed by its exact name.`;
         continue;
       }
 
-      const byName = new Map(
-        described.types.map((t) => [t.name.trim().toLowerCase(), t]),
-      );
+      const byName = new Map(described.types.map((t) => [t.name.trim().toLowerCase(), t]));
       for (const t of batch) {
         const d = byName.get(t.name.trim().toLowerCase());
         if (!d?.description) continue; // skip rather than store an empty string

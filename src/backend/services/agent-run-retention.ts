@@ -20,7 +20,7 @@
  * minute-resolution pruning.
  */
 import { agentRuns } from "@backend/db";
-import { and, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** Terminal-and-boring: safe to forget relatively soon. */
@@ -131,18 +131,20 @@ export async function sweepAbandonedRuns(env: Env, now = new Date()): Promise<nu
       .update(agentRuns)
       .set({
         status: "failed",
-        errorCode: ABANDONED_ERROR_CODE,
-        errorMessage: `No terminal status recorded within ${ABANDON_AFTER_HOURS}h — the run's isolate died before it could close the row.`,
+        // Preserve an existing diagnosis rather than stamping the generic code
+        // over it. This was originally an `isNull(errorCode)` guard in the WHERE
+        // clause, which had the opposite of the intended effect: a run that
+        // recorded a non-fatal error mid-flight and THEN had its isolate die was
+        // skipped by the sweep entirely and stayed `running` for ever — the exact
+        // stranding this function exists to end, and the most useful row to close,
+        // since it is the one that already says what went wrong. Selecting the
+        // value instead of filtering on it keeps the annotation and still closes
+        // the run.
+        errorCode: sql`COALESCE(${agentRuns.errorCode}, ${ABANDONED_ERROR_CODE})`,
+        errorMessage: sql`COALESCE(${agentRuns.errorMessage}, ${`No terminal status recorded within ${ABANDON_AFTER_HOURS}h — the run's isolate died before it could close the row.`})`,
       })
       .where(
-        and(
-          inArray(agentRuns.status, ["running", "queued"]),
-          lt(agentRuns.createdAt, cutoff),
-          // Only rows nothing has already diagnosed. A run someone manually
-          // annotated keeps its own error_code rather than being overwritten
-          // with the generic one.
-          isNull(agentRuns.errorCode),
-        ),
+        and(inArray(agentRuns.status, ["running", "queued"]), lt(agentRuns.createdAt, cutoff)),
       );
 
     const swept = (res as { meta?: { changes?: number } })?.meta?.changes ?? 0;
