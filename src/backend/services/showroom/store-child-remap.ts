@@ -53,7 +53,8 @@ const SIMPLE_MOVE: Array<{ label: string; table: SQLiteTable; col: SQLiteColumn;
   { label: "store_rating", table: storeRating, col: storeRating.storeId, key: "storeId" },
   { label: "showroom_store_ratings", table: showroomStoreRatings, col: showroomStoreRatings.storeId, key: "storeId" },
   { label: "showroom_pocs", table: showroomPocs, col: showroomPocs.showroomId, key: "showroomId" },
-  { label: "showroom_store_contacts", table: showroomStoreContacts, col: showroomStoreContacts.storeId, key: "storeId" },
+  // showroom_store_contacts is NOT here — it has a dedicated person-dedup pass
+  // (remapContactsDeduped) so a merge does not recreate the same person twice.
   { label: "showroom_store_contact_log", table: showroomStoreContactLog, col: showroomStoreContactLog.storeId, key: "storeId" },
   {
     label: "showroom_store_contact_business_cards",
@@ -154,10 +155,80 @@ const keyOf = (row: Record<string, unknown>, cols: SQLiteColumn[]) =>
   cols.map((c) => String(row[c.name] ?? "∅")).join("");
 
 /**
+ * Person identity for a contact — matches the from-pocs backfill key so the two dedup
+ * paths agree on "the same person": normalized name + phones + email. GENERAL_CONTACT
+ * rows (no name) collapse on phone/email.
+ */
+const contactKey = (r: Record<string, unknown>) =>
+  [r.firstName, r.lastName, r.officePhoneNumber, r.mobilePhoneNumber, r.emailAddress]
+    .map((v) => String(v ?? "").trim().toLowerCase())
+    .join("|");
+
+/**
+ * Move `showroom_store_contacts` from losers onto the keeper WITHOUT recreating a person
+ * the keeper already has. A loser contact whose person-key already exists on the keeper is
+ * dropped; otherwise it is repointed. Moved contacts lose `is_primary` — the keeper keeps
+ * its own primary, and two `is_primary` rows per (store, location) would trip
+ * `ssc_one_primary_per_location`.
+ *
+ * ponytail: a moved contact keeps its `location_id` (it points at the loser's site row,
+ * which the merge soft-deletes the STORE but not the location, so the FK stays valid). If
+ * the keeper had zero contacts, the merged set ends with no primary — acceptable; re-flag
+ * in the UI. Per-site location remap is the separate Phase-L concern.
+ */
+async function remapContactsDeduped(
+  db: RemodelDb,
+  keeperId: number,
+  loserIds: number[],
+): Promise<number> {
+  let moved = 0;
+  const keeperRows = await db
+    .select()
+    .from(showroomStoreContacts)
+    .where(inArray(showroomStoreContacts.storeId, [keeperId]))
+    .all();
+  const seen = new Set(keeperRows.map((r) => contactKey(r as Record<string, unknown>)));
+
+  for (const ids of chunk(loserIds)) {
+    const rows = await db
+      .select()
+      .from(showroomStoreContacts)
+      .where(inArray(showroomStoreContacts.storeId, ids))
+      .all();
+    const toDrop: number[] = [];
+    const toMove: number[] = [];
+    for (const r of rows) {
+      const row = r as Record<string, unknown>;
+      const id = Number(row.id);
+      const k = contactKey(row);
+      if (seen.has(k)) toDrop.push(id);
+      else {
+        seen.add(k);
+        toMove.push(id);
+      }
+    }
+    for (const part of chunk(toDrop))
+      if (part.length)
+        await db.delete(showroomStoreContacts).where(inArray(showroomStoreContacts.id, part)).run();
+    for (const part of chunk(toMove))
+      if (part.length) {
+        const res = await db
+          .update(showroomStoreContacts)
+          .set({ storeId: keeperId, isPrimary: false })
+          .where(inArray(showroomStoreContacts.id, part))
+          .run();
+        moved += changesOf(res);
+      }
+  }
+  return moved;
+}
+
+/**
  * Move every child/support row from `loserIds` onto `keeperId`. DEDUP_MOVE tables drop a
  * loser row the keeper already has (by its identity columns); SIMPLE_MOVE tables repoint
- * everything. Returns the number of rows moved. Does NOT touch `showroom_stores` itself —
- * the caller decides when to soft-delete the loser.
+ * everything; `showroom_store_contacts` gets a dedicated person-dedup pass. Returns the
+ * number of rows moved. Does NOT touch `showroom_stores` itself — the caller decides when
+ * to soft-delete the loser.
  */
 export async function remapStoreChildren(
   db: RemodelDb,
@@ -165,7 +236,7 @@ export async function remapStoreChildren(
   loserIds: number[],
 ): Promise<number> {
   if (loserIds.length === 0) return 0;
-  let moved = 0;
+  let moved = await remapContactsDeduped(db, keeperId, loserIds);
 
   for (const t of DEDUP_MOVE) {
     const keeperRows = await db.select().from(t.table).where(inArray(t.col, [keeperId])).all();
@@ -220,6 +291,17 @@ export async function countStoreChildren(
 ): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
   if (storeIds.length === 0) return counts;
+  // Contacts have a dedicated dedup pass (not in SIMPLE_MOVE) — count them explicitly.
+  let contactTotal = 0;
+  for (const ids of chunk(storeIds)) {
+    const rows = await db
+      .select({ id: showroomStoreContacts.id })
+      .from(showroomStoreContacts)
+      .where(inArray(showroomStoreContacts.storeId, ids))
+      .all();
+    contactTotal += rows.length;
+  }
+  if (contactTotal > 0) counts["showroom_store_contacts"] = contactTotal;
   for (const fk of [...SIMPLE_MOVE, ...DEDUP_MOVE]) {
     let total = 0;
     for (const ids of chunk(storeIds)) {
