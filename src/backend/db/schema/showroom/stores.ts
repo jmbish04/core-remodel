@@ -145,6 +145,18 @@ export const showroomStores = sqliteTable("showroom_stores", {
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
 
   /**
+   * When this store was MERGED into another (dedup / branch-collapse), points at the
+   * surviving KEEPER store's id — the row this one was folded into. Distinguishes a
+   * merged-away loser (DEFUNCT: deep-links should redirect to the keeper, and write
+   * endpoints should 409) from a store that was merely soft-deactivated (`is_active = 0`
+   * with NO keeper → still restorable, writes allowed per the note above). Soft
+   * self-reference (no hard FK, like `store_rating.replaced_by_id`) to avoid a circular
+   * constraint; always another `showroom_stores.id`. Follow the chain to the final keeper
+   * (a keeper can itself be merged later). Null = never merged.
+   */
+  keeperStoreId: integer("keeper_store_id"),
+
+  /**
    * Online-only flag (0038) — this row is a web-only clearance source with no
    * physical showroom (no address / GPS). Added from the Sale Scan Health page
    * so web retailers' sales can be tracked alongside physical showrooms; drive
