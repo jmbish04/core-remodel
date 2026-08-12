@@ -56,6 +56,17 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "worktree-bridge-cse_016Rp7EJTqbFmvTpUX2cUvWw",
+    title:
+      "System health audit — two false-alarm probes, an abandoned-run sweep, and a KV spend breaker",
+    summary:
+      "System health reported FAILURE with 5 failing probes. Auditing each against production showed two of the five were measurement artifacts, latched red permanently, masking the rest. (1) The email pipeline probe counted `status='pending'` without excluding `ai_status='pending_approval'` — the 0042 AI trust gate's deliberate parked state — so every Gmail message read as a stalled pipeline; 22 of 26 pending rows on prod were parked, not stuck. (2) The Durable Object runaway watcher counted `running` rows of any age as evidence a DO was awake and billing; the 31 rows were corpses from crashes 6-16 days earlier, and the probe's own message said `Last hour started=0`. Root cause of (2): a run row is opened by `startRun` and closed by the caller, so a dead isolate leaves it `running` forever — `sweepAbandonedRuns` now marks those `failed`/`ABANDONED` on the daily cron. Separately, `DURABLE_OBJECT` had been a declared metered provider since metering shipped with no writer anywhere, so its ceiling summed to $0 and could never trip; `startRun`'s close now prices the run's wall-clock. `generateStructuredOutput` (15 callers) spent on both the Workers AI path and the Gemini fallback with no ceiling check and no usage row. A KV read-through cache now fronts `canSpend`, whose uncached path is two D1 queries including a SUM over an append-only table. No migration.",
+    date: "2026-08-12",
+    status: "staged",
+    prNumber: 382,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/382",
+  },
+  {
     branch: "claude/budget-workbench-p3",
     title: "Budget workbench P3 — estimate-line reconciliation HITL",
     summary:
@@ -451,6 +462,56 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "health-probe-truth-and-spend-breaker",
+    branch: "worktree-bridge-cse_016Rp7EJTqbFmvTpUX2cUvWw",
+    date: "2026-08-12",
+    area: "System health",
+    title: "Health probe truth, abandoned-run sweep, and a KV spend circuit breaker",
+    summary:
+      "Two of the five failing health probes were measuring the wrong thing and had latched red permanently, hiding the three real failures behind them. Fixed the classification, fixed the root cause that produced the stale data, and closed the loop from observing spend to declining it. Prod failures go 5 → 3, and the 3 that remain are real.",
+    changes: [
+      {
+        kind: "fixed",
+        text: "False alarm — email pipeline. The liveness probe counted worker_emails.status='pending' without excluding ai_status='pending_approval', which is the 0042 AI trust gate's deliberate parked state (pipeline.ts returns early on deferAiUntilApproval for Gmail-sourced mail). Verified on prod: 22 of 26 pending rows were parked, waiting on a human, not stuck. Parked mail is now reported separately as 'awaiting your approval' instead of counted as a broken pipeline. The FAILURE ratio's denominator excludes parked rows too — leaving it in silently diluted the signal, so 90 parked messages plus 10 genuinely stuck ones scored 10% and read healthy.",
+      },
+      {
+        kind: "fixed",
+        text: "False alarm — Durable Object runaway watcher. It counted running/queued rows of ANY age as evidence a DO was awake and billing, so a single crash pinned the probe to FAILURE for ever and every subsequent real runaway would have been hidden behind the stale alarm. The 31 rows on prod were 6-16 days old and the probe's own message read 'Last hour started=0'. Stuck runs are now split by age; only runs younger than 24h can raise a billing FAILURE, because only a recent one can still be spending. Older residue is reported, never hidden.",
+      },
+      {
+        kind: "added",
+        text: "sweepAbandonedRuns — the root cause of the above. A run row is opened by startRun and closed by the caller, so an isolate that dies mid-run (Worker exceeded memory limit, an evicted Workflow step) leaves it 'running' for ever. pruneAgentRuns refuses to delete those by design, but 'keep it visible' had been implemented as 'keep it indistinguishable from a live run'. The sweep marks them failed with error_code='ABANDONED' on the daily cron — exactly what the probe's own devOpsPlaybook prescribes, so it needs no migration, no enum change, and inherits the 90-day failed-run retention.",
+      },
+      {
+        kind: "added",
+        text: "Durable Object spend is measured for the first time. DURABLE_OBJECT has been a declared metered provider since the metering system shipped, but nothing anywhere wrote a DURABLE_OBJECT usage row — getCycleSpend summed to $0 for ever, so its ceiling could never trip. A budget over an unmeasured number is decoration. startRun's close now prices the run's wall-clock, covering every Agent, DO and Workflow through one writer instead of 26 classes. Verified live on the preview: spend went $0 → $0.000044925 after one real agent run. Scope is stated honestly in the code: this catches a runaway in agent run VOLUME or DURATION, and would NOT have caught the #162 incident, which was 537 billion DO row reads (~$512) and is covered by the separate kill-switch in services/safety/do-circuit-breaker.ts.",
+      },
+      {
+        kind: "added",
+        text: "The AI choke point is now metered. generateStructuredOutput (15 callers) spent on BOTH the Workers AI path and the Gemini fallback with no ceiling check and no usage row. It now asserts the breaker before spending and records both the success and the failed-primary outcomes, so a retry storm on the Workers AI path is visible in the ledger instead of looking like Gemini cost.",
+      },
+      {
+        kind: "added",
+        text: "KV read-through cache for the circuit breaker (breaker-cache.ts). canSpend's uncached path is two D1 queries, one a SUM over an append-only table — too expensive to sit in front of every AI call, which is exactly where a brake has to be to matter. D1 stays authoritative for both config and spend; KV caches only the DECISION. Nothing is incremented in KV: Workers KV has no atomic increment, and a lost increment under-reports spend, the one direction a spend guard must never err in. TTL is asymmetric (allow 30s, deny 300s) because a stale allow costs money and a stale deny does not. A KV miss or error falls through to D1 rather than deciding policy, read_error is never cached, and every config write invalidates the cache so break-glass controls bite immediately.",
+      },
+      {
+        kind: "fixed",
+        text: "Budget stops no longer masquerade as empty results. pascal/ai-edit.ts caught everything and returned a structurally valid EditPlan with zero ops, which the caller reads as success — right for a model failure, wrong for 'you are over your ceiling'. SpendBlockedError now propagates. The three brand batch loops likewise abort instead of grinding the whole 900-brand list logging the same refusal per batch and reporting it as 'skipped'.",
+      },
+      {
+        kind: "changed",
+        text: "Durable Object budget enforcement sits in dispatchDueWorkflows, not startRun. startRun is contractually non-throwing — it records work, it does not authorize it — and making it throw would surface a budget stop as a random exception in 26 unrelated agent classes. Declining at dispatch skips the tick and leaves the schedule untouched, so the job simply runs once the budget resets.",
+      },
+      {
+        kind: "changed",
+        text: "AGENTS.md: deleting a preview worker is now part of merging a PR, not a later chore, and deploy:preview sweeps orphans automatically. Also documented the rebuilt local agent tooling and its two traps (health is a config check, not an auth check; the starter orchestrator.toml caps claude at 8 turns).",
+      },
+    ],
+    migrations: [],
+    // PR number lives on the BRANCHES row (ChangelogEntry has no prNumber field).
+    status: "staged",
+  },
   {
     id: "budget-workbench-reconciliation-p3",
     branch: "claude/budget-workbench-p3",
