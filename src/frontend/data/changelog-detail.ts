@@ -113,6 +113,38 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "budget-grid-usability": {
+    slug: "budget-grid-usability",
+    branch: "claude/budget-grid-followups",
+    prNumber: 400,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/400",
+    subtitle: "0035 follow-up · make the shipped grid usable",
+    code: [],
+    problem:
+      "The grid shipped correct but degenerate: no UI assigned a line to a phase (everything sat under 'Unphased') and no UI set funding accounts (Total Budget $0, Remaining meaningless). Worse, phaseId existed on the item but the PATCH revision insert didn't carry it — so even an MCP/API phase assignment would be wiped by the next unrelated edit.",
+    approach:
+      "Two small grid controls + one backend fix. A ghost per-line phase-select PATCHes /api/budget-tracker/items/{id} {phaseId} (the grid line already carries the active item id) then refetches. A 'Set budget' dialog on the Total-budget scorecard loads /financial-status and saves via PUT /financial-accounts (upsert by key; new keys slugified). The backend fix adds phaseId to BudgetTrackerPatch and carries phaseId + variance-note md/html forward in the revision insert (undefined=keep, null=unassign) so edits no longer wipe them.",
+    apiChanges: [
+      "USES existing PATCH /api/budget-tracker/items/{id} (now honors + persists phaseId), GET /api/config/budget-phases, GET /api/budget-tracker/financial-status, PUT /api/budget-tracker/financial-accounts.",
+      "No new routes, no schema/migration — phaseId + variance columns shipped in #360.",
+    ],
+    filesTouched: [
+      "src/backend/api/routes/budget-tracker.ts (phaseId in patch + carry phaseId/variance across revisions)",
+      "src/frontend/components/BudgetGridApp.tsx (PhaseSelect per line + FundingDialog)",
+      "src/frontend/components/budget-grid-view.ts (slugifyAccountKey helper)",
+      "scripts/tests/test_budget_grid_view.mjs, scripts/qc/pr_400.mjs",
+    ],
+    migrations: [],
+    diagrams: [],
+    verification: {
+      qcScript: "scripts/qc/pr_400.mjs",
+      command: "node scripts/qc/pr_400.mjs --preview  (11/11)  &&  node scripts/qc/pr_400.mjs  (prod 8/8)",
+      ranAt: "2026-08-12",
+      output:
+        "QC 11/11 preview: phases list, funding round-trip (write current values back), phase assign → line moves into the phase group, phase RETAINED after an unrelated edit (carry-forward fix), restored to Unphased, grid regression. Prod 8/8: funding + regression green; phase-assign persistence correctly reports pending merge/deploy (old prod code ignores phaseId). Funding dialog also browser-verified on preview (load → edit → save → refetch, no console errors). Build green; tsc no new errors in touched files; view self-check incl. slugifyAccountKey passes.",
+      migrations: [],
+    },
+  },
   "vendor-email-context-layer": {
     slug: "vendor-email-context-layer",
     branch: "feat/vendor-email-context-layer",
