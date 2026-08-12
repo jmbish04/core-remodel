@@ -1,0 +1,1 @@
+ALTER TABLE `showroom_store_category` ADD `ui_group` text DEFAULT 'General' NOT NULL;
