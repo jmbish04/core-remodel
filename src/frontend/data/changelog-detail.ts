@@ -187,21 +187,32 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
         description:
           "Attribute comments mark REMOVED (moves off the store) vs ADDED. Content tables reference a physical location, not the brand.",
         code: `erDiagram
-  showroom_stores ||--o{ showroom_store_locations : "1:N physical sites"
-  showroom_stores ||--o{ showroom_store_contacts : "brand anchor"
-  showroom_store_locations ||--o{ showroom_store_contacts : "per-site location_id"
-  showroom_store_locations ||--o{ showroom_images : "our + visit photos"
-  showroom_store_locations ||--o{ showroom_photos_mapping : "Google Places photos"
-  showroom_store_locations ||--o{ showroom_store_ratings : "external reviews"
-  showroom_store_locations ||--o{ store_notes : "location_id nullable=brand"
+  showroom_stores ||--o{ showroom_store_locations : "1:N sites"
+  showroom_stores ||--o{ showroom_store_contacts : "anchor"
+  showroom_store_locations ||--o{ showroom_store_contacts : "location_id"
+  showroom_stores ||--o{ showroom_store_category_mapping : "N:M"
+  showroom_store_category ||--o{ showroom_store_category_mapping : "N:M"
+  showroom_stores ||--o{ showroom_image_groups : "user stacks"
+  showroom_image_groups ||--o{ showroom_images : "group_id"
+  showroom_store_locations ||--o{ showroom_images : "location_id"
+  showroom_store_locations ||--o{ showroom_photos_mapping : "location_id"
+  showroom_store_locations ||--o{ showroom_store_ratings : "location_id"
+  showroom_store_locations ||--o{ store_notes : "location_id"
+  showroom_stores ||--o{ showroom_store_links : "brand"
+  showroom_store_locations ||--o{ showroom_store_hours : "location_id"
+  showroom_stores ||--o{ showroom_store_sales : "brand"
+  showroom_store_contacts ||--o{ showroom_store_contact_log : "who was contacted"
   showroom_stores {
     int id PK
-    text name "brand-level, stays"
-    text overview_note_markdown "brand · md source"
-    text overview_note_html "brand · render cache"
-    real latitude "REMOVED to location"
-    real longitude "REMOVED to location"
+    text name "brand"
+    int type_id FK "EXISTS to store_type"
+    bool is_active "EXISTS soft-delete"
+    text soft_delete_reason "ADD"
+    text overview_note_markdown "brand"
+    text overview_note_html "brand"
+    text rating_context_markdown "brand"
     text place_id "REMOVED to location"
+    real latitude "REMOVED to location"
     text phone_number "REMOVED to contact"
     text main_poc_fullname "REMOVED to contact"
   }
@@ -209,63 +220,111 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     int id PK
     int store_id FK
     text place_id "canonical uniq"
-    real latitude "canonical"
-    real longitude "canonical"
-    text unit "suite level"
-    text city "canonical"
-    text zip_code "canonical"
+    real latitude
+    real longitude
+    text unit
+    text city
+    text zip_code
+    text notes_markdown
+    text notes_html
   }
   showroom_store_contacts {
     int id PK
     int store_id FK
-    int location_id FK "ADDED"
-    bool is_primary "ADDED"
+    int location_id FK "ADD"
+    bool is_primary "ADD"
     text type "GENERAL_CONTACT etc"
     text first_name
     text last_name
     text office_phone_number
     text mobile_phone_number
-    text fax_phone_number
     text email_address
   }
-  showroom_store_ratings {
+  showroom_store_contact_log {
     int id PK
     int store_id FK
-    int location_id FK "ADDED per site"
-    text source "SYSTEM_USER GOOGLE YELP HOUZZ"
-    int rating "1-5"
-    text comment "external plain"
-    text rating_context_markdown "ADDED user note md"
-    text rating_context_html "ADDED user note html"
-    bool is_active "ADDED revision"
-    int replaced_by_id "ADDED revision"
-    text rating_created
-    int scraped_at
+    int store_contact_id FK
+    text outcome
   }
-  store_notes {
+  showroom_store_category {
+    int id PK
+    text name "cleaned canonical"
+    text description
+    bool is_active "merged-away = false"
+  }
+  showroom_store_category_mapping {
     int id PK
     int store_id FK
-    int location_id FK "ADDED nullable=brand"
-    text content_markdown "md source"
-    text content_html "render cache"
-    bool is_active
+    int category_id FK
+    bool is_primary "ADD one per store"
+    bool is_bread_butter "specialist 1-2"
+    int ai_rationale_confidence_score
   }
   showroom_images {
     int id PK
     int store_id FK
-    int location_id FK "ADDED"
+    int location_id FK "ADD"
+    int group_id FK "to image_groups"
     text image_kind "visit or discovered"
     text delivery_url
-    text note_markdown "polaroid note md"
-    text note_html "polaroid note html"
+    text note_markdown "polaroid"
+    text note_html
+  }
+  showroom_image_groups {
+    int id PK
+    int store_id FK
+    text name
+    text description_markdown
+    text description_html
+    int price_cents
+    int cover_image_id "to images"
   }
   showroom_photos_mapping {
     int id PK
-    int showroom_id FK
-    int location_id FK "ADDED exact place"
+    int store_id FK "showroom_id"
+    int location_id FK "ADD exact place"
     text cf_images_photo_url
     text author_attributes "Google attribution"
     int sort_order "Places rank"
+  }
+  showroom_store_ratings {
+    int id PK
+    int store_id FK
+    int location_id FK "ADD"
+    text source "SYSTEM_USER GOOGLE YELP HOUZZ"
+    int rating "1-5"
+    text comment "external plain"
+    text rating_context_markdown "ADD user note"
+    text rating_context_html "ADD"
+    bool is_active "ADD revision"
+    int replaced_by_id "ADD revision"
+  }
+  store_notes {
+    int id PK
+    int store_id FK
+    int location_id FK "ADD nullable=brand"
+    text content_markdown
+    text content_html
+    bool is_active
+  }
+  showroom_store_links {
+    int id PK
+    int store_id FK
+    text type "WEBSITE INSTAGRAM etc"
+    text url
+  }
+  showroom_store_hours {
+    int id PK
+    int store_id FK
+    int location_id FK "EXISTS nullable=brand"
+    text day
+    text open_close
+  }
+  showroom_store_sales {
+    int id PK
+    int store_id FK
+    text title
+    int price_cents
   }`,
       },
       {

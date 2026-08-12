@@ -487,7 +487,20 @@ export const CHANGELOG: ChangelogEntry[] = [
         kind: "added",
         text: "Full prod DB archive as a restore point (git-ignored, not committed): db-archive/full-dump-20260810.sql (57MB, whole DB via wrangler d1 export) + json/ (25 showroom-cluster tables). Row baselines: 244 stores, 248 locations, 12 contacts vs 72 pocs, 242 images, 479 photo mappings.",
       },
+      {
+        kind: "changed",
+        text: "SHIPPED (data): showroom category vocab cleaned on prod — 70 messy categories → 28 canonical (adopted Gemini's set + AI-optimized descriptions). Renamed survivors, remapped mappings (UPDATE OR IGNORE + dedup), soft-deactivated the 42 dupes (is_active=0, NOT hard-deleted — repo rule; backup in db-archive/category-backup-20260812/). Mappings 225→177 (48 dupes removed).",
+      },
+      {
+        kind: "migration",
+        text: "0177_true_deadpool: showroom_store_category.ui_group TEXT NOT NULL DEFAULT 'General' — flat parent grouping for the Edit-categories modal (no recursive parent_id FK). Applied to remote. The 28 categories bucketed into 7 groups (Surfaces & Finishes, Kitchen & Bath, Structural & Openings, Systems & Tech, Outdoor & Exterior, Specialty & Decor, General).",
+      },
+      {
+        kind: "changed",
+        text: "Edit-categories modal (CategoryChipsEditor.tsx): the flat 28-checkbox grid now renders grouped by ui_group with section headers in a fixed order, a two-column masonry per group, and a filled highlight on checked rows. Pre-check of applied categories + replace-all save (uncheck removes) were already correct; kept. AI classifier constraint (cap 1–3 + explicit primary) is the next slice.",
+      },
     ],
+    migrations: ["0177_true_deadpool"],
     status: "staged",
   },
   {

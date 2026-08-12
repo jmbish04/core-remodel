@@ -14,6 +14,13 @@ export const showroomStoreCategory = sqliteTable("showroom_store_category", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   description: text("description"),
+  /**
+   * Parent UI grouping for the "Edit categories" modal + directory filters — a
+   * flat TEXT bucket (e.g. "Surfaces & Finishes", "Kitchen & Bath") rather than a
+   * recursive parent_id FK, so grouping stays a cheap in-memory reduce with no
+   * self-join. Every active category belongs to exactly one group.
+   */
+  uiGroup: text("ui_group").notNull().default("General"),
   isActive: integer("is_active", { mode: "boolean" }).default(true),
 });
 

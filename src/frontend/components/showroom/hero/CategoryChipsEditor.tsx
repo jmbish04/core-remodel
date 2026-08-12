@@ -39,6 +39,44 @@ interface CategoryOption {
   id: number;
   name: string;
   description: string | null;
+  /** Parent UI bucket (showroom_store_category.ui_group). Falls back to "General". */
+  uiGroup?: string | null;
+}
+
+/**
+ * Fixed display order for the parent groups so the modal reads the same every
+ * time (not alphabetical — "General" belongs last, not first). Any group the API
+ * returns that is not listed here is appended after these, before "General".
+ */
+const GROUP_ORDER = [
+  "Surfaces & Finishes",
+  "Kitchen & Bath",
+  "Structural & Openings",
+  "Systems & Tech",
+  "Outdoor & Exterior",
+  "Specialty & Decor",
+  "General",
+];
+
+/** Group the flat category vocabulary by `uiGroup`, in GROUP_ORDER. */
+function groupByUiGroup(
+  options: CategoryOption[],
+): Array<{ group: string; items: CategoryOption[] }> {
+  const buckets = new Map<string, CategoryOption[]>();
+  for (const opt of options) {
+    const g = opt.uiGroup?.trim() || "General";
+    (buckets.get(g) ?? buckets.set(g, []).get(g)!).push(opt);
+  }
+  const rank = (g: string) => {
+    const i = GROUP_ORDER.indexOf(g);
+    return i === -1 ? GROUP_ORDER.length - 1.5 : i; // unknown groups before "General"
+  };
+  return [...buckets.entries()]
+    .map(([group, items]) => ({
+      group,
+      items: items.sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => rank(a.group) - rank(b.group));
 }
 
 export function CategoryChipsEditor({
@@ -60,6 +98,8 @@ export function CategoryChipsEditor({
     () => new Set(categories.map((c) => c.categoryId)),
     [categories],
   );
+
+  const grouped = useMemo(() => groupByUiGroup(options), [options]);
 
   // Load the vocabulary + seed the selection each time the dialog opens.
   useEffect(() => {
@@ -163,28 +203,47 @@ export function CategoryChipsEditor({
               <Loader2 className="size-5 animate-spin" />
             </div>
           ) : (
-            <div
-              className={`${TOUCH_DIALOG_BODY_CLASS} grid grid-cols-1 content-start gap-2 sm:grid-cols-2 lg:grid-cols-3`}
-            >
-              {options.map((opt) => (
-                // min-h-14 + size-6 checkbox: a category list is the single most
-                // mis-tapped control in the viewport from a car screen.
-                <label
-                  key={opt.id}
-                  className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-base ring-1 ring-border/40 transition-colors hover:bg-muted/60"
-                >
-                  <Checkbox
-                    className="size-6"
-                    checked={selected.has(opt.id)}
-                    onCheckedChange={() => toggle(opt.id)}
-                  />
-                  <span className="min-w-0 truncate" title={opt.description ?? undefined}>
-                    {opt.name}
-                  </span>
-                </label>
+            <div className={`${TOUCH_DIALOG_BODY_CLASS} flex flex-col gap-5`}>
+              {grouped.map(({ group, items }) => (
+                <section key={group} className="space-y-2">
+                  <h3 className="flex items-center gap-2 border-b border-border/40 pb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    {group}
+                    <span className="text-muted-foreground/50">{items.length}</span>
+                  </h3>
+                  {/* min-h-12 + size-6 checkbox: a category list is the single most
+                      mis-tapped control in the viewport from a car screen. Checked
+                      rows get a filled highlight so selection reads at a glance. */}
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {items.map((opt) => {
+                      const isOn = selected.has(opt.id);
+                      return (
+                        <label
+                          key={opt.id}
+                          className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-base ring-1 transition-colors ${
+                            isOn
+                              ? "bg-primary/10 ring-primary/50"
+                              : "ring-border/40 hover:bg-muted/60"
+                          }`}
+                        >
+                          <Checkbox
+                            className="size-6"
+                            checked={isOn}
+                            onCheckedChange={() => toggle(opt.id)}
+                          />
+                          <span
+                            className="min-w-0 truncate"
+                            title={opt.description ?? undefined}
+                          >
+                            {opt.name}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
               ))}
               {options.length === 0 ? (
-                <p className="col-span-full py-6 text-center text-sm text-muted-foreground">
+                <p className="py-6 text-center text-sm text-muted-foreground">
                   No categories defined.
                 </p>
               ) : null}

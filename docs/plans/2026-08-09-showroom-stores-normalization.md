@@ -406,21 +406,32 @@ flowchart TB
 ### Entity model after normalization
 ```mermaid
 erDiagram
-  showroom_stores ||--o{ showroom_store_locations : "1:N physical sites"
-  showroom_stores ||--o{ showroom_store_contacts : "brand anchor"
-  showroom_store_locations ||--o{ showroom_store_contacts : "per-site location_id"
-  showroom_store_locations ||--o{ showroom_images : "our + visit photos"
-  showroom_store_locations ||--o{ showroom_photos_mapping : "Google Places photos"
-  showroom_store_locations ||--o{ showroom_store_ratings : "external reviews"
-  showroom_store_locations ||--o{ store_notes : "location_id nullable=brand"
+  showroom_stores ||--o{ showroom_store_locations : "1:N sites"
+  showroom_stores ||--o{ showroom_store_contacts : "anchor"
+  showroom_store_locations ||--o{ showroom_store_contacts : "location_id"
+  showroom_stores ||--o{ showroom_store_category_mapping : "N:M"
+  showroom_store_category ||--o{ showroom_store_category_mapping : "N:M"
+  showroom_stores ||--o{ showroom_image_groups : "user stacks"
+  showroom_image_groups ||--o{ showroom_images : "group_id"
+  showroom_store_locations ||--o{ showroom_images : "location_id"
+  showroom_store_locations ||--o{ showroom_photos_mapping : "location_id"
+  showroom_store_locations ||--o{ showroom_store_ratings : "location_id"
+  showroom_store_locations ||--o{ store_notes : "location_id"
+  showroom_stores ||--o{ showroom_store_links : "brand"
+  showroom_store_locations ||--o{ showroom_store_hours : "location_id"
+  showroom_stores ||--o{ showroom_store_sales : "brand"
+  showroom_store_contacts ||--o{ showroom_store_contact_log : "who was contacted"
   showroom_stores {
     int id PK
-    text name "brand-level, stays"
-    text overview_note_markdown "brand · md source"
-    text overview_note_html "brand · render cache"
-    real latitude "REMOVED to location"
-    real longitude "REMOVED to location"
+    text name "brand"
+    int type_id FK "EXISTS to store_type"
+    bool is_active "EXISTS soft-delete"
+    text soft_delete_reason "ADD"
+    text overview_note_markdown "brand"
+    text overview_note_html "brand"
+    text rating_context_markdown "brand"
     text place_id "REMOVED to location"
+    real latitude "REMOVED to location"
     text phone_number "REMOVED to contact"
     text main_poc_fullname "REMOVED to contact"
   }
@@ -428,63 +439,111 @@ erDiagram
     int id PK
     int store_id FK
     text place_id "canonical uniq"
-    real latitude "canonical"
-    real longitude "canonical"
-    text unit "suite level"
-    text city "canonical"
-    text zip_code "canonical"
+    real latitude
+    real longitude
+    text unit
+    text city
+    text zip_code
+    text notes_markdown
+    text notes_html
   }
   showroom_store_contacts {
     int id PK
     int store_id FK
-    int location_id FK "ADDED"
-    bool is_primary "ADDED"
+    int location_id FK "ADD"
+    bool is_primary "ADD"
     text type "GENERAL_CONTACT etc"
     text first_name
     text last_name
     text office_phone_number
     text mobile_phone_number
-    text fax_phone_number
     text email_address
   }
-  showroom_store_ratings {
+  showroom_store_contact_log {
     int id PK
     int store_id FK
-    int location_id FK "ADDED per site"
-    text source "SYSTEM_USER GOOGLE YELP HOUZZ"
-    int rating "1-5"
-    text comment "external plain"
-    text rating_context_markdown "ADDED user note md"
-    text rating_context_html "ADDED user note html"
-    bool is_active "ADDED revision"
-    int replaced_by_id "ADDED revision"
-    text rating_created
-    int scraped_at
+    int store_contact_id FK
+    text outcome
   }
-  store_notes {
+  showroom_store_category {
+    int id PK
+    text name "cleaned canonical"
+    text description
+    bool is_active "merged-away = false"
+  }
+  showroom_store_category_mapping {
     int id PK
     int store_id FK
-    int location_id FK "ADDED nullable=brand"
-    text content_markdown "md source"
-    text content_html "render cache"
-    bool is_active
+    int category_id FK
+    bool is_primary "ADD one per store"
+    bool is_bread_butter "specialist 1-2"
+    int ai_rationale_confidence_score
   }
   showroom_images {
     int id PK
     int store_id FK
-    int location_id FK "ADDED"
+    int location_id FK "ADD"
+    int group_id FK "to image_groups"
     text image_kind "visit or discovered"
     text delivery_url
-    text note_markdown "polaroid note md"
-    text note_html "polaroid note html"
+    text note_markdown "polaroid"
+    text note_html
+  }
+  showroom_image_groups {
+    int id PK
+    int store_id FK
+    text name
+    text description_markdown
+    text description_html
+    int price_cents
+    int cover_image_id "to images"
   }
   showroom_photos_mapping {
     int id PK
-    int showroom_id FK
-    int location_id FK "ADDED exact place"
+    int store_id FK "showroom_id"
+    int location_id FK "ADD exact place"
     text cf_images_photo_url
     text author_attributes "Google attribution"
     int sort_order "Places rank"
+  }
+  showroom_store_ratings {
+    int id PK
+    int store_id FK
+    int location_id FK "ADD"
+    text source "SYSTEM_USER GOOGLE YELP HOUZZ"
+    int rating "1-5"
+    text comment "external plain"
+    text rating_context_markdown "ADD user note"
+    text rating_context_html "ADD"
+    bool is_active "ADD revision"
+    int replaced_by_id "ADD revision"
+  }
+  store_notes {
+    int id PK
+    int store_id FK
+    int location_id FK "ADD nullable=brand"
+    text content_markdown
+    text content_html
+    bool is_active
+  }
+  showroom_store_links {
+    int id PK
+    int store_id FK
+    text type "WEBSITE INSTAGRAM etc"
+    text url
+  }
+  showroom_store_hours {
+    int id PK
+    int store_id FK
+    int location_id FK "EXISTS nullable=brand"
+    text day
+    text open_close
+  }
+  showroom_store_sales {
+    int id PK
+    int store_id FK
+    text title
+    int price_cents
   }
 ```
 
@@ -760,3 +819,240 @@ brand `overview_note` is not a note-timeline `content` is not a rating's `rating
 (the same cascade-wipe hazard as the Phase-5 drop) for zero behavioral gain, since the pairs already
 conform. If you want literal prefix-uniformity across tables, that is a separate, deliberate rebuild
 migration — flag it and it gets its own phase.
+
+---
+
+## 16. `showroom_stores` field additions + confirmations (round 2 review)
+
+- **`is_active`** — ALREADY EXISTS ([stores.ts:145](../../src/backend/db/schema/showroom/stores.ts)). No work.
+- **`type_id` FK → `showroom_store_type`** — ALREADY EXISTS ([stores.ts:41](../../src/backend/db/schema/showroom/stores.ts)). No work.
+- **`soft_delete_reason` TEXT — NEW** (nullable). Additive column; written when `is_active` is set false. Surface it in the admin viewport + the deactivate action. API: `PATCH /:id` accepts it; MCP `delete_showroom`/`update_showroom` accept it.
+
+**Child-table confirmations** (all store-scoped, all remapped on merge by `store-child-remap.ts`):
+`showroom_store_links`, `showroom_store_hours` (already has `location_id`), `showroom_store_sales`,
+`showroom_store_contact_log`, `store_notes`, `showroom_image_groups`. `showroom_photos_mapping` = Google
+Places photos (per place); `showroom_images` = user uploads (device / Google Photos) + web-scrape logo/
+storefront (`image_kind`); `showroom_image_groups` = user-made photo stacks on the viewport.
+
+---
+
+## 17. Category cleanup + primary-category directory grouping
+
+**Problem (verified on live prod — 70 categories):**
+1. **~21 exact 0-store duplicates** — intake minted a second full copy of the vocab (ids **50–70** duplicate
+   34–49: two "Flooring", two "Windows & Doors", two "Countertops", etc.). The AI classifier "add a category
+   if missing" behavior did this.
+2. **Suffix noise** — "Tile & Surfaces **Showrooms**", "Windows & Doors **Dealerships**", "Slab & Natural Stone
+   **Yards**", "Lighting **Showrooms**", "Appliance **Galleries**".
+3. **Near-dupes** — Closets: #5/#35/#36 (+dupes); Kitchen: #4/#39/#40/#41 (+dupes); Tile: #2/#34; Plumbing/Bath:
+   #3/#31/#32/#33/#13; Windows/Doors: #9/#30/#37; Flooring: #29/#7; Lighting: #8/#43.
+4. **Directory "primary" is arbitrary** — the viewport groups a store under **its first-registered category
+   mapping** ([showroom-stores.ts:1189](../../src/backend/api/routes/showroom-stores.ts): *"the first category
+   is the store's primary type"*), so a store with 5 categories appears in whichever was inserted first, and
+   can surface in multiple groups. There is **no `is_primary` flag**.
+
+### 17.A ADOPTED — Gemini 28-category canonical (survivor ids kept, dupes merged in)
+
+**Backup taken** before any change: `db-archive/category-backup-20260812/{showroom_store_category,
+showroom_store_category_mapping}.json` (70 + 225 rows, git-ignored). Restore point secured.
+
+Survivor = the existing low id, **renamed + given an AI-optimized description**; every dupe/near-dupe
+remaps into it. 28 canonical categories kept (granular trades stay distinct — Glass, Concrete, Fireplaces,
+etc. are their own category, not swept into a bucket).
+
+| id | Canonical name | Merge these ids in |
+|---|---|---|
+| 1 | Stone & Countertops | 46, 67 |
+| 2 | Tile | 34, 55 |
+| 3 | Bath & Plumbing | 31, 32, 33, 52, 53, 54 |
+| 4 | Cabinetry | 39, 40, 41, 60, 61, 62 |
+| 5 | Closets & Storage | 35, 36, 56, 57 |
+| 6 | Appliances | 45, 66 |
+| 7 | Flooring | 29, 50 |
+| 8 | Lighting | 43, 64 |
+| 9 | Windows & Doors | 30, 37, 51, 58 |
+| 10 | Hardware | — |
+| 11 | Paint & Coatings | 42, 63 |
+| 12 | Architectural Concrete | 38, 59 |
+| 13 | Glass | 28 |
+| 14 | Home Automation | — |
+| 15 | Outdoor & Landscaping | 44, 48, 65, 69 |
+| 16 | Roofing & Exteriors | — |
+| 17 | Electrical & HVAC | — |
+| 18 | Home Decor & Furniture | — |
+| 19 | General Home Improvement | — |
+| 20 | Building Materials & Millwork | 47, 68 |
+| 21 | Pools & Spas | — |
+| 22 | Fireplaces | — |
+| 23 | Elevators & Lifts | — |
+| 24 | Acoustics & Soundproofing | — |
+| 25 | Metalwork & Fabrication | — |
+| 26 | Stairs & Railings | — |
+| 27 | Window Treatments | — |
+| 49 | Water Filtration | 70 |
+
+Prod ids 1–27 + 49 already line up with these trades by id, so this is: **rename survivors → remap dupes →
+dedup → deactivate the 42 merged-away ids.**
+
+**Mechanics — D1-safe, and repo-rule-correct (NOT Gemini's raw `DELETE`):**
+1. **Rename + describe survivors** — `UPDATE showroom_store_category SET name=…, description=…` for the 28
+   ids (Gemini's names/descriptions verbatim). Pure updates, no risk.
+2. **Remap mappings with dedup** — the `(store_id, category_id)` unique index makes a plain UPDATE throw
+   when a store already has the survivor category. Use **`UPDATE OR IGNORE showroom_store_category_mapping
+   SET category_id=<survivor> WHERE category_id IN (<dupes>)`** — collisions are left on the old id — then
+   **`DELETE FROM showroom_store_category_mapping WHERE category_id IN (<all 42 merged-away ids>)`** to drop
+   the leftover dupes. (Mapping rows are per-store data, not a definition, so deleting a redundant mapping is
+   fine — deleting the *category definition* is not.)
+3. **Soft-deactivate, do NOT hard-delete the definitions** — `UPDATE showroom_store_category SET is_active=0
+   WHERE id IN (<42 merged-away ids>)`. Repo rule: never hard-delete a definition (soft-delete via `is_active`).
+   Gemini's `DELETE FROM showroom_store_categories …` **violates that** — we deactivate instead; the backup +
+   the kept rows mean it's fully reversible, and a hard purge can be a later, separate, verified step if ever wanted.
+4. Apply via `pnpm run migrate:remote` (a data migration file) — never `wrangler d1 execute --file`. Category
+   id list is small (~42), so no chunking needed; no `db.transaction` (D1 forbids it).
+
+### 17.A-legacy (superseded — my earlier 17-bucket flatten)
+Kept for the record; the Gemini 28-category set above is what we build.
+
+<details><summary>old 17-bucket map</summary>
+Every one of the 70 live categories is assigned. `[N]` = stores currently mapped. `0-store` ids are the
+duplicate/never-used rows intake minted — remap is a no-op, just deactivate them.
+
+| Canonical | [stores] | Folds in (old category ids) |
+|---|---|---|
+| Home Decor, Furniture & Textiles | 58 | 18 |
+| Bath, Plumbing & Shower | 30 | 3, 32, 31, 33, 13 (Glass & Shower); +52, 53, 54 (0-store) |
+| Countertops & Stone ⚠️ | 25 | 46, 1 (Slab & Natural Stone); +67 |
+| Tile & Surfaces | 22 | 34, 2 (−"Showrooms"); +55 |
+| General Home Improvement | 12 | 19 |
+| Lumber, Millwork & Building Materials ⚠️ | 10 | 20, 26 (Staircases), 47 (Trim); +68 |
+| Flooring | 10 | 29, 7 (Hardwood); +50 |
+| Landscape & Outdoor | 9 | 15, 48, 44 (Decking); +65, 69 |
+| Windows & Doors | 8 | 9 (−"Dealerships"), 30; +37 (Frameless), 51, 58 |
+| Paint & Coatings | 8 | 11, 42 (Microcement); +63 |
+| Kitchen & Cabinetry | 8 | 4, 39; +40, 41 (InvisaCook/PITT), 60, 61, 62 (0-store) |
+| Hardware & Architectural Fittings | 5 | 10 |
+| Lighting | 5 | 8 (−"Showrooms"), 43 (Architectural); +64 |
+| Closets & Storage | 4 | 5; +35, 36, 56, 57 (0-store) |
+| Electrical & Mechanical Supply | 4 | 17 |
+| Appliances ⚠️ (standalone, not folded into Kitchen) | 4 | 6 (−"Galleries"), 45; +66 |
+| Specialty & Structural ⚠️ (bucket) | 3 | 16 Roofing, 25 Metalwork, 38 Precast; +12, 14 (Home A/V), 21 (Pool/Spa), 22 (Fireplaces), 23 (Elevators), 24 (Acoustic), 27 (Window Treatments), 28 (Smart Film), 49/70 (Water Filtration), 59 (0-store) |
+
+⚠️ **Defaults I chose — override any:** Appliances standalone (not in Kitchen); Countertops+Slab merged;
+Glass&Shower→Bath; Staircases+Trim→Millwork; the 0-store long tail (Pool, Fireplace, Elevators, Acoustic,
+Window Treatments, Smart Film, Water Filtration, Home A/V) swept into Specialty — split any out if you stock it.
+
+**Mechanics (additive → remap → deactivate, D1-safe):**
+- Pick/create the canonical rows; write a `merge_map` (old category_id → canonical id).
+- Remap `showroom_store_category_mapping` to canonical ids in `db.batch` chunks of 20; the
+  `(store_id, category_id)` unique index dedups collisions (drop the loser mapping).
+- **Soft-deactivate** the merged-away + 0-store category rows (`is_active = false`) — never hard-delete a
+  definition (repo rule).
+</details>
+
+### 17.B Add `is_primary` to the mapping
+- **New column** `showroom_store_category_mapping.is_primary` (boolean, default false) — distinct from
+  `is_bread_butter` (which allows 1–2 "specialist" flags). `is_primary` = **exactly one per store**.
+- **Partial-unique index:** `one is_primary per store` (`ON (store_id) WHERE is_primary = 1`).
+- **Directory** (`showroom-stores.ts:1189`): group by the `is_primary` category, NOT registration order — so a
+  store shows in **exactly one** group. Multi-category still available on the detail viewport + as filters.
+- Backfill: set `is_primary` from the highest `ai_rationale_confidence_score` (tie → `is_bread_butter`, then
+  lowest category id) for each store.
+
+### 17.C The intake category classifier (this is an intake-workflow change)
+**The classifier already exists and is 70% right — this is a targeted edit, not a rewrite.**
+- **Shared classifier:** `src/backend/utils/showroom-categories.ts` — `inferShowroomCategoryIds()` (the AI
+  call, `ai.models.generateContent`, ~:107-165) + `inferAndMapCategories()` (~:182, persists the mapping,
+  FILL-BLANKS-ONLY). It ALREADY returns numeric `id`s (not names), hands the model `id + name + description`,
+  uses a JSON schema, and validates ids against the live list.
+- **Intake caller:** `src/backend/services/showroom/onboarding.ts` → `inferAndMapCategories(...)` — this runs
+  during **showroom intake/onboarding** (also `ShowroomResearchAgent/methods/backfill.ts` for backfill). So
+  Gemini's prompt lands here, in the intake path.
+
+**What's wrong today (the cause of the mess):**
+- The prompt says *"Choose EVERY category below that this showroom clearly sells"* → it **over-categorizes**,
+  so a store lands in 4–5 groups.
+- "Primary" is implicit = the **first id in the returned array** (relevance-ordered, inserted first). There is
+  **no `is_primary` column**, so the directory reads insertion order — arbitrary and un-fixable per-store.
+
+**The three deltas (adopting Gemini's prompt):**
+1. **Cap at 1–3, "do not over-categorize"** — replace "choose EVERY category" with Gemini's *"select 1–3 most
+   applicable; think trade-show brochure."* Feed the cleaned **28-category** vocab as `id: name — description`.
+2. **Return an explicit `primaryCategoryId`** (not array-position) → schema
+   `{ categories:[{id,name}], primaryCategoryId, reasoning }` → set the **`is_primary` column** (§17.B) on that
+   mapping row. Directory then groups by the flag, not insertion order.
+3. **Keep the id-validation** against the live active set (already there) — a hallucinated id never reaches the
+   FK. With the closed vocab + no "add if missing", the 42-dupe re-proliferation cannot recur.
+
+**System prompt (Gemini's, adopted):**
+> You are an expert architectural, construction, and interior design sourcing assistant. Analyze a
+> showroom's data (Google Places details, website summary, reviews) and classify it into high-level trade
+> categories. **Select 1–3** of the most applicable from the provided list. Do not over-categorize. **You
+> MUST strictly use the provided category ids and exact names. Do NOT invent new categories.** Think like a
+> trade-show brochure: what primary categories would this business be listed under?
+
+JSON-schema output (per delta 2): `{ categories: [{ id, name }], primaryCategoryId: number, reasoning: string }`
+— then set `is_primary` on the `primaryCategoryId` mapping row.
+
+### 17.D Impacted surfaces (#8)
+- **Schema/migration:** `soft_delete_reason`; `category_mapping.is_primary` + partial-unique; category merge_map + remap + deactivate.
+- **API:** `GET /categories` (return active only), `GET /api/showroom-stores` (group by is_primary), category create/map endpoints (reject inactive/duplicate names, set is_primary), `PATCH /:id` (soft_delete_reason).
+- **MCP:** the category-assignment tool(s) + `create_showroom`/scrape classifier — constrained-vocab + primary.
+- **Intake classifier (primary change):** `utils/showroom-categories.ts` (`inferShowroomCategoryIds` + `inferAndMapCategories`) — cap 1–3, explicit `primaryCategoryId` → set `is_primary`, 28-vocab descriptions. Called by `services/showroom/onboarding.ts` (intake) + `ShowroomResearchAgent/methods/backfill.ts`. Also verify `showroom-scrape-workflow.ts:949-970` (website-content classify) rides the same helper.
+- **Frontend:** directory (group by primary, one card per store), the category filter chips, the store viewport category editor (mark primary), `/admin/config` category management (merge/deactivate UI).
+
+### 17.E Directory: one canonical store, shown at all its locations
+Ref: the shipped locations-UI design (`docs/superpowers/specs/2026-08-09-showroom-locations-ui-design.md`,
+PRs #375/#376) — it added the viewport `LocationsSpot` + `LocationsModal` + directory card **city chips**,
+but **explicitly deferred the directory MAP + a `locations[]` coords payload** ("0045 Phase-B cutover
+deferred"). Your ask is exactly that deferred piece. The model: **one canonical `showroom_stores` record
+owns the identity (name, brand, categories, rating); each `showroom_store_locations` row is a physical site
+pointing back at it.** The directory then shows the store at *all* its sites, not just the primary.
+
+- **List DTO (extend, don't reinvent):** `GET /api/showroom-stores` already returns `locationCount` +
+  `locationCities` (via `loadStoreLocationCounts`/`loadStoreLocationCities`). **Add `locations[]{id, city,
+  latitude, longitude, isPrimary, placeId}`** — sourced from the SAME `loadStoreLocations` service the
+  `/:id/locations` endpoint + `LocationsModal` already use (`services/showroom/locations.ts`). No new shape.
+- **Map view** (`ShowroomsDirectoryApp.tsx` MapView): today plots one pin per store from the flat
+  `store.latitude/longitude` (@888/@996/@1112). NEW: `stores.flatMap(s => s.locations.map(loc => ({store:s,
+  loc})))` → **one pin per location**; a Bay-wide brand (Porcelanosa, Studio Belmont ×5) shows all its sites.
+  Each pin's popup carries the **canonical store name** + that site's city, and deep-links to the per-store
+  viewport (`/admin/shopping/store/:id`) — the viewport is per-store, not per-location.
+- **List/grouped view:** stays **one card per canonical store** (no per-location card duplication) —
+  `ShowroomMergedCard` already shows the `{n} locations` + city chips. The store appears in its **primary
+  category group** only (§17.B), so it stops scattering across category groups.
+- **Reuse, don't rebuild:** the location coords, `isPrimary`, and city list all come from the existing
+  `loadStoreLocations` DTO; `LocationsModal` already consumes it. This is a list-endpoint enrichment + a
+  `flatMap` on the map — not a new subsystem.
+- **Sequencing:** this rides Phase 3d (the list/detail reader cutover to JOINs) — the `locations[]` enrichment
+  lands there. Until then the map stays single-pin (no regression).
+
+### 17.F `ui_group` parent grouping + the "Edit categories" modal redesign
+
+**DONE (shipped to prod this session):**
+- **Schema:** `showroom_store_category.ui_group TEXT NOT NULL DEFAULT 'General'` — a flat bucket, NOT a
+  recursive `parent_id` FK (grouping is a cheap in-memory reduce, no self-join). Migration `0177_true_deadpool.sql`,
+  applied via `migrate:remote`.
+- **Data:** the 28 active categories bucketed into 7 groups (`db-archive/…/bucket_ui_groups.sql`):
+  Surfaces & Finishes · Kitchen & Bath · Structural & Openings · Systems & Tech · Outdoor & Exterior ·
+  Specialty & Decor · General.
+
+**TO BUILD — the modal fix** (`components/showroom/hero/CategoryChipsEditor.tsx`, 216 lines):
+- **Already correct, keep it:** applied categories ARE pre-checked (`selected` init from the store's current
+  mappings, `:60`); Save is a **replace-all** `PUT /:id/categories` (`:98-102`), so unchecking removes the
+  mapping. The two behaviors you asked for already work — don't rebuild them.
+- **The actual problem:** it renders a **flat** `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` (`:167`) of 28
+  checkboxes — no grouping — which is the cognitive-overload wall in the screenshot. And the checkbox reads weak.
+- **Fix (adapt Gemini's grouped layout to OUR stack — Base UI, not Radix/Next):**
+  1. **API:** `GET /api/showroom-stores/meta/categories` returns `uiGroup` per row and **active only**
+     (`is_active=1`). One field add to the select.
+  2. **Group in the island:** reduce `options` by `uiGroup` → sections, each with a small uppercase header
+     (`Surfaces & Finishes`, …), a fixed group order (not alphabetical — General last), a two/three-column
+     masonry inside each group. Keep the existing `useState<Set<number>>` selection + PUT-replace save.
+  3. **Reuse our primitives:** `@/components/ui/checkbox` + `Dialog` are already **Base UI** here — do NOT
+     import Radix/Next shadcn from the Gemini snippet (`@/components/ui/checkbox` in this repo ≠ Gemini's).
+     Improve the checkbox contrast/size (the current one is low-contrast on the dark card) and make the whole
+     row a click target (label + box), not just the tiny box.
+  4. **Primary:** once `category_mapping.is_primary` (§17.B) ships, add a "primary" radio/star per checked row
+     (exactly one) so the user sets the directory group here too — the AI's pick is the default, user overrides.
+- **Config parity:** the `/admin/config` category vocab page gains a `uiGroup` selector when editing a category
+  (so new/edited categories get a group); and the merge/deactivate UI (§17.D).
