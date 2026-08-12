@@ -1300,9 +1300,10 @@ showroomStoresRouter.get("/", async (c) => {
 
   // Multi-location summary for the directory card (0045/0047 locations). Always computed —
   // one grouped read each, cheap — so every card can show the count + sorted city chips.
-  const [locationCounts, locationCities] = await Promise.all([
+  const [locationCounts, locationCities, locationsById] = await Promise.all([
     loadStoreLocationCounts(db, storeIds),
     loadStoreLocationCities(db, storeIds),
+    loadStoreLocations(db, storeIds),
   ]);
 
   return c.json({
@@ -1345,6 +1346,17 @@ showroomStoresRouter.get("/", async (c) => {
         // Multi-location summary — count + unique cities sorted asc (for the card chips).
         locationCount: locationCounts.get(r.store.id) ?? 0,
         locationCities: locationCities.get(r.store.id) ?? [],
+        // Compact per-location array for the directory MAP (one pin per site) +
+        // card group-by-primary. isPrimary is DERIVED (place_id-matches-parent-else-
+        // lowest-id). The full DTO (address parts, notes) stays on /:id/locations —
+        // do NOT fatten this list payload. Contract: docs/plans/showroom-location-contract.md.
+        locations: (locationsById.get(r.store.id) ?? []).map((l) => ({
+          id: l.id,
+          city: l.city,
+          latitude: l.latitude,
+          longitude: l.longitude,
+          isPrimary: l.isPrimary,
+        })),
       };
 
       if (includes.has("categories")) {
