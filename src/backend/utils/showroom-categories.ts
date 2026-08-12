@@ -104,11 +104,11 @@ async function classifyCategoriesWithAI(
       .filter(Boolean)
       .join("\n");
 
-    const prompt = `You are categorizing a home-renovation showroom / vendor for a homeowner's sourcing directory.
+    const prompt = `You are an expert architectural, construction, and interior design sourcing assistant categorizing a home-renovation showroom / vendor for a homeowner's sourcing directory.
 
-Choose EVERY category below that this showroom clearly sells or specializes in. Order them by relevance, most central to the business FIRST — the first id is treated as the store's primary category. Only choose a category when the context supports it; do not guess wildly. If the specialty is genuinely unclear, return your single best guess rather than nothing.
+Think like a trade-show brochure: what primary categories would this business be listed under? SELECT THE 1 TO 3 MOST APPLICABLE categories — do NOT over-categorize. Order them by relevance, most central to the business FIRST: the FIRST id is the store's PRIMARY category, the single group it appears under on the directory, so pick the grouping a homeowner would most expect to find this store in. Only choose a category the context clearly supports; if the specialty is genuinely unclear, return your single best guess rather than nothing. You MUST use only the ids below — do NOT invent categories.
 
-Return the numeric id of each chosen category. Ids must come from this list:
+Return the numeric id of each chosen category (1 to 3), most relevant first. Ids must come from this list:
 ${validCategories
       .map((c) => `${c.id}: ${c.name}${c.description ? ` — ${c.description}` : ""}`)
       .join("\n")}
@@ -154,7 +154,10 @@ ${context}`;
     const valid = new Set(validCategories.map((c) => c.id));
     return parsed.categoryIds
       .map((n) => (typeof n === "number" ? n : Number.parseInt(String(n), 10)))
-      .filter((n) => Number.isInteger(n) && valid.has(n));
+      .filter((n) => Number.isInteger(n) && valid.has(n))
+      // Cap at 3 (belt-and-suspenders vs the prompt) so a runaway model can't
+      // re-scatter a store across categories. First stays the primary.
+      .slice(0, 3);
   } catch (err) {
     console.error(`[categories] AI classification failed for "${ctx.name}":`, err);
     return [];
@@ -272,13 +275,18 @@ export async function inferAndMapCategories(
     if (categoryIds.length === 0) return 0;
 
     const usedAi = aiIds.length > 0;
-    for (const categoryId of categoryIds) {
+    for (const [i, categoryId] of categoryIds.entries()) {
       await db.insert(showroomStoreCategoryMapping).values({
         storeId: showroomId,
         categoryId,
         aiRationale: rationale,
         // Higher confidence when the LLM read the store context; mid otherwise.
         aiRationaleConfidenceScore: usedAi ? 7 : 5,
+        // First id (most relevant) is the store's ONE primary category — decides
+        // the single directory group it appears under. The partial-unique index
+        // (sscm_one_primary_per_store) enforces at-most-one; fill-blanks only runs
+        // when the store has zero mappings, so there's no prior primary to collide.
+        isPrimary: i === 0,
       });
     }
     return categoryIds.length;
