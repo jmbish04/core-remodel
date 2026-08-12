@@ -1716,6 +1716,37 @@ showroomStoresRouter.get("/:id/locations", async (c) => {
     if (g.locationId != null && g.phone) phoneByLoc.set(g.locationId, g.phone);
   }
 
+  // Per-location external-rating summary (Phase L, #9). Aggregate showroom_store_ratings
+  // by location_id — a store carries a handful of scraped reviews, so summing in JS is
+  // cheaper than a GROUP BY round-trip. `storeRatingSummary` is the brand-wide roll-up the
+  // frontend shows as the "all locations" fallback when a site has none of its own.
+  const ratingRows = await db
+    .select({ locationId: showroomStoreRatings.locationId, rating: showroomStoreRatings.rating })
+    .from(showroomStoreRatings)
+    .where(eq(showroomStoreRatings.storeId, storeId))
+    .all();
+  const ratingAgg = new Map<number, { count: number; sum: number }>();
+  let storeCount = 0;
+  let storeSum = 0;
+  for (const r of ratingRows) {
+    if (r.rating == null) continue;
+    storeCount++;
+    storeSum += r.rating;
+    if (r.locationId == null) continue;
+    const a = ratingAgg.get(r.locationId) ?? { count: 0, sum: 0 };
+    a.count++;
+    a.sum += r.rating;
+    ratingAgg.set(r.locationId, a);
+  }
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const summaryFor = (locId: number) => {
+    const a = ratingAgg.get(locId);
+    return a && a.count ? { count: a.count, avg: round1(a.sum / a.count) } : null;
+  };
+  const storeRatingSummary = storeCount
+    ? { count: storeCount, avg: round1(storeSum / storeCount) }
+    : null;
+
   const enrichedLocations = locations.map((l) => {
     const rows = hoursByLoc.get(l.id) ?? brandHours;
     return {
@@ -1723,6 +1754,7 @@ showroomStoresRouter.get("/:id/locations", async (c) => {
       hours: rows,
       hoursJson: rows.length ? rowsToHoursJson(rows) : null,
       phone: phoneByLoc.get(l.id) ?? null,
+      ratingSummary: summaryFor(l.id),
     };
   });
 
@@ -1736,6 +1768,7 @@ showroomStoresRouter.get("/:id/locations", async (c) => {
     locations: enrichedLocations,
     storePhone: store.phoneNumber,
     storeWebsite: websiteUrl,
+    storeRatingSummary,
     pocs: pocs.map((p) => ({
       id: p.id,
       fullName: p.fullName,
