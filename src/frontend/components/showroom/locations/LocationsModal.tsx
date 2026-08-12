@@ -47,6 +47,11 @@ export interface StoreLocation {
   googleMapsLink: string | null;
   hubName: string | null;
   isPrimary: boolean;
+  // Per-location hours + phone (backend ask #8 / PR #400). Additive + nullable:
+  // absent until that enrichment ships, so consumers must fall back to
+  // store-level values. Typed loosely to avoid a hard dep on the hours shape.
+  hoursJson?: unknown | null;
+  phone?: string | null;
 }
 
 interface LocationPoc {

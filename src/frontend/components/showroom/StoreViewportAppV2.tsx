@@ -1246,6 +1246,9 @@ export function StoreViewportAppV2({
   // Prefer the polled status; fall back to the store row's value on first paint.
   const effectiveScrapeStatus: ScrapeStatus = scrapeStatus ?? store.scrapeStatus ?? "idle";
 
+  // Call target: the selected site's phone (backend #8), else the store line.
+  const callPhone = activeLoc?.phone ?? store.phoneNumber;
+
   return (
     <main className="w-full px-4 py-10 md:px-8">
       <a
@@ -1397,13 +1400,13 @@ export function StoreViewportAppV2({
                   className="h-12 min-w-40 flex-1 gap-2"
                 />
               ) : null}
-              {store.phoneNumber ? (
+              {callPhone ? (
                 <Button
                   variant="outline"
                   className="h-12 min-w-40 flex-1 gap-2"
                   render={
                     <a
-                      href={`tel:${store.phoneNumber.replace(/[^\d+]/g, "")}`}
+                      href={`tel:${callPhone.replace(/[^\d+]/g, "")}`}
                       aria-label="Call showroom"
                     />
                   }
@@ -1418,8 +1421,10 @@ export function StoreViewportAppV2({
               the Call / Copy address / Navigate actions and the hours + address
               edit affordances (all now live inside that modal). */}
           <div className="shrink-0 space-y-2 sm:w-60">
+            {/* Per-location hours when the site carries them (backend #8), else
+                the store-level hours. Flips automatically when #8 ships. */}
             <HoursMiniCard
-              hoursJson={store.hoursJson}
+              hoursJson={(activeLoc?.hoursJson as HoursJson | null | undefined) ?? store.hoursJson}
               onClick={() => setHoursModalOpen(true)}
             />
           </div>
