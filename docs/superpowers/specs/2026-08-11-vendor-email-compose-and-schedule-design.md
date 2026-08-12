@@ -1,157 +1,90 @@
-# Vendor email — compose, attach-as-link, drafts, rich text, scheduled send
+# Vendor email — core-remodel context layer (Gmail mechanics live on the Workspace worker)
 
 - **Date:** 2026-08-11
 - **Status:** design, awaiting approval
-- **Slug:** `vendor-email-compose-schedule`
-- **Builds on:** `docs/superpowers/specs/2026-08-08-drive-ingestion-and-vendor-email-design.md` (PR 1, shipped). This is that spec's "PR 2", refined by decisions taken 2026-08-11.
-- **Ships as:** two PRs — **2a** core email (compose / send / draft / link / rich text), then **2b** scheduled send.
+- **Slug:** `vendor-email-context-layer`
+- **Builds on:** `docs/superpowers/specs/2026-08-08-drive-ingestion-and-vendor-email-design.md` (PR 1, shipped). This is that spec's "PR 2", re-architected by decisions taken 2026-08-11.
 
 ---
 
-## 1. What this is
+## 1. What changed, and why this is now small
 
-Two things Justin does constantly, still unserved after PR 1:
+The original "PR 2" sketch had core-remodel building the whole Gmail send path — MIME, attachments, drafts, scheduled-send queue, rich-text HTML. **That is no longer the plan.** Decisions taken 2026-08-11:
 
-- **Email a vendor project material** — from a chat ("I onboarded this plumber, send him the floor plan") or by hand — with the platform's own context, boilerplate, and Drive links, instead of the generic claude.ai Gmail connector that knows none of it. **This repo's MCP registry still has zero email tools.**
-- **Stage or schedule that email** — save it as a Gmail draft, or approve it late at night and have it go out at 9am tomorrow / Monday morning.
+1. **The Gmail mechanics move to the separate `google-workspace-mcp` worker.** That worker already has its own per-user OAuth with **Drive write** (it no longer relies on domain-wide delegation), so it — not core-remodel's Gmail service account — is the right home for: rich-text HTML bodies, attachments (Drive-file blobs + raw blobs, with anyone-with-link fallback past Gmail's 25 MiB cap), and scheduled send (a worker-side queue, because the Gmail API has no native scheduled send). Three prompts were written to build those capabilities there; they are out of scope for THIS repo.
+2. **core-remodel therefore keeps only the project CONTEXT** the Workspace worker cannot know: the reusable boilerplate/instructions, resolving a vendor reference to an email address, and the Drive-file catalogue to choose from. The agent (in chat) orchestrates: pull context from core-remodel's MCP, then call the Workspace worker's `gmail_send` / `schedule_email` with the assembled message.
+3. **No Drive-write scope in core-remodel.** The write-scope gate the earlier draft of this spec carried is deleted — sharing changes happen on the Workspace worker.
 
-### 1.1 Decisions taken (2026-08-11), with their consequences
+So this PR is a small, self-contained context layer with no dependency on the Workspace worker's timeline: it produces data and payloads; it sends nothing.
 
-These reshape the "PR 2" sketch in the PR-1 spec; where they differ, THIS document governs.
+## 2. Scope
 
-1. **Drive files are LINKED, never attached.** No binary attachments from Drive. This removes the attach-vs-link-by-size logic, the `multipart/mixed` builder, the 18 MB Gmail cap problem, and the scheduled-send "rebuild the MIME from Drive at fire time" complexity all at once — a link is a few hundred bytes.
-2. **Access is guaranteed by setting each linked file to `ANYONE_WITH_LINK`.** The recipient opens it with no sign-in. This is a **write** to Drive.
-3. **Guaranteed access therefore needs the full `https://www.googleapis.com/auth/drive` scope** — `drive.readonly` (PR 1) cannot change permissions, and `drive.file` only covers app-created files, not existing ones. This is a **new domain-wide-delegation grant** and, per the PR-1 lesson, an undelegated scope makes Google reject the ENTIRE token exchange and breaks all Gmail — so it is **preview-tested before production**, exactly like `drive.readonly` was.
-4. **`ANYONE_WITH_LINK` is public to anyone with the URL** — accepted trade for guaranteed no-sign-in access. (A per-recipient share would be more private but forces a Google sign-in; rejected.)
-5. **Gmail's API has no scheduled send.** `messages.send` / `drafts.send` are immediate; "Schedule send" is a Gmail UI-only feature. Scheduled send is therefore built as a D1 queue + a minute-tick dispatcher (modeled on the existing `workflow-dispatcher`), NOT handed to Gmail.
-6. **Rich text is HTML with inline styles only.** Gmail strips `<head>`, clips `<style>`, ignores classes and external CSS (per Gmail's behavior and the Mailchimp CSS-in-email guide). The email editor emits inline-`style`-attribute HTML with web-safe font fallbacks. Full mark set: bold, italic, underline, font-family, font-color.
+**In (PR 2a — core-remodel context layer):**
 
----
+- **Email instructions** — a reusable, editable boilerplate/guidance document the composing agent reads.
+- **Recipient resolution** — turn a showroom store / contact reference into an email address from data already in D1.
+- **A compose-context tool** — assemble the send-ready payload (recipients + subject + body guidance + chosen Drive files with their share state and a suggested attach-vs-link disposition) for the agent to hand to the Workspace worker. Sends nothing.
 
-## 2. PR 2a — core email
+**Out (named, not dropped):**
 
-### 2.1 The Drive write scope (gate — do this first)
+- All Gmail send / draft / attachment / scheduled-send mechanics → the `google-workspace-mcp` worker (the three prompts).
+- Rich-text HTML authoring + a frontend compose-and-send surface → deferred until the Workspace worker exposes send/HTML/attachment tools, since a "send" button here would have nothing to call. The instructions editor (below) is the only frontend in this PR.
+- Multi-vendor bid blast; mail-merge; multiple named instruction templates (v1 is one instructions doc).
 
-Task 1 of implementation, mirroring PR 1's Task 1:
+## 3. Components
 
-- Add `https://www.googleapis.com/auth/drive` to `GOOGLE_SCOPES` in `services/gmail/auth.ts`.
-- Deploy a **preview** worker, and via a probe route confirm BOTH: a Drive `permissions.create` succeeds on a throwaway test file, AND an existing Gmail read still returns 200 on that same preview.
-- If the token mint fails (`unauthorized_client`), the scope is not delegated: revert, report BLOCKED, and wait for the Workspace Admin grant. Do NOT deploy to production. This is expected and acceptable — the whole point of the gate.
+### 3.1 Email instructions
 
-Reuse the PR-1 probe pattern (`GET /api/admin/drive-auth-probe`); extend it (or add a sibling) to exercise a write.
+An `AGENTS.md`-style instruction document the agent READS and follows when composing — guidance and conventions, not a `{{name}}` mail-merge template.
 
-### 2.2 Ensuring a link is openable
+- Table `email_instructions`, single active row: `instructions_markdown` + `instructions_html` (repo convention — markdown canonical, html the render cache; markdown IS the right canonical form here because this is prose guidance, not a formatted email body).
+- MCP: `get_email_instructions`, `update_email_instructions` (accept + return both markdown and html; sanitize html on write).
+- API: `GET /api/email/instructions`, `PUT /api/email/instructions` (admin-gated).
+- Frontend: an admin-gated editor page reusing the existing PlateJS markdown note editor (`OverviewNoteEditor`) — headings/bold/italic/lists, emitting `{ markdown, html }`. Follows the mandatory page shell (BaseLayout, container, header block with icon).
 
-A small service, `ensureAnyoneWithLink(env, driveFileId)`:
+### 3.2 Recipient resolution
 
-- Reads the file's current sharing (already derivable from `permissions[]`, PR 1).
-- If it is not already `ANYONE` / `ANYONE_WITH_LINK`, calls Drive `permissions.create` with `{ type: "anyone", role: "reader" }`.
-- Updates the cached `sharing` on the `drive_documents` / `drive_folders` row so the catalogue stays truthful (and the metadata-update path from the review-followups PR agrees).
-- Idempotent: an already-public file is a no-op read.
-- Returns the `webViewUrl` to embed.
+- MCP: `resolve_recipient` — input is either an explicit email address (passes through, validated) or a reference (a showroom store id/name + optional contact name/role). Resolves against `showroom_store_contacts` (`store_id`, `email_address`, `first_name`, `last_name`, and the contact role/kind already on that table). Returns the matched address(es) with the contact/store they came from, or a clear "could not resolve / ambiguous — here are the candidates" result. **Never guesses or silently drops** an unresolvable reference.
+- API: `GET /api/email/resolve-recipient?store=&contact=` (admin-gated), same logic, for the frontend/debugging.
+- Relate by FK + JOIN; no denormalized name columns.
 
-Failure to set sharing is surfaced to the caller (compose reports it) — never silently sends a link the recipient cannot open.
+### 3.3 Compose-context tool
 
-### 2.3 Email instructions (the boilerplate)
+- MCP: `compose_vendor_email` — the convenience that ties the layer together for a chat flow. Inputs: a recipient reference (or explicit address), a subject, a short statement of intent, and an optional list of `drive_document_id`s (from the PR-1 catalogue) to include. It:
+  - resolves recipients via §3.2,
+  - loads the instructions via §3.1 so the agent has the boilerplate to fold in,
+  - for each chosen Drive file, returns `{ driveDocumentId, name, mimeType, sizeBytes, webViewUrl, sharing, suggestedDisposition }` where `suggestedDisposition` is `"attach"` when the running total stays under ~18 MiB of raw bytes (Gmail's 25 MiB cap minus base64 inflation) and `"link"` otherwise — a RECOMMENDATION for the agent/Workspace worker, which makes the final call and does the actual attaching/sharing.
+  - returns a single structured payload: `{ to, cc, subject, instructionsMarkdown, attachments[] }`.
+  - **Sends nothing, changes no Drive sharing** — it only assembles context. The agent passes this to the Workspace worker's `gmail_send` / `schedule_email`, which performs the attach/link/share/send.
+- No API route and no persisted draft in v1: nothing here is stateful beyond the instructions doc. A persisted draft only earns its place once the frontend compose-and-send surface exists, which is deferred.
 
-An `AGENTS.md`-style instruction document the composing agent READS and follows — not a `{{name}}` mail-merge template.
+### 3.4 MCP `email` domain
 
-- One row in `email_instructions`: `instructions_markdown` + `instructions_html` (repo convention — markdown canonical, html the render cache). This is prose-with-guidance, so markdown IS the right canonical form here (unlike the email body itself — see §2.5).
-- Edited in the frontend (PlateJS, the existing markdown editor is fine for instructions) and read/written by MCP against the same content.
-- Always optional — an input to composition, never a wrapper forced around the message.
+New `src/backend/mcp/tools/email/`, one file per tool: `get_email_instructions`, `update_email_instructions`, `resolve_recipient`, `compose_vendor_email`. Registered in the registry per the repo's one-file-per-tool convention; the `/connect/tools` catalog picks them up.
 
-### 2.4 Recipient resolution
-
-`compose_email` accepts recipients as either explicit email addresses or references to resolve:
-
-- Explicit `to`/`cc`/`bcc` email strings pass through.
-- A reference like a showroom store + contact resolves against `showroom_store_contacts` (`emailAddress`, `firstName`, `lastName`, `storeId`) — the "I just onboarded this contact, email them" path.
-- An unresolvable reference is an error the tool reports, never a silent drop or a guessed address.
-
-### 2.5 Rich-text email body — HTML canonical, inline styles only
-
-The body is authored in a **dedicated email editor** (PlateJS), distinct from the markdown note editor, because the repo's "markdown canonical" convention cannot express underline / font-family / font-color and email renders HTML regardless.
-
-- **HTML is the source of truth** for the email body. A best-effort plaintext alternative is derived for the `multipart/alternative` text part (accessibility + non-HTML clients); markdown is not stored for the body.
-- Marks: **bold, italic, underline, font-family, font-color** (needs `@platejs/font`).
-- The serializer emits **email-safe HTML**: every style as an inline `style="..."` attribute, no `<style>`/`<head>`/class/external CSS, web-safe font stacks with fallbacks. Supported inline properties limited to the set Gmail honors: `color`, `background-color`, `font-family`, `font-size`, `font-weight`, `font-style`, `text-decoration`, `text-align`.
-- The HTML is **sanitized on write** (server-side) before it is ever stored or sent — the author is trusted, but a sanitize pass keeps the stored/sent HTML to the safe subset and strips anything a client would choke on.
-- The existing `buildComposeRaw` already emits `multipart/alternative` (text + html); it is reused. No `multipart/mixed` — there are no binary attachments.
-
-### 2.6 MCP `email` domain
-
-New `src/backend/mcp/tools/email/`, one file per tool:
-
-| Tool | Behaviour |
-| --- | --- |
-| `get_email_instructions` | read the boilerplate |
-| `update_email_instructions` | modify it (markdown + html) |
-| `resolve_recipient` | turn a store/contact reference into an email address (or report it cannot) |
-| `compose_email` | resolve recipients, compile the body from instructions + given content, take a list of Drive file ids to LINK (each run through `ensureAnyoneWithLink`, reporting any that failed), persist a **draft record** in D1, and return it for review. Sends NOTHING. |
-| `send_email` | take a draft id + a `mode` and act: `confirm` requires the draft was shown/approved, `direct` composes+sends in one step, `gmail_draft` writes a Gmail draft (via `users.drafts.create`) and returns its id for the user to send by hand. |
-
-`send_email` defaults to `confirm`. The two-step (compose → review → send) exists because sending to a real vendor is outward-facing and irreversible.
-
-### 2.7 Drafts
-
-- **Our draft record** (`email_drafts` in D1) is the compose spec: recipients, subject, body HTML + derived text, the linked Drive file ids, status (`draft` / `sent` / `scheduled`), timestamps. It is what `compose_email` writes and `send_email` reads.
-- **A Gmail draft** (mode `gmail_draft`) is a separate thing: `users.drafts.create` writes the built RFC-822 into the mailbox so the user finishes it in Gmail. Staging a draft = this mode.
-- The frontend compose surface reads/writes `email_drafts` so anything doable by chat is doable by hand and vice versa.
-
-### 2.8 Frontend
-
-A compose surface (new page + island) reusing the email editor + a Drive picker (browse the PR-1 catalogue, pick files to link) + recipient chips (typed or resolved from contacts). Follows the mandatory page shell (BaseLayout, container, header block with icon). Shows the linked files with their post-`ensureAnyoneWithLink` sharing state so it is visible that access was granted.
-
-### 2.9 Schema (PR 2a)
+## 4. Schema
 
 | Table | Purpose |
 | --- | --- |
-| `email_instructions` | the boilerplate: `instructions_markdown`, `instructions_html`, `updated_at`. Single-row (or keyed by a name for future multiplicity; v1 single). |
-| `email_drafts` | compose spec: `to_json`, `cc_json`, `bcc_json`, `subject`, `body_html`, `body_text`, `status`, `gmail_draft_id?`, `gmail_message_id?`, `sent_at?`, timestamps. |
-| `email_draft_links` | mapping: `email_draft_id` FK, `drive_document_id` FK, the `web_view_url` and `sharing` captured at compose time. A real mapping table, never a comma-separated column. |
+| `email_instructions` | single active row: `instructions_markdown`, `instructions_html`, `updated_at`. |
 
-Money: none. Multi-select (the linked-files set): a real mapping table per the repo rule.
+That is the whole schema. No drafts table, no attachment mapping — those belonged to the send path, which now lives elsewhere. (If §3.3's payload ever needs auditing, a log table can be added when the frontend send surface lands.)
 
----
+## 5. Error handling
 
-## 3. PR 2b — scheduled send
+- Unresolvable / ambiguous recipient → structured "cannot resolve, here are candidates," never a guess.
+- HTML that fails sanitize on the instructions write → rejected with a message, never stored raw.
+- D1 discipline: no `db.transaction()`, `db.batch()` only; relate by FK, no denormalized `*_name`; hand-written Zod (never drizzle-zod).
+- The compose tool touches no external system and changes no state, so it cannot half-fail; the Workspace worker owns every failure mode of the actual send.
 
-Built on 2a's `email_drafts`. Gmail has no scheduled send (§1.1.5), so:
+## 6. Testing
 
-- `email_drafts.status` gains `scheduled`; add `send_at` (timestamp) and `schedule_error?`.
-- A new MCP tool `schedule_email` takes a draft id + an absolute `send_at` (the model resolves "9am Monday" to a concrete UTC instant using Justin's timezone and today's date — the tool receives an ISO timestamp, not a phrase, so the resolution is unambiguous and testable). It sets `status = 'scheduled'`, `send_at = <ts>`. `cancel_scheduled_email` reverts to `draft`.
-- **The dispatcher:** the existing `* * * * *` master cron already calls into `src/_worker.ts`. Add `dispatchDueEmails(env)` alongside `dispatchDueWorkflows`: select `email_drafts` where `status='scheduled' AND send_at <= now`, and for each, send it (rebuild the RFC-822 from the stored spec — links are already in the HTML, so no Drive re-fetch is needed; just re-run `ensureAnyoneWithLink` on each linked file so a file that lost its sharing between schedule and send is re-shared), mark `sent`/`sent_at` or record `schedule_error` and leave it for retry/attention. One email's failure must not stop the others (per-row try/catch, like the PR-1 cron).
-- Each dispatch is recorded in the existing `agent_runs` ledger (one run per tick that sent anything, a step per email), so it shows at `/admin/system/agents` — no bespoke table.
-- **Concurrency:** a due email must be claimed atomically (a conditional `UPDATE ... SET status='sending' WHERE id=? AND status='scheduled' RETURNING`) so an overlapping tick or a manual send cannot double-send it. Same lesson as the PR-1 scan lease.
-- Frontend: the compose surface gains a "schedule" control and a list of scheduled emails with cancel.
+- **Unit (pure):** the attach-vs-link `suggestedDisposition` size logic (a set of files crossing ~18 MiB flips the overflow to `link`); recipient-reference normalization (explicit address passes; store+contact resolves; ambiguous returns candidates).
+- **QC (`scripts/qc/pr_<n>.mjs`) against the deployed worker:** `GET`/`PUT /api/email/instructions` round-trip; `resolve_recipient` resolves a known showroom contact and reports a clear miss for an unknown one; `compose_vendor_email` returns a payload with resolved recipients + the instructions + the chosen files' share state and a plausible disposition. Preview + production, new-surface assertions gated on a capability probe so the production run stays a clean regression guard pre-merge.
+- No send is exercised from this repo — that is the Workspace worker's test surface.
 
----
+## 7. Dependencies & sequencing
 
-## 4. Error handling
-
-- A linked file whose sharing cannot be set → `compose_email` reports it per-file; the email is not silently sent with a dead link. The user decides (send anyway, fix by hand, drop the file).
-- Recipient that cannot be resolved → error, never a guessed address.
-- Gmail send failure → surfaced; a scheduled send records `schedule_error` and does not mark `sent`, so it is visible and retryable rather than lost.
-- HTML that fails sanitize → rejected on write with a message, never stored/sent raw.
-- D1 discipline throughout: no `db.transaction()`, `db.batch()` only; chunk any unbounded multi-row write / `inArray` at 20; relate by FK, no denormalized `*_name`.
-- The atomic claim on scheduled sends prevents double-send across overlapping ticks.
-
-## 5. Testing
-
-- **Unit (pure):** the email-HTML serializer (marks → inline-style HTML; underline/color/font each round-trip; a disallowed property is stripped); the plaintext derivation; the "9am tomorrow / Monday" → UTC resolution given a fixed now + tz.
-- **QC (`scripts/qc/pr_<n>.mjs`) against the deployed worker:**
-  - 2a: `compose_email` produces a draft with the expected recipients and body; a linked PRIVATE file comes back `ANYONE_WITH_LINK` after compose (proves the write scope end to end); `send_email` in `gmail_draft` mode creates a retrievable Gmail draft; `direct`/`confirm` behave per mode.
-  - 2b: `schedule_email` sets `send_at`; a due email is claimed exactly once under two concurrent dispatch calls (the double-send guard); `cancel_scheduled_email` reverts.
-- Both PRs QC against preview AND production, per repo convention, with new-surface assertions gated on a capability probe so the production run stays a clean regression guard pre-merge.
-
-## 6. Out of scope (named, not dropped)
-
-- Binary attachments (non-Drive files, embedded photos) — everything is a link in v1.
-- Multi-vendor bid blast — separate feature, builds on `bid_portfolios`.
-- Mail-merge / per-recipient variable substitution — the instructions doc is guidance the agent follows, not templated fields.
-- Multiple named instruction templates — v1 is a single instructions doc.
-- Reply-into-thread from the composer — the existing `/reply` route covers thread replies; this is new-message composition.
-
-## 7. Open prerequisite (needs Justin)
-
-The full `https://www.googleapis.com/auth/drive` scope must be granted in Workspace Admin → domain-wide delegation for the service account (the same client id that holds the four `gmail.*` scopes + `drive.readonly`). Until then, PR 2a's Task 1 gate will (correctly) report BLOCKED and stop. Everything up to that gate — schema, the editor, recipient resolution, the draft record, the MCP tool skeletons — can be built and unit-tested without it; only the live `ensureAnyoneWithLink` write and its QC need the grant.
+- **No hard dependency on the Workspace worker.** This layer produces data/payloads and can be built and shipped independently, in parallel with the Workspace-worker email work.
+- The end-to-end flow (compose context here → send there) only lights up once the Workspace worker has the send/HTML/attachment tools from the three prompts. Until then this layer is exercised via its own API/MCP + QC, and the payload is validated by shape, not by a real send.
+- The deferred frontend compose-and-send surface + rich-text authoring picks up when the Workspace worker is ready; it will call the Workspace worker's tools to send.
