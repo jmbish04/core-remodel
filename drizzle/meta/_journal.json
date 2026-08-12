@@ -568,6 +568,13 @@
       "when": 1786545308972,
       "tag": "0180_panoramic_major_mapleleaf",
       "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "6",
+      "when": 1786546302143,
+      "tag": "0181_new_sunset_bain",
+      "breakpoints": true
     }
   ]
 }

@@ -47,6 +47,7 @@ import { dialerRouter } from "./routes/dialer";
 import { documentViewsRouter } from "./routes/document-views";
 import { documentsRouter } from "./routes/documents";
 import driveListsRouter from "./routes/drive-lists";
+import { emailRouter } from "./routes/email";
 import { estimateCompaniesRouter } from "./routes/estimate-companies";
 import { estimateContactsRouter } from "./routes/estimate-contacts";
 import { estimateStatusesRouter } from "./routes/estimate-statuses";
@@ -213,6 +214,8 @@ app.use("/api/wishlist", requireAccessAuth);
 app.use("/api/wishlist/*", requireAccessAuth);
 app.use("/api/worker-emails", requireAccessAuth);
 app.use("/api/worker-emails/*", requireAccessAuth);
+app.use("/api/email", requireAccessAuth);
+app.use("/api/email/*", requireAccessAuth);
 app.use("/api/places", requireAccessAuth);
 app.use("/api/places/*", requireAccessAuth);
 // Company CRM (notes + todos, 0013 roadmap P3-03/P3-04) — admin-only, no public read.
@@ -358,6 +361,7 @@ app.route("/api/wishlist", wishlistRouter);
 // Worker-email HITL inbox API (invoices / contracts / receipts / staged
 // companies). Mounting this is what makes /admin/inbox show emails.
 app.route("/api/worker-emails", workerEmailsRouter);
+app.route("/api/email", emailRouter);
 app.route("/api/changelog", changelogRouter);
 app.route("/api/places", placesRouter);
 // adminIntegrationsRouter mounts under /api/admin/integrations — already covered

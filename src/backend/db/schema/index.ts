@@ -182,6 +182,9 @@ export * from "./gmail/gmail_message_images";
 // worker emails (Cloudflare Email Routing inbound)
 export * from "./emails/index";
 
+// Vendor-email context layer (2026-08-11): the reusable instructions doc.
+export * from "./email/index";
+
 // MCP ops/observability (0017) + artifact studio (0016)
 export * from "./mcp/index";
 export * from "./artifacts/index";

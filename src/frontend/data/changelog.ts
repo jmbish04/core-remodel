@@ -56,6 +56,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "feat/vendor-email-context-layer",
+    title: "Vendor-email context layer — instructions doc + recipient resolution",
+    summary:
+      "PR 2a of the vendor-email arc (PR 1 was Drive ingestion, #374). A single reusable email_instructions doc (markdown + sanitized html, one row), resolve_recipient (explicit address or showroom store+contact lookup — never guesses, returns ok:false/candidates on no_match/ambiguous/invalid), and compose_vendor_email which assembles a send-ready payload (recipient + instructions + Drive attachments with an attach-vs-link suggestion against Gmail's ~18 MiB usable budget). Sends nothing and changes no Drive sharing — the actual send is out of scope here and lives on the google-workspace-mcp worker. Migration 0181 (email_instructions), applied to remote.",
+    date: "2026-08-11",
+    status: "staged",
+    prNumber: 379,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/379",
+  },
+  {
     branch: "fix/drive-ingestion-review-followups",
     title: "Drive ingestion — three review findings from an independent reviewer",
     summary:
@@ -421,6 +431,40 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "vendor-email-context-layer",
+    branch: "feat/vendor-email-context-layer",
+    date: "2026-08-11",
+    area: "Email",
+    title: "Vendor-email context layer — instructions doc + recipient resolution",
+    summary:
+      "The context layer a vendor email is composed from, with no send path (that stays on google-workspace-mcp): a single reusable instructions doc, an explicit resolve-or-fail recipient lookup against showroom store contacts, and a compose tool that assembles a send-ready payload from both plus Drive attachments. Every ambiguity — an unmatched store, a store with two contacts, a malformed address — returns a structured ok:false with candidates rather than guessing.",
+    changes: [
+      {
+        kind: "migration",
+        text: "0181_new_sunset_bain: email_instructions (id, instructions_markdown, instructions_html, updated_at) — single active row (id=1). Additive; applied and verified on remote D1.",
+      },
+      {
+        kind: "added",
+        text: "GET/PUT /api/email/instructions (admin-gated via requireAccessAuth on /api/email/*) and the get_email_instructions / update_email_instructions MCP tools. PUT sanitizes html with the repo's sanitizeNoteHtml on every write — raw html is never stored.",
+      },
+      {
+        kind: "added",
+        text: "GET /api/email/resolve-recipient?email=|store=&contact= and the resolve_recipient MCP tool. An explicit email is validated and passed through; a store reference matches by id or name substring against showroom_store_contacts. Always returns 200 — ok:false is a valid resolved result (reason: no_match | ambiguous | invalid), not an HTTP error.",
+      },
+      {
+        kind: "added",
+        text: "compose_vendor_email MCP tool (read-only): resolves the recipient, loads the instructions doc, loads the requested Drive documents (chunked at 20 ids for D1's 100-bound-param cap) and suggests attach vs link per file via suggestDispositions against an 18 MiB running budget (Gmail's 25 MiB cap minus base64 inflation). Assembles a payload only — sends nothing, changes no Drive sharing.",
+      },
+      {
+        kind: "added",
+        text: "/admin/email/instructions — admin editor page (EmailInstructionsEditor) for the boilerplate doc, following the PlateJS rich-text pattern (markdown + html) used elsewhere in the repo.",
+      },
+    ],
+    migrations: ["0181_new_sunset_bain"],
+    status: "staged",
+    prNumber: 379,
+  },
   {
     id: "drive-ingestion-review-followups",
     branch: "fix/drive-ingestion-review-followups",

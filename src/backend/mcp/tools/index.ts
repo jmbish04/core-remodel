@@ -4,21 +4,23 @@
  * here and spreading it into `ALL_TOOL_GROUPS` (order = docs-page order).
  */
 import type { RemodelTool } from "../types";
+
 import { analyticsTools } from "./analytics";
 import { artifactTools } from "./artifacts";
 import { brandTools } from "./brands";
 import { budgetTools } from "./budget";
 import { changelogTools } from "./changelog";
 import { driveTools } from "./drives";
+import { emailTools } from "./email";
 import { legacyTools } from "./legacy";
 import { materialTools } from "./materials";
-import { renderTools } from "./render";
 import { memoryTools } from "./memory";
 import { opsTools } from "./ops";
 import { pascalTools } from "./pascal";
 import { priceObservationTools } from "./price_observations";
-import { productTools } from "./products";
 import { productPhotoTools } from "./product_photos";
+import { productTools } from "./products";
+import { renderTools } from "./render";
 import { roomTools } from "./rooms";
 import { showroomTools } from "./showrooms";
 import { teslaTools } from "./tesla";
@@ -47,4 +49,5 @@ export const ALL_TOOL_GROUPS: RemodelTool[] = [
   ...memoryTools,
   ...pascalTools,
   ...legacyTools,
+  ...emailTools,
 ];
