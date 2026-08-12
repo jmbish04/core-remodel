@@ -90,10 +90,12 @@ export const listReconciliationQueue = defineTool({
       revision: row.revisionId ? { id: row.revisionId, revisionNumber: row.revisionNumber ?? 0 } : null,
     }));
 
-    const totalCents = items.reduce((sum, it) => sum + (it.lineTotalCents ?? 0), 0);
+    // Page-scoped: this sums only the rows on THIS page, not the whole queue.
+    // Say so explicitly so a chat consumer doesn't read it as the grand total.
+    const pageCents = items.reduce((sum, it) => sum + (it.lineTotalCents ?? 0), 0);
     const summary =
-      `${items.length} line item${items.length === 1 ? "" : "s"} pending reconciliation ` +
-      `(${formatCents(totalCents)} total)${hasMore ? ", more available" : ""}`;
+      `${items.length} line item${items.length === 1 ? "" : "s"} pending reconciliation on this page ` +
+      `(${formatCents(pageCents)} on this page)${hasMore ? " — more pending beyond this page" : ""}`;
 
     return { summary, items, limit, offset, hasMore, url: reconcileQueueUrl(env) };
   },
