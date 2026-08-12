@@ -59,7 +59,7 @@ export const BRANCHES: ChangelogBranch[] = [
     branch: "feat/vendor-email-context-layer",
     title: "Vendor-email context layer — instructions doc + recipient resolution",
     summary:
-      "PR 2a of the vendor-email arc (PR 1 was Drive ingestion, #374). A single reusable email_instructions doc (markdown + sanitized html, one row), resolve_recipient (explicit address or showroom store+contact lookup — never guesses, returns ok:false/candidates on no_match/ambiguous/invalid), and compose_vendor_email which assembles a send-ready payload (recipient + instructions + Drive attachments with an attach-vs-link suggestion against Gmail's ~18 MiB usable budget). Sends nothing and changes no Drive sharing — the actual send is out of scope here and lives on the google-workspace-mcp worker. Migration 0176 (email_instructions), applied to remote.",
+      "PR 2a of the vendor-email arc (PR 1 was Drive ingestion, #374). A single reusable email_instructions doc (markdown + sanitized html, one row), resolve_recipient (explicit address or showroom store+contact lookup — never guesses, returns ok:false/candidates on no_match/ambiguous/invalid), and compose_vendor_email which assembles a send-ready payload (recipient + instructions + Drive attachments with an attach-vs-link suggestion against Gmail's ~18 MiB usable budget). Sends nothing and changes no Drive sharing — the actual send is out of scope here and lives on the google-workspace-mcp worker. Migration 0181 (email_instructions), applied to remote.",
     date: "2026-08-11",
     status: "staged",
     prNumber: 379,
@@ -442,7 +442,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     changes: [
       {
         kind: "migration",
-        text: "0176_yielding_human_fly: email_instructions (id, instructions_markdown, instructions_html, updated_at) — single active row (id=1). Additive; applied and verified on remote D1.",
+        text: "0181_new_sunset_bain: email_instructions (id, instructions_markdown, instructions_html, updated_at) — single active row (id=1). Additive; applied and verified on remote D1.",
       },
       {
         kind: "added",
@@ -461,7 +461,7 @@ export const CHANGELOG: ChangelogEntry[] = [
         text: "/admin/email/instructions — admin editor page (EmailInstructionsEditor) for the boilerplate doc, following the PlateJS rich-text pattern (markdown + html) used elsewhere in the repo.",
       },
     ],
-    migrations: ["0176_yielding_human_fly"],
+    migrations: ["0181_new_sunset_bain"],
     status: "staged",
     prNumber: 379,
   },

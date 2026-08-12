@@ -139,7 +139,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       "No send endpoint exists or is planned here — compose_vendor_email's payload is handed to the google-workspace-mcp worker's gmail_send / schedule_email.",
     ],
     filesTouched: [
-      "drizzle/0176_yielding_human_fly.sql, src/backend/db/schema/email/email_instructions.ts",
+      "drizzle/0181_new_sunset_bain.sql, src/backend/db/schema/email/email_instructions.ts",
       "src/backend/services/email/instructions.ts, resolve-recipient.ts (+ .test.ts), disposition.ts (+ .test.ts)",
       "src/backend/api/routes/email.ts, src/backend/api/index.ts (requireAccessAuth gate + app.route mount)",
       "src/backend/mcp/tools/email/{get_email_instructions,update_email_instructions,resolve_recipient,compose_vendor_email,index}.ts",
@@ -148,7 +148,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     ],
     migrations: [
       {
-        tag: "0176_yielding_human_fly",
+        tag: "0181_new_sunset_bain",
         sql: `CREATE TABLE \`email_instructions\` (
 \t\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 \t\`instructions_markdown\` text DEFAULT '' NOT NULL,
@@ -269,7 +269,7 @@ PR #379 QC — vendor-email context layer
 1 passed, 0 failed`,
       migrations: [
         {
-          tag: "0176_yielding_human_fly",
+          tag: "0181_new_sunset_bain",
           appliedRemote: true,
           note: "Applied via pnpm run migrate:remote and verified: email_instructions present on the remote DB.",
         },
@@ -531,11 +531,11 @@ PR #379 QC — vendor-email context layer
     verification: {
       qcScript: "docs/plans/2026-08-09-showroom-stores-normalization/data/ (live prod exports)",
       command:
-        "curl -H \"cookie: remodel_access=$(sha256 WORKER_API_KEY)\" $BASE/api/showroom-stores?limit=500 | (compute populations)",
+        'curl -H "cookie: remodel_access=$(sha256 WORKER_API_KEY)" $BASE/api/showroom-stores?limit=500 | (compute populations)',
       source:
         "GET /api/showroom-stores?limit=500 ; GET /api/showroom-stores/meta/incomplete ; GET /api/showroom-contacts ; POST /api/showroom-contacts/backfill/from-pocs (no apply)",
       output:
-        "233 active stores. flat place_id=184, address=207, lat+long=184, phone=219, email=39, main_poc=5. contacts: 12 rows / 11 stores / 0 GENERAL_CONTACT. from-pocs dry-run: {\"pocs\":72,\"mainPocs\":5,\"apply\":false}. list endpoint returns FLAT columns with NO locations[] join.",
+        '233 active stores. flat place_id=184, address=207, lat+long=184, phone=219, email=39, main_poc=5. contacts: 12 rows / 11 stores / 0 GENERAL_CONTACT. from-pocs dry-run: {"pocs":72,"mainPocs":5,"apply":false}. list endpoint returns FLAT columns with NO locations[] join.',
       ranAt: "2026-08-09",
       migrations: [],
     },
