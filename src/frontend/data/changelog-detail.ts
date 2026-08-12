@@ -113,6 +113,211 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-stores-normalization": {
+    slug: "showroom-stores-normalization",
+    branch: "claude/database-schema-audit-cleanup-271ac6",
+    subtitle: "Audit + migration plan · no schema shipped",
+    introduction:
+      "This is a plan, not a merge. It answers one question with live prod numbers: can the 16 flat location/contact columns on showroom_stores be dropped, and if not, what has to happen first.",
+    problem:
+      "showroom_stores is a 58-column table still carrying flat location columns (location_*, latitude, longitude, place_id, google_maps_link, zip_code) and contact columns (phone_number, email_address, main_poc_*) even though dedicated child tables — showroom_store_locations and showroom_store_contacts — already exist for them.\n" +
+      "The instinct to move that data out is correct, but the real state is subtler than 'the table is hoarding columns': the LOCATION side is already 100% mirrored (all 233 active stores have >=1 location row; the flat columns are redundant copies that were never cleared), while the CONTACT side is barely started (0 GENERAL_CONTACT rows; 72 legacy showroom_pocs + 5 flat main_poc stores unmigrated). The blocker is not schema — it is that intake writes ZERO child rows and ~35 placeId sites plus every geo/drive/dedup reader still read the flat columns via whole-row selects, so a DROP COLUMN is a silent undefined at the boundary, not a compile error.",
+    approach:
+      "A 6-agent audit workflow (schema readiness, backend + frontend blast-radius, intake readiness, live-data quantification, synthesis) measured the surface against origin/main and live prod, then produced a staged expand→contract plan.\n" +
+      "Verdict: readyToDrop = PARTIAL. Sequence: Phase 0 guardrails (partial-unique indexes for one GENERAL_CONTACT and one is_primary contact per store; zip reconcile; cross-table place_id guard) → Phase 1 contacts backfill + name Title-Casing + domain consolidation → Phase 2 rewire intake to dual-write child rows and add the place_id-new-location path → Phase 3 migrate readers to JOINs (placeId → geo → contacts → address-derived) → Phase 4 stop dual-writing, repoint the place_id unique index, retire showroom_pocs → Phase 5 DROP in a separate backup→rebuild→restore migration after prod is verified.\n" +
+      "Also folds in the requested intake-normalization + 50-mile sibling-discovery feature, mapped onto the real stack and correcting a Gemini reference snippet (no UUID-PK tables, no isSibling flag — isPrimary is DERIVED per PR #375 — no OpenAI-via-gateway path, extend the existing bulk-intake workflow).",
+    apiChanges: [
+      "(planned) POST /api/showroom-contacts/backfill/from-pocs?apply=true — migrate 72 pocs + 5 flat main_poc into showroom_store_contacts (GENERAL_CONTACT + is_primary person rows).",
+      "(planned) intake write paths (_shared.ts persistPlaceShowroom / adoptPlaceLocation, create_showroom.ts) dual-write showroom_store_locations + showroom_store_contacts; server-side 50-mile Places sibling discovery gated by website-host signal.",
+      "(planned) LIST/DETAIL showroom-stores routes swap whole-row `store: showroomStores` selects for JOINs re-aliased to identical output keys.",
+      "No endpoints changed in this entry — plan + changelog only.",
+    ],
+    filesTouched: [
+      "docs/plans/2026-08-09-showroom-stores-normalization.md (the plan)",
+      "docs/plans/2026-08-09-showroom-stores-normalization/data/*.json (live prod query exports)",
+      "src/frontend/data/changelog.ts (this entry)",
+      "src/frontend/data/changelog-detail.ts (this detail)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Hard facts computed from the live prod pull (summary.json)",
+        lang: "json",
+        code: `{
+  "activeStores": 233,
+  "flatColumnPopulation": {
+    "placeId": 184, "locationAddress": 207, "latitude": 184, "longitude": 184,
+    "phoneNumber": 219, "emailAddress": 39,
+    "mainPocFullname": 5, "mainPocPhoneNumber": 5, "mainPocEmailAddress": 4
+  },
+  "contacts": { "rows": 12, "generalContactRows": 0, "byType": { "OTHER": 10, "MANAGER": 2 } },
+  "legacyPocsBackfillDryRun": { "pocs": 72, "mainPocs": 5, "apply": false }
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "before / after — column moves",
+        title: "Before / After: the store row splits",
+        description:
+          "Red = removed from showroom_stores. Green = added / now canonical on the child tables. showroom_pocs retires into contacts.",
+        code: `flowchart TB
+  subgraph BEFORE["Before — everything on the store row"]
+    direction TB
+    Bs["showroom_stores<br/>58 cols · incl 16 flat location + contact"]:::del
+    Bp["showroom_pocs · 72 rows"]:::del
+  end
+  subgraph AFTER["After — brand vs site split"]
+    direction TB
+    As["showroom_stores<br/>brand-level only · name, notes, mappings"]:::keep
+    Al["showroom_store_locations<br/>+ place_id + lat/lng + address parts + unit"]:::add
+    Ac["showroom_store_contacts<br/>+ is_primary + location_id"]:::add
+  end
+  Bs -->|"9 location cols move"| Al
+  Bs -->|"phone / email / main_poc move"| Ac
+  Bs -->|"drop location_address, legacy zip_code"| As
+  Bp -->|"retired -> merged into"| Ac
+  classDef del fill:#fbeaea,stroke:#d83a3f,color:#b02a2e;
+  classDef add fill:#e7f6ec,stroke:#1f9d57,color:#166b3d;
+  classDef keep fill:#eef1f6,stroke:#8a93a3,color:#444;`,
+      },
+      {
+        caption: "after-model ER diagram",
+        title: "Entity model after normalization",
+        description:
+          "Attribute comments mark REMOVED (moves off the store) vs ADDED. Content tables reference a physical location, not the brand.",
+        code: `erDiagram
+  showroom_stores ||--o{ showroom_store_locations : "1:N physical sites"
+  showroom_stores ||--o{ showroom_store_contacts : "brand anchor"
+  showroom_store_locations ||--o{ showroom_store_contacts : "per-site location_id"
+  showroom_store_locations ||--o{ showroom_images : "our + visit photos"
+  showroom_store_locations ||--o{ showroom_photos_mapping : "Google Places photos"
+  showroom_store_locations ||--o{ showroom_store_ratings : "external reviews"
+  showroom_store_locations ||--o{ store_notes : "location_id nullable=brand"
+  showroom_stores {
+    int id PK
+    text name "brand-level, stays"
+    text overview_note_markdown "brand · md source"
+    text overview_note_html "brand · render cache"
+    real latitude "REMOVED to location"
+    real longitude "REMOVED to location"
+    text place_id "REMOVED to location"
+    text phone_number "REMOVED to contact"
+    text main_poc_fullname "REMOVED to contact"
+  }
+  showroom_store_locations {
+    int id PK
+    int store_id FK
+    text place_id "canonical uniq"
+    real latitude "canonical"
+    real longitude "canonical"
+    text unit "suite level"
+    text city "canonical"
+    text zip_code "canonical"
+  }
+  showroom_store_contacts {
+    int id PK
+    int store_id FK
+    int location_id FK "ADDED"
+    bool is_primary "ADDED"
+    text type "GENERAL_CONTACT etc"
+    text first_name
+    text last_name
+    text office_phone_number
+    text mobile_phone_number
+    text fax_phone_number
+    text email_address
+  }
+  showroom_store_ratings {
+    int id PK
+    int store_id FK
+    int location_id FK "ADDED per site"
+    text source "SYSTEM_USER GOOGLE YELP HOUZZ"
+    int rating "1-5"
+    text comment "external plain"
+    text rating_context_markdown "ADDED user note md"
+    text rating_context_html "ADDED user note html"
+    bool is_active "ADDED revision"
+    int replaced_by_id "ADDED revision"
+    text rating_created
+    int scraped_at
+  }
+  store_notes {
+    int id PK
+    int store_id FK
+    int location_id FK "ADDED nullable=brand"
+    text content_markdown "md source"
+    text content_html "render cache"
+    bool is_active
+  }
+  showroom_images {
+    int id PK
+    int store_id FK
+    int location_id FK "ADDED"
+    text image_kind "visit or discovered"
+    text delivery_url
+    text note_markdown "polaroid note md"
+    text note_html "polaroid note html"
+  }
+  showroom_photos_mapping {
+    int id PK
+    int showroom_id FK
+    int location_id FK "ADDED exact place"
+    text cf_images_photo_url
+    text author_attributes "Google attribution"
+    int sort_order "Places rank"
+  }`,
+      },
+      {
+        caption: "content re-parents to a location",
+        title: "Site content attaches to a location, not the store",
+        description:
+          "8 tables gain a nullable location_id (green); 5 stay brand/store-level (grey).",
+        code: `flowchart LR
+  LOC["showroom_store_locations<br/>one physical site"]:::hub
+  subgraph MOVED["gains location_id — site content"]
+    direction TB
+    pm["showroom_photos_mapping · 479"]:::add
+    rt["showroom_store_ratings · 32<br/>+ SYSTEM_USER user rating"]:::add
+    ct["showroom_store_contacts · 12"]:::add
+    im["showroom_images · 242"]:::add
+    nt["store_notes · 65"]:::add
+    pp["product_showroom_photos"]:::add
+    pr["product_price_observations"]:::add
+    sr["store_rating · 0 rows<br/>RETIRED into ratings"]:::del
+  end
+  subgraph STAY["stays brand / store-level"]
+    direction TB
+    ss["scraping_sitemap"]:::keep
+    br["browser_run_pages · 649"]:::keep
+    pb["product_photo_buckets"]:::keep
+    sl["showroom_scan_log"]:::keep
+  end
+  pm --> LOC
+  rt --> LOC
+  ct --> LOC
+  im --> LOC
+  nt --> LOC
+  pp --> LOC
+  pr --> LOC
+  sr --> rt
+  classDef add fill:#e7f6ec,stroke:#1f9d57,color:#166b3d;
+  classDef keep fill:#eef1f6,stroke:#8a93a3,color:#555;
+  classDef hub fill:#eaecfb,stroke:#4f5bd5,color:#2f3a9e;`,
+      },
+    ],
+    verification: {
+      qcScript: "docs/plans/2026-08-09-showroom-stores-normalization/data/ (live prod exports)",
+      command:
+        "curl -H \"cookie: remodel_access=$(sha256 WORKER_API_KEY)\" $BASE/api/showroom-stores?limit=500 | (compute populations)",
+      source:
+        "GET /api/showroom-stores?limit=500 ; GET /api/showroom-stores/meta/incomplete ; GET /api/showroom-contacts ; POST /api/showroom-contacts/backfill/from-pocs (no apply)",
+      output:
+        "233 active stores. flat place_id=184, address=207, lat+long=184, phone=219, email=39, main_poc=5. contacts: 12 rows / 11 stores / 0 GENERAL_CONTACT. from-pocs dry-run: {\"pocs\":72,\"mainPocs\":5,\"apply\":false}. list endpoint returns FLAT columns with NO locations[] join.",
+      ranAt: "2026-08-09",
+      migrations: [],
+    },
+  },
   "drive-ingestion-service": {
     slug: "drive-ingestion-service",
     branch: "feat/drive-ingestion-service",
