@@ -3,6 +3,7 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
 import { showroomStoreProducts } from "./store_products";
+import { showroomStoreLocations } from "./store_location";
 
 /**
  * Store Rating — user's personal rating of a showroom location.
@@ -16,6 +17,15 @@ export const storeRating = sqliteTable("store_rating", {
   storeId: integer("store_id")
     .notNull()
     .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+  /**
+   * Physical site this rating is about (Phase L, plan 0031). Nullable = brand-level or
+   * not-yet-backfilled; FK → showroom_store_locations, ON DELETE SET NULL. Backfilled to
+   * the store's primary location. Lets a user rate a specific site of a chain.
+   */
+  locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+    onDelete: "set null",
+  }),
 
   rating: integer("rating").notNull(), // 1-5
   ratingNotes: text("rating_notes"),
@@ -63,6 +73,16 @@ export const showroomStoreRatings = sqliteTable("showroom_store_ratings", {
   storeId: integer("store_id")
     .notNull()
     .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+  /**
+   * Physical site this external rating is for (Phase L, plan 0031). Nullable = brand-level
+   * or not-yet-backfilled; FK → showroom_store_locations, ON DELETE SET NULL. Backfilled to
+   * the store's primary location. A `source` of SYSTEM_USER carries the user's own rating
+   * per location alongside the scraped platforms.
+   */
+  locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+    onDelete: "set null",
+  }),
 
   /** The date the rating was recorded in its native source system (YYYY-MM-DD). */
   ratingCreated: text("rating_created"),

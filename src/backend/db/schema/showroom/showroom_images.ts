@@ -9,6 +9,7 @@ import {
 
 import { showroomImageGroups } from "./image_groups";
 import { showroomStores } from "./stores";
+import { showroomStoreLocations } from "./store_location";
 
 /**
  * Showroom Images — storefront and showroom interior imagery discovered during
@@ -24,6 +25,15 @@ export const showroomImages = sqliteTable(
     storeId: integer("store_id")
       .notNull()
       .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+    /**
+     * Physical site this image belongs to (Phase L, plan 0031). Nullable = brand-level or
+     * not-yet-backfilled; FK → showroom_store_locations, ON DELETE SET NULL. Backfilled to
+     * the store's primary location.
+     */
+    locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+      onDelete: "set null",
+    }),
 
     /**
      * Optional folder this photo belongs to (0040 P3). NULL = a loose photo shown

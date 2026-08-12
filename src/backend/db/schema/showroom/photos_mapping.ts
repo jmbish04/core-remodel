@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
+import { showroomStoreLocations } from "./store_location";
 
 /**
  * Showroom Photos Mapping — Google Places photos uploaded to Cloudflare Images.
@@ -23,6 +24,15 @@ export const showroomPhotosMapping = sqliteTable(
     showroomId: integer("showroom_id")
       .notNull()
       .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+    /**
+     * Physical site this photo belongs to (Phase L, plan 0031). Nullable = brand-level or
+     * not-yet-backfilled; FK → showroom_store_locations, ON DELETE SET NULL. Backfilled to
+     * the store's primary location.
+     */
+    locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+      onDelete: "set null",
+    }),
 
     /** Cloudflare Images delivery URL for this photo. */
     cfImagesPhotoUrl: text("cf_images_photo_url").notNull(),
