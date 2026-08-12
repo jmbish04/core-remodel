@@ -13,9 +13,12 @@ import { classifySiteLink } from "@backend/services/showroom/social-links";
  *
  * Per store, cheapest signal first:
  *   1. `robots.txt` `Sitemap:` lines + a `/sitemap.xml` guess → fetch each
- *      sitemap (following a sitemap INDEX one level down), collect page URLs.
- *   2. If the site publishes NO sitemap, fall back to fetching the homepage and
- *      scanning its `<a href>` links.
+ *      sitemap, following a sitemap INDEX into its children (bounded by
+ *      MAX_SITEMAPS_PER_SITE), collecting page URLs.
+ *   2. If the site publishes NO parseable sitemap at all, fall back to fetching
+ *      the homepage and scanning its `<a href>` links. (A site WITH a thin
+ *      sitemap that simply omits its /sale page is not re-crawled — the sitemap
+ *      is treated as authoritative once one parses.)
  * Then classify every URL with the shared {@link classifySiteLink} (own-domain
  * only; already matches clearance|sale|outlet|closeout|last-chance|… and vetoes
  * bot-challenge junk), keep the shallow LANDING pages (not deep product URLs),
@@ -44,8 +47,43 @@ export interface DiscoverySummary {
   errors: number;
 }
 
+/**
+ * Reject non-public hosts before fetching. Discovery only ever fetches stored
+ * store WEBSITE urls (and their same-origin sitemaps), so this is defense in
+ * depth rather than a real SSRF surface — but a bad row must not let us hit
+ * localhost or a private range.
+ */
+function isPublicHost(u: string): boolean {
+  try {
+    const url = new URL(u);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const h = url.hostname.toLowerCase();
+    if (h === "localhost" || h.endsWith(".local")) return false;
+    if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(h)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A stable dedupe key: https, no query/hash, no trailing slash, lowercased. */
+function dedupeKey(u: string): string {
+  try {
+    const url = new URL(u);
+    url.protocol = "https:";
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.toString().toLowerCase();
+  } catch {
+    return u.toLowerCase();
+  }
+}
+
 /** Fetch text with a timeout; transparently gunzip a `.gz` body. Null on any failure. */
 async function fetchText(url: string): Promise<string | null> {
+  if (!isPublicHost(url)) return null;
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -204,14 +242,17 @@ export async function discoverClearanceLinks(
       if (clearance.size === 0) return;
 
       // Skip anything this store already has (any type — never duplicate a URL).
+      // Compare on the NORMALIZED key so an existing `http://…/outlet/` doesn't
+      // read as distinct from the classifier's `https://…/outlet` (there is no
+      // unique index on (store_id, url) to catch it at the DB — see links.ts).
       const existing = await db
         .select({ url: showroomStoreLinks.url })
         .from(showroomStoreLinks)
         .where(eq(showroomStoreLinks.storeId, site.storeId));
-      const have = new Set(existing.map((e) => e.url.toLowerCase()));
+      const have = new Set(existing.map((e) => dedupeKey(e.url)));
 
       const fresh = [...clearance.values()]
-        .filter((u) => !have.has(u.toLowerCase()))
+        .filter((u) => !have.has(dedupeKey(u)))
         .sort((a, b) => pathDepth(a) - pathDepth(b)) // landing pages first
         .slice(0, MAX_NEW_LINKS_PER_STORE);
       if (fresh.length === 0) return;

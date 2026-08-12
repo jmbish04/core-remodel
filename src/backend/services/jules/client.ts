@@ -163,6 +163,33 @@ export class JulesClient {
     await this.request(`sessions/${id}:approvePlan`, { method: "POST", body: {} });
   }
 
+  /**
+   * Archive (tear down) a session so its VM is reaped. Best-effort — callers
+   * should not fail a job if this throws. A repoless session left un-archived
+   * keeps a booted VM on the paid subscription, so `finish` must call this.
+   */
+  async archiveSession(id: string): Promise<void> {
+    await this.request(`sessions/${id}:archive`, { method: "POST", body: {} });
+  }
+
+  /**
+   * The newest `agentMessaged` `createTime` (ms on JULES's clock), or 0 if none.
+   * Capture this BEFORE sending a batch so the reply is detected as "newer than
+   * baseline" on Jules's own timeline — never by comparing against the Worker's
+   * `Date.now()`, which is a different clock and silently filters the reply out
+   * under any skew.
+   */
+  async baselineReplyTime(id: string): Promise<number> {
+    const { activities } = await this.listActivities(id, { pageSize: 30 });
+    let newest = 0;
+    for (const a of activities) {
+      if (a.type !== "agentMessaged" || !a.createTime) continue;
+      const t = new Date(a.createTime).getTime();
+      if (Number.isFinite(t) && t > newest) newest = t;
+    }
+    return newest;
+  }
+
   async listActivities(
     id: string,
     opts: { pageSize?: number; pageToken?: string } = {},

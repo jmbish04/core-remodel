@@ -263,26 +263,31 @@ export async function persistSaleSnapshot(
   const finalDetails = { ...params.details, items };
   const ragUuid = crypto.randomUUID();
 
-  await db
-    .update(showroomStoreSales)
-    .set({ isCurrent: false })
-    .where(
-      and(
-        eq(showroomStoreSales.clearanceWebsiteId, params.link.id),
-        eq(showroomStoreSales.isCurrent, true),
+  // Supersede-then-insert as ONE all-or-nothing D1 batch: no generated-id
+  // dependency between them (ragUuid is JS-side), so a batch is safe and keeps
+  // "exactly one isCurrent row per link" atomic. (D1 has no transactions — see
+  // the CLAUDE.md D1 rule; db.batch is the sanctioned atomic unit.)
+  await db.batch([
+    db
+      .update(showroomStoreSales)
+      .set({ isCurrent: false })
+      .where(
+        and(
+          eq(showroomStoreSales.clearanceWebsiteId, params.link.id),
+          eq(showroomStoreSales.isCurrent, true),
+        ),
       ),
-    );
-
-  await db.insert(showroomStoreSales).values({
-    storeId: params.storeId,
-    clearanceWebsiteId: params.link.id,
-    sourceUrl: params.link.url,
-    clearanceDetailsJson: finalDetails,
-    contentHash: params.contentHash,
-    ragUuid,
-    isCurrent: true,
-    timestamp: new Date(),
-  });
+    db.insert(showroomStoreSales).values({
+      storeId: params.storeId,
+      clearanceWebsiteId: params.link.id,
+      sourceUrl: params.link.url,
+      clearanceDetailsJson: finalDetails,
+      contentHash: params.contentHash,
+      ragUuid,
+      isCurrent: true,
+      timestamp: new Date(),
+    }),
+  ]);
 
   // Embedding is a nice-to-have for RAG — never fail the write over it.
   try {

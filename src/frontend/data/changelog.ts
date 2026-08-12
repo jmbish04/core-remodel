@@ -531,6 +531,10 @@ export const CHANGELOG: ChangelogEntry[] = [
         kind: "changed",
         text: "The weekly cron now runs discovery FIRST, then the sweep, so newly-found clearance pages are covered the same run. New POST /api/showroom-sales/discover runs it on demand; POST /sweep stays fast by default (discovery opt-in via ?discover=1).",
       },
+      {
+        kind: "fixed",
+        text: "Hardening from an independent code review (local reviewer, codra offline): (1) the Jules reply was detected by comparing the Worker's Date.now() against Jules's server createTime — a cross-clock compare that under skew silently filtered the real reply out and fell back forever; now baselined on Jules's own timeline before the send. (2) The 24s in-alarm reply poll would time out before a Jules VM (which answers in minutes) ever replied, so Jules was primary in name only while still paying for the VM — the reply wait is now ALARM-DRIVEN (send → persist pending → read on a later fire, ~2.7 min budget, then per-page fallback). (3) The Jules session was never torn down — now archived in finish and on the lifetime→fallback flip so a booted VM is never leaked. (4) Concurrent kickoffs on the singleton DO clobbered a running job and leaked its session — /start now returns the in-flight job instead. (5) A lifetime-ceiling job now drains its remaining links through Workers-AI instead of reporting a clean 'done' with nothing extracted. Plus: persistSaleSnapshot supersede+insert is now one db.batch; discovery dedupe normalizes http-vs-https; a private-host guard on discovery fetches.",
+      },
     ],
     status: "staged",
     prNumber: 380,
