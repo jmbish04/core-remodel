@@ -546,6 +546,10 @@ export const CHANGELOG: ChangelogEntry[] = [
       },
       {
         kind: "fixed",
+        text: "Spend safety: plugged the clearance sweep's Workers-AI calls into the existing AI-spend circuit breaker (services/usage/metering). The fallback extraction and the snapshot embedding now go through meteredAiRun — which checks the WORKERS_AI ceiling before the call (a tripped breaker throws → extraction returns null → the page is skipped with no spend, embedding is best-effort and skipped) and records usage after. Browser Rendering was already gated inside scrapeUrl (assertCanSpend + recordBrowserRun), so both the per-page scrape and the AI extraction are now under the breaker. Jules itself is an external subscription, not a metered provider — it's bounded instead by the DO's lifetime ceiling and session teardown.",
+      },
+      {
+        kind: "changed",
         text: "Follow-up (0176_wistful migration): gave Jules more time — the per-batch reply budget is now 8 min (was 2.7) and the job lifetime 60 min, after a live run showed Jules doesn't answer inside a few minutes and was losing to the Workers-AI fallback every time. Plus a new jules_clearance_sessions D1 table recording each sweep's session_uuid (crypto.randomUUID), the Jules API session id, timestamps and the final outcome — so a billed Jules run is auditable from D1, not just the DO's ephemeral KV.",
       },
       {
