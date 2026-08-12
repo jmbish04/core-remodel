@@ -80,6 +80,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "The weekly showroom sale/clearance sweep now hands its pages to a repoless Google Jules session as the PRIMARY extractor, using the paid subscription's ~1M-token context for the heavy analysis. A new native-alarm Durable Object (JulesClearanceAgent) stands the session up, waits for the VM to boot, then feeds scraped pages in small batches and reads back one JSON reply per batch — so the sweep is no longer bound by the ~15-minute scheduled-invocation wall that was truncating it. Cost is bounded like TeslaStreamDO: job state lives in KV (never DO SQLite), each alarm fire does at most a few pages, and the alarm is deleted the instant the job finishes so the DO goes dormant. Workers-AI is the fallback on any Jules outage or unparseable reply, moved off kimi-k2.6 (a reasoning model that returns empty content for structured output — the reason most snapshots were empty) to kimi-k2.7-code with thinking disabled. The SDK itself can't run on Workers (its bundle statically imports node:fs/os), so we call the Jules REST API directly; @google/jules-sdk stays a dev dependency for its types. Also closes the coverage gap: plain-fetch sitemap/homepage discovery finds and registers clearance links across all stores, not just the 6 a shallow scrape happened to crawl.",
     date: "2026-08-11",
     status: "staged",
+    prNumber: 380,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/380",
   },
   {
     branch: "feat/drive-ingestion-service",
@@ -531,6 +533,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       },
     ],
     status: "staged",
+    prNumber: 380,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/380",
   },
   {
     id: "drive-ingestion-service",
