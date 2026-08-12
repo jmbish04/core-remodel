@@ -76,16 +76,26 @@ Every design decision follows from which bucket a field is in:
 
 ## 3. Backend asks (relayed to the normalization session; tracked in contract §7)
 
-- **#1 (P0)** LIST feed `locations: [{id, city, latitude, longitude, isPrimary}]` — blocks the directory map.
-- **#2 (P0)** `POST /api/tesla/navigate` + `/navigate-drive` accept optional `locationId`; resolve per-location
-  coords, fall back to primary. Fixes the critical wrong-destination bug.
-- **#3 (P1)** Loser→keeper 302 on the `/admin/shopping/store/[id]` page route (or a `keeperId` on the 404 so the
-  Astro page can redirect). Ownership TBD with backend.
-- **#4 (P1)** Loser API MUTATIONS return 409/308, not 302 (avoid silent write-drop).
-- **#5 (P1)** `hubRoutes: string[]` on the LIST feed — set-valued region tabs.
-- **#6 (P2)** `POST /:id/locations` create verb — intake "add as a location of {store}".
-- **#7 (semantics)** Merged store `googleRating`/`userRatingCount` — brand-aggregate or primary's? UI renders
-  as-is.
+- **#1 (P0)** ✅ **LIVE (prod, #389)** — LIST feed `locations: [{id, city, latitude, longitude, isPrimary}]` on
+  every row; `locationCount`/`locationCities` untouched. `isPrimary` derived. Wire the map flatMap against it.
+- **#2 (P0)** ✅ **LIVE (prod)** — `POST /api/tesla/navigate` accepts `{ storeId, locationId? }`; resolves coords
+  from the selected location, else derived primary, else store flat; rejects a foreign `locationId` (400).
+  **Pass `{storeId, locationId}`, NOT lat/lng.** ⚠️ Happy-path dispatch fires a REAL navigation to Justin's car —
+  do NOT QC the happy path without explicit permission (backend only verified the 400 validation path).
+- **#3 (P1)** SPLIT (confirmed): backend adds `keeperStoreId` pointer (at merge-apply) + `GET /:id/keeper`; the
+  Astro page owns the 302. Not built yet — lands with merge-apply. Until then a loser id renders the inactive
+  store (not a 404).
+- **#4 (P1)** Loser API MUTATIONS return **409** (agreed, backend-owned; not built yet).
+- **#5 (P1)** ✅ **LIVE (prod)** — `hubRoutes: string[]` (distinct region hubs across the brand's sites) on the
+  LIST feed. Filter each region tab by membership so a multi-region brand shows in every tab it has a site in.
+- **#6 (P2)** ✅ **LIVE (prod)** — `POST /api/showroom-stores/:id/locations` create verb. Body: address parts +
+  coords + `placeId`/`googleMapsLink` + notes triple. Returns 201 `{location}`; 400 empty, 404 no store, 409
+  `{ownerStoreId}` on a duplicate placeId. Wire intake's dup-warning "add as a location of {store}" to it.
+
+**Live vs pending:** backend #1/#2/#5/#6 are all live → Phases A, B, C are unblocked. Only #3 (keeper 302) + #4
+(loser 409) remain, gating Phase D; backend is checkpointing those + Phase-L with Justin.
+- **#7 (semantics)** ANSWERED: `googleRating`/`userRatingCount` = the **primary/keeper site's** Google values,
+  NOT a brand aggregate. Render as "primary site's Google rating." Cross-site aggregation is a Phase-L option.
 - **Phase-L write params** (future): `locationId` on `POST /:id/photos`, `/:id/image-groups`,
   `/api/showroom-contacts`, `/:id/pocs`(+`/extract-card`, business-cards), `PUT /:id/visit-rating`,
   `showroom_store_ratings`, and (deferred) `POST /api/showroom-visit-logs`.

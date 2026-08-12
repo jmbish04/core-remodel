@@ -1,0 +1,35 @@
+---
+/**
+ * TEMPORARY V2 inbox route — /admin/shopping/store/:id/inbox-v2 (item 4).
+ *
+ * Gives the inbox component the maximum room on the page: the page title +
+ * description are dropped (only a small "back to showroom" link remains), and
+ * the nav rail is auto-collapsed for this page via BaseLayout's `collapseSidebar`
+ * (per-render only — the user's sidebar cookie is untouched). The original
+ * inbox.astro is left in place; this retires with the V2 promotion.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { StoreInboxApp } from "@/components/gmail/StoreInboxApp";
+
+const { id } = Astro.params;
+const storeId = id ? Number.parseInt(id, 10) : NaN;
+if (!Number.isFinite(storeId)) {
+  return Astro.redirect("/admin/shopping/showrooms");
+}
+---
+
+<BaseLayout
+  title="Showroom Inbox — The Monolith"
+  description="Full-page inbox scoped to a single showroom's email correspondence."
+  collapseSidebar={true}
+>
+  <main class="w-full px-4 py-4 md:px-6">
+    <a
+      href={`/admin/shopping/store/${storeId}/v2`}
+      class="mb-3 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+    >
+      ← Back to showroom
+    </a>
+    <StoreInboxApp client:only="react" storeId={storeId} />
+  </main>
+</BaseLayout>

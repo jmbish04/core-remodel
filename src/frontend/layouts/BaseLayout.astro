@@ -10,7 +10,7 @@ import { Footer } from "@/components/Footer";
 import { VisitorActivityTracker } from "@/components/VisitorActivityTracker";
 import { Toaster } from "sonner";
 
-const { title, description, ogImage } = Astro.props;
+const { title, description, ogImage, collapseSidebar } = Astro.props;
 
 // Normalize the request path so the sidebar can SSR the correct active item +
 // expanded section (no trailing slash; "/" stays "/").
@@ -25,7 +25,12 @@ const isAdmin = currentPath === "/admin" || currentPath.startsWith("/admin/");
 // Collapse-to-rail state, seeded from the cookie so the SSR HTML already has the
 // right width (no post-hydration flash). Only meaningful on admin pages — the
 // PublicSidebar has no collapse, so its content stays offset by the full width.
-const sidebarCollapsed = isAdmin && Astro.cookies.get("remodel_sidebar_collapsed")?.value === "1";
+// `collapseSidebar` lets a page force the rail collapsed (e.g. the full-height
+// inbox) WITHOUT persisting the user's cookie preference — it's per-render only.
+const sidebarCollapsed =
+  isAdmin &&
+  (collapseSidebar === true ||
+    Astro.cookies.get("remodel_sidebar_collapsed")?.value === "1");
 ---
 
 <!doctype html>
