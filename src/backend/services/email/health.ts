@@ -1,3 +1,4 @@
+import { getLatestLoopback } from "@backend/services/health/email-loopback";
 /**
  * @fileoverview Health probes for the inbound/outbound email module
  * (`src/backend/services/email/**` + the Worker's `email()` handler).
@@ -22,7 +23,6 @@ import {
   tableExists,
   type HealthProbe,
 } from "@backend/services/health/types";
-import { getLatestLoopback } from "@backend/services/health/email-loopback";
 
 const FILE = "src/backend/services/email/health.ts";
 
@@ -51,16 +51,21 @@ export const HEALTH_PROBES: HealthProbe[] = [
     whatFailureMeans:
       "The binding is missing or is not a SendEmail object. Any code path that calls `env.EMAIL.send()` will throw a TypeError at runtime. The usual cause is a deploy from a config that lost the `send_email` block, or a preview worker whose derived config dropped it.",
     troubleshootingSteps:
-      "1. Confirm the block is still in wrangler.jsonc: `grep -n 'send_email' wrangler.jsonc` — expect `\"send_email\": [{ \"name\": \"EMAIL\", \"remote\": true }]`. 2. Confirm the deployed version has it: `npx wrangler deployments list | tail -20` and check the newest entry is yours. 3. Re-run this probe from /admin/system/health after a redeploy. 4. If wrangler.jsonc is correct but the binding is absent in production, the running code predates the config change — see step 2 of the playbook.",
+      '1. Confirm the block is still in wrangler.jsonc: `grep -n \'send_email\' wrangler.jsonc` — expect `"send_email": [{ "name": "EMAIL", "remote": true }]`. 2. Confirm the deployed version has it: `npx wrangler deployments list | tail -20` and check the newest entry is yours. 3. Re-run this probe from /admin/system/health after a redeploy. 4. If wrangler.jsonc is correct but the binding is absent in production, the running code predates the config change — see step 2 of the playbook.',
     devOpsPlaybook:
       "1. From `main`, after pulling: `pnpm run deploy` (build → migrate:remote → migrate:tesla:remote → wrangler deploy). 2. Verify: `npx wrangler deployments list | tail -20`. 3. Tail for the actual send error if the binding is present but sends fail: `npx wrangler tail --format pretty | grep -i email`. 4. Destination addresses must be verified in the Cloudflare dashboard under Email → Email Routing; a binding cannot send to an unverified destination.",
     isBillingRisk: false,
     severity: "MEDIUM",
     run: async (env) => {
       const binding = (env as unknown as { EMAIL?: { send?: unknown } }).EMAIL;
-      if (!binding) return failure("env.EMAIL is undefined — the send_email binding is not attached to this deployment.");
+      if (!binding)
+        return failure(
+          "env.EMAIL is undefined — the send_email binding is not attached to this deployment.",
+        );
       if (typeof binding.send !== "function") {
-        return failure("env.EMAIL exists but has no send() method — the binding is not a SendEmail object.");
+        return failure(
+          "env.EMAIL exists but has no send() method — the binding is not a SendEmail object.",
+        );
       }
       return ok("env.EMAIL is bound and exposes send().");
     },
@@ -85,13 +90,21 @@ export const HEALTH_PROBES: HealthProbe[] = [
     severity: "HIGH",
     run: async (env) => {
       if (!(await tableExists(env.DB, "worker_emails"))) {
-        return failure("Table `worker_emails` does not exist on this D1 — run `pnpm run migrate:remote`.");
+        return failure(
+          "Table `worker_emails` does not exist on this D1 — run `pnpm run migrate:remote`.",
+        );
       }
       const since = Math.floor(Date.now() / 1000) - 30 * DAY;
-      const recent = await scalar(env.DB, "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ?", since);
+      const recent = await scalar(
+        env.DB,
+        "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ?",
+        since,
+      );
       if (recent === 0) {
         const total = await scalar(env.DB, "SELECT COUNT(*) FROM worker_emails");
-        return ok(`No inbound email in the last 30 days (${total} row(s) all-time) — nothing to route, table healthy.`);
+        return ok(
+          `No inbound email in the last 30 days (${total} row(s) all-time) — nothing to route, table healthy.`,
+        );
       }
       const unrouted = await scalar(
         env.DB,
@@ -110,7 +123,9 @@ export const HEALTH_PROBES: HealthProbe[] = [
           `${recent} email(s) in 30d: ${unrouted} with no route, ${unknown} with a route id not in routes.ts (${KNOWN_ROUTES.join("/")}).`,
         );
       }
-      return ok(`${recent} email(s) in 30d, all routed to a known route id (${KNOWN_ROUTES.join("/")}).`);
+      return ok(
+        `${recent} email(s) in 30d, all routed to a known route id (${KNOWN_ROUTES.join("/")}).`,
+      );
     },
   }),
 
@@ -118,7 +133,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     name: "email_pipeline_processing_liveness",
     displayName: "Email · pipeline processing backlog",
     description:
-      "Watches for inbound email that got stuck. `pipeline.ts` moves a row pending → classified → processed/reviewed. A row still `pending` hours after arrival means the background `ctx.waitUntil` work never completed (AI failure, thrown insert, evicted isolate). Counts rows older than 6 hours still in `pending`, and the share of the last 7 days still `pending`.",
+      "Watches for inbound email that got stuck. `pipeline.ts` moves a row pending → classified → processed/reviewed. A row still `pending` hours after arrival means the background `ctx.waitUntil` work never completed (AI failure, thrown insert, evicted isolate). Counts rows older than 6 hours still in `pending`, and the share of the last 7 days still `pending`. EXCLUDES rows with `ai_status='pending_approval'`: the 0042 AI trust gate parks Gmail-sourced mail there on purpose (`pipeline.ts` returns early on `deferAiUntilApproval`), so those are waiting on a human, not stuck. Counting them made every Gmail message read as a pipeline failure.",
     healthTsFilepath: FILE,
     bindingTypesTested: ["d1"],
     whatSuccessMeans:
@@ -133,29 +148,46 @@ export const HEALTH_PROBES: HealthProbe[] = [
     severity: "HIGH",
     run: async (env) => {
       if (!(await tableExists(env.DB, "worker_emails"))) {
-        return failure("Table `worker_emails` does not exist on this D1 — run `pnpm run migrate:remote`.");
+        return failure(
+          "Table `worker_emails` does not exist on this D1 — run `pnpm run migrate:remote`.",
+        );
       }
       const now = Math.floor(Date.now() / 1000);
+      // `ai_status='pending_approval'` is the 0042 trust gate's parked state, not
+      // a stall — see the description. Every `pending` count below excludes it.
+      const NOT_PARKED = "status = 'pending' AND ai_status <> 'pending_approval'";
       const stuck = await scalar(
         env.DB,
-        "SELECT COUNT(*) FROM worker_emails WHERE status = 'pending' AND created_at < ?",
+        `SELECT COUNT(*) FROM worker_emails WHERE ${NOT_PARKED} AND created_at < ?`,
         now - 6 * 3600,
       );
-      const week = await scalar(env.DB, "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ?", now - 7 * DAY);
-      const weekStuck = await scalar(
+      const week = await scalar(
         env.DB,
-        "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ? AND status = 'pending'",
+        "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ?",
         now - 7 * DAY,
       );
+      const weekStuck = await scalar(
+        env.DB,
+        `SELECT COUNT(*) FROM worker_emails WHERE created_at >= ? AND ${NOT_PARKED}`,
+        now - 7 * DAY,
+      );
+      const awaitingApproval = await scalar(
+        env.DB,
+        "SELECT COUNT(*) FROM worker_emails WHERE ai_status = 'pending_approval'",
+      );
+      const parked =
+        awaitingApproval > 0 ? ` ${awaitingApproval} awaiting your approval (not stuck).` : "";
       if (week > 0 && weekStuck / week > 0.25) {
         return failure(
-          `${weekStuck} of ${week} email(s) received in the last 7 days are still status='pending' (>25%) — the processing pipeline is not completing.`,
+          `${weekStuck} of ${week} email(s) received in the last 7 days are still status='pending' (>25%) — the processing pipeline is not completing.${parked}`,
         );
       }
       if (stuck > 0) {
-        return degraded(`${stuck} email(s) older than 6h are still status='pending' (7d volume: ${week}).`);
+        return degraded(
+          `${stuck} email(s) older than 6h are still status='pending' (7d volume: ${week}).${parked}`,
+        );
       }
-      return ok(`No email older than 6h stuck in 'pending'. 7d volume: ${week}.`);
+      return ok(`No email older than 6h stuck in 'pending'. 7d volume: ${week}.${parked}`);
     },
   }),
 
@@ -178,7 +210,9 @@ export const HEALTH_PROBES: HealthProbe[] = [
     severity: "MEDIUM",
     run: async (env) => {
       if (!(await tableExists(env.DB, "worker_emails"))) {
-        return failure("Table `worker_emails` does not exist on this D1 — run `pnpm run migrate:remote`.");
+        return failure(
+          "Table `worker_emails` does not exist on this D1 — run `pnpm run migrate:remote`.",
+        );
       }
       const idx = await scalar(
         env.DB,
@@ -194,7 +228,9 @@ export const HEALTH_PROBES: HealthProbe[] = [
         "SELECT COUNT(*) FROM (SELECT message_id FROM worker_emails WHERE message_id IS NOT NULL AND message_id <> '' GROUP BY message_id HAVING COUNT(*) > 1)",
       );
       if (dupes > 0) {
-        return degraded(`Unique index present, but ${dupes} Message-ID(s) appear on more than one row.`);
+        return degraded(
+          `Unique index present, but ${dupes} Message-ID(s) appear on more than one row.`,
+        );
       }
       return ok("Unique index on worker_emails.message_id present; no duplicate Message-IDs.");
     },
@@ -212,19 +248,24 @@ export const HEALTH_PROBES: HealthProbe[] = [
     whatFailureMeans:
       "FAILURE (received-but-mismatch): the worker stored the message but the body lost the planted token/number — a parsing/extraction regression in the pipeline. FAILURE (expired): 6h passed and the message never landed in `worker_emails` — Cloudflare Email Routing is not delivering to the Worker, the `email()` handler is erroring, or the routing rule for remodel@hacolby.app is gone. DEGRADED (in-flight): a cycle was just sent and delivery has not completed yet — expected, resolves on the next run.",
     troubleshootingSteps:
-      "1. Check the cycle detail: `npx wrangler d1 execute core-remodel --remote --command \"SELECT * FROM health_email_loopback ORDER BY id DESC LIMIT 3\"`. 2. If expired: confirm the Cloudflare Email Routing rule still delivers remodel@hacolby.app to this Worker (dashboard → Email → Routing), then `npx wrangler tail --format pretty | grep email-router` while re-running the screen. 3. If received-but-mismatch: open the row in /admin/inbox/all and compare `body_text` against the LOOPBACK-TOKEN / LOOPBACK-NUMBER lines. 4. Confirm Gmail send worked at all — the sender is the service account impersonating justin (see the gmail credential probes).",
+      '1. Check the cycle detail: `npx wrangler d1 execute core-remodel --remote --command "SELECT * FROM health_email_loopback ORDER BY id DESC LIMIT 3"`. 2. If expired: confirm the Cloudflare Email Routing rule still delivers remodel@hacolby.app to this Worker (dashboard → Email → Routing), then `npx wrangler tail --format pretty | grep email-router` while re-running the screen. 3. If received-but-mismatch: open the row in /admin/inbox/all and compare `body_text` against the LOOPBACK-TOKEN / LOOPBACK-NUMBER lines. 4. Confirm Gmail send worked at all — the sender is the service account impersonating justin (see the gmail credential probes).',
     devOpsPlaybook:
       "1. This sends REAL mail from justin's Gmail; the sent copies are labelled core-remodel/unit-testing so they can be bulk-cleaned. 2. A cycle advances one step per health screen — to force progress, run the screen again rather than waiting. 3. After a fix, `pnpm run deploy` from `main`, run the screen twice a few minutes apart, and confirm the newest health_email_loopback row reaches stage='complete'. 4. If Gmail auth is the blocker, fix the domain-wide-delegation scopes first (gmail.compose) — no token, no send.",
     isBillingRisk: false,
     severity: "MEDIUM",
     run: async (env) => {
       if (!(await tableExists(env.DB, "health_email_loopback"))) {
-        return failure("Table `health_email_loopback` does not exist — run `pnpm run migrate:remote`.");
+        return failure(
+          "Table `health_email_loopback` does not exist — run `pnpm run migrate:remote`.",
+        );
       }
       const c = await getLatestLoopback(env);
-      if (!c) return degraded("No email round-trip has run yet — one starts on the next health screen.");
+      if (!c)
+        return degraded("No email round-trip has run yet — one starts on the next health screen.");
       if (c.g2wReceived && c.g2wExtractOk) {
-        return ok(`Gmail→worker delivered and extracted (token ${c.token}, number ${c.g2wExpected} matched).`);
+        return ok(
+          `Gmail→worker delivered and extracted (token ${c.token}, number ${c.g2wExpected} matched).`,
+        );
       }
       if (c.g2wReceived && !c.g2wExtractOk) {
         return failure(
@@ -232,9 +273,13 @@ export const HEALTH_PROBES: HealthProbe[] = [
         );
       }
       if (c.stage === "expired") {
-        return failure(`Gmail→worker email (token ${c.token}) never reached the worker within 6h — inbound routing is not delivering.`);
+        return failure(
+          `Gmail→worker email (token ${c.token}) never reached the worker within 6h — inbound routing is not delivering.`,
+        );
       }
-      return degraded(`Gmail→worker leg in flight (token ${c.token}, sent ${ageLabel(c.startedAt)} ago) — awaiting delivery.`);
+      return degraded(
+        `Gmail→worker leg in flight (token ${c.token}, sent ${ageLabel(c.startedAt)} ago) — awaiting delivery.`,
+      );
     },
   }),
 
@@ -257,12 +302,17 @@ export const HEALTH_PROBES: HealthProbe[] = [
     severity: "MEDIUM",
     run: async (env) => {
       if (!(await tableExists(env.DB, "health_email_loopback"))) {
-        return failure("Table `health_email_loopback` does not exist — run `pnpm run migrate:remote`.");
+        return failure(
+          "Table `health_email_loopback` does not exist — run `pnpm run migrate:remote`.",
+        );
       }
       const c = await getLatestLoopback(env);
-      if (!c) return degraded("No email round-trip has run yet — one starts on the next health screen.");
+      if (!c)
+        return degraded("No email round-trip has run yet — one starts on the next health screen.");
       if (c.stage === "complete" && c.w2gReceived && c.w2gExtractOk) {
-        return ok(`Worker→Gmail delivered and extracted (token ${c.token}, number ${c.w2gExpected} matched).`);
+        return ok(
+          `Worker→Gmail delivered and extracted (token ${c.token}, number ${c.w2gExpected} matched).`,
+        );
       }
       if (c.w2gReceived && !c.w2gExtractOk) {
         return failure(
@@ -275,9 +325,13 @@ export const HEALTH_PROBES: HealthProbe[] = [
         );
       }
       if (c.stage === "sent_w2g") {
-        return degraded(`Worker replied (token ${c.token}); Gmail delivery in flight (${ageLabel(c.updatedAt)} ago).`);
+        return degraded(
+          `Worker replied (token ${c.token}); Gmail delivery in flight (${ageLabel(c.updatedAt)} ago).`,
+        );
       }
-      return degraded(`Waiting on the Gmail→worker leg first (token ${c.token}, stage ${c.stage}).`);
+      return degraded(
+        `Waiting on the Gmail→worker leg first (token ${c.token}, stage ${c.stage}).`,
+      );
     },
   }),
 ];

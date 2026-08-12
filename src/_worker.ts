@@ -14,7 +14,7 @@ import { withAbsoluteRegistrationUri } from "./backend/mcp/absolute-registration
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
 import { withSseHeartbeat } from "./backend/mcp/sse-heartbeat";
-import { pruneAgentRuns } from "./backend/services/agent-run-retention.js";
+import { pruneAgentRuns, sweepAbandonedRuns } from "./backend/services/agent-run-retention.js";
 import { startRun } from "./backend/services/agent-runs";
 import { runPermitSync } from "./backend/services/dbi/permits-sync.js";
 import { getDeviceLandingPath } from "./backend/services/device-preferences";
@@ -356,6 +356,10 @@ const legacyHandler: ExportedHandler<Env> = {
       // written by every instrumented surface is exactly how a cost-monitoring
       // feature would otherwise become its own D1 row-read cost story.
       ctx.waitUntil(pruneAgentRuns(env));
+      // Close out runs whose isolate died mid-flight. Must run BEFORE nothing —
+      // it is what stops a crashed run from masquerading as a live Durable
+      // Object in the runaway watcher for the rest of time.
+      ctx.waitUntil(sweepAbandonedRuns(env).then(() => undefined));
       return;
     }
     if (event.cron === "* * * * *") {

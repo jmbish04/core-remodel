@@ -24,13 +24,14 @@
  * the ledger is unreadable is exactly when an uncapped loop does the damage.
  */
 
+import { projectSystemVariables } from "@backend/db/schema/home/project_system_variables";
+import { geminiUsage } from "@backend/db/schema/system/gemini-usage";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+
 import { currentAgentRunId } from "../agent-run-context";
 import { estimateCostUsd } from "../pricing/catalog";
-import { and, eq, gte, sql } from "drizzle-orm";
-
-import { geminiUsage } from "@backend/db/schema/system/gemini-usage";
-import { projectSystemVariables } from "@backend/db/schema/home/project_system_variables";
+import { invalidateBreakerCache, readCachedDecision, writeCachedDecision } from "./breaker-cache";
 import { decideSpend, cycleStart } from "./breaker-rules";
 
 export { decideSpend, cycleStart } from "./breaker-rules";
@@ -164,6 +165,13 @@ export async function setConfigValue(
       target: projectSystemVariables.variableKey,
       set: { valueText },
     });
+
+  // Drop the cached decisions immediately. Every caller of this function is
+  // changing a threshold, a manual break or a snooze — i.e. changing the answer
+  // — and a break-glass control that waits out a TTL is not a control. Clears
+  // all providers because this function does not know whether `variableKey` was
+  // provider-scoped or global (the cycle anchor day moves every window).
+  await invalidateBreakerCache(env);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,9 +249,7 @@ export async function recordUsage(env: Env, rec: UsageRecord): Promise<void> {
       cachedTokens: rec.cachedTokens ?? null,
       // Derive a total when the provider did not report one; keep null rather
       // than storing a misleading 0 when neither side is known.
-      totalTokens:
-        rec.totalTokens ??
-        ((rec.promptTokens ?? 0) + (rec.outputTokens ?? 0) || null),
+      totalTokens: rec.totalTokens ?? ((rec.promptTokens ?? 0) + (rec.outputTokens ?? 0) || null),
       estimatedCostUsd: costUsd,
       errorMessage: rec.errorMessage ?? null,
       requestMeta: pricingNote ? { ...(rec.meta ?? {}), pricing: pricingNote } : (rec.meta ?? null),
@@ -298,11 +304,23 @@ export interface SpendDecision {
  * FAILS CLOSED. If spend cannot be read, the answer is NO — the moment the
  * ledger is unreadable is exactly when an uncapped loop does the damage. This
  * is the deliberate opposite of the legacy Places breaker's fail-open.
+ *
+ * Read-through KV cache in front (see `breaker-cache.ts`): the uncached path is
+ * two D1 queries, one of them a SUM over an append-only table, which is too
+ * expensive to sit in front of every AI call. Pass `fresh: true` to bypass the
+ * cache — admin screens reporting live spend must not read a 30-second-old
+ * number and call it current.
  */
 export async function canSpend(
   env: Env,
   provider: MeteredProvider,
+  opts: { fresh?: boolean } = {},
 ): Promise<SpendDecision> {
+  if (!opts.fresh) {
+    const cached = await readCachedDecision(env, provider);
+    if (cached) return cached;
+  }
+
   let cfg: MeteringConfig;
   let spend: number;
   try {
@@ -327,7 +345,9 @@ export async function canSpend(
     spendUsd: spend,
   });
 
-  return { ...decision, provider, spendUsd: spend };
+  const resolved: SpendDecision = { ...decision, provider, spendUsd: spend };
+  await writeCachedDecision(env, resolved);
+  return resolved;
 }
 
 /** Trip the manual break for a provider. */

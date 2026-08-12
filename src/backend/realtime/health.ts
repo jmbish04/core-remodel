@@ -81,8 +81,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
   defineProbe({
     name: "do_agent_namespace_bindings_present",
     displayName: "Agent Durable Object namespaces present",
-    description:
-      `Checks all ${AGENT_NAMESPACES.length} agent-hosting Durable Object namespaces are bound: ${AGENT_NAMESPACES.join(", ")}. Binding presence only — no stub is fetched and no agent is woken.`,
+    description: `Checks all ${AGENT_NAMESPACES.length} agent-hosting Durable Object namespaces are bound: ${AGENT_NAMESPACES.join(", ")}. Binding presence only — no stub is fetched and no agent is woken.`,
     healthTsFilepath: "src/backend/realtime/health.ts",
     bindingTypesTested: ["durable_object"],
     whatSuccessMeans:
@@ -200,7 +199,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     name: "do_agent_run_volume_watcher",
     displayName: "Durable Object runaway watcher (agent run ledger)",
     description:
-      "Reads the shared agent run ledger (`agent_runs`) for the last hour: total runs started, and runs still in `running`/`queued` for more than an hour. Durable Objects bill for wall-clock while awake, so a run count far above baseline or a pile of never-ending runs is the cheapest D1-side signal of a DO billing runaway.",
+      "Reads the shared agent run ledger (`agent_runs`) for the last hour: total runs started, and runs still in `running`/`queued` for more than an hour. Durable Objects bill for wall-clock while awake, so a run count far above baseline or a pile of never-ending runs is the cheapest D1-side signal of a DO billing runaway. Stuck runs are split by AGE, because only a recent one can still be burning money: a run older than `RESIDUE_AFTER_HOURS` is a corpse — the isolate that owned it died days ago and cannot be billing — so it is reported but never raises a billing FAILURE on its own. Without that split the probe latched red forever after one crash and every subsequent real runaway was hidden behind a stale alarm.",
     healthTsFilepath: "src/backend/realtime/health.ts",
     bindingTypesTested: ["d1", "durable_object"],
     whatSuccessMeans:
@@ -225,15 +224,31 @@ export const HEALTH_PROBES: HealthProbe[] = [
         env.DB,
         "SELECT COUNT(*) AS c FROM agent_runs WHERE created_at <= unixepoch() - 3600 AND created_at > unixepoch() - 608400",
       );
-      const stuck = await scalar(
+      // Past this age a `running` row cannot be live spend — the isolate that
+      // owned it is long gone. `pruneAgentRuns` deliberately never deletes these
+      // (a stuck run is a bug worth seeing), and `sweepAbandonedRuns` marks them
+      // `abandoned`, so anything still counted here is un-swept residue.
+      const RESIDUE_AFTER_HOURS = 24;
+      const live = await scalar(
         env.DB,
-        "SELECT COUNT(*) AS c FROM agent_runs WHERE status IN ('running','queued') AND created_at < unixepoch() - 3600",
+        `SELECT COUNT(*) AS c FROM agent_runs WHERE status IN ('running','queued')
+           AND created_at < unixepoch() - 3600 AND created_at >= unixepoch() - ?`,
+        RESIDUE_AFTER_HOURS * 3600,
+      );
+      const residue = await scalar(
+        env.DB,
+        "SELECT COUNT(*) AS c FROM agent_runs WHERE status IN ('running','queued') AND created_at < unixepoch() - ?",
+        RESIDUE_AFTER_HOURS * 3600,
       );
       const hourlyBaseline = prior7d / 168;
+      const residueNote =
+        residue > 0
+          ? ` (plus ${residue} run(s) older than ${RESIDUE_AFTER_HOURS}h — dead ledger rows, not live spend; the abandoned-run sweep clears these)`
+          : "";
 
-      if (stuck >= 25) {
+      if (live >= 25) {
         return failure(
-          `${stuck} agent runs stuck in running/queued for over an hour — a Durable Object is likely awake and billing. Last hour started=${lastHour}.`,
+          `${live} agent runs stuck in running/queued for over an hour — a Durable Object is likely awake and billing. Last hour started=${lastHour}.${residueNote}`,
         );
       }
       if (hourlyBaseline >= 1 && lastHour / hourlyBaseline > 10) {
@@ -241,9 +256,9 @@ export const HEALTH_PROBES: HealthProbe[] = [
           `Agent run rate spiked ${(lastHour / hourlyBaseline).toFixed(1)}x: ${lastHour} runs in the last hour vs baseline ${hourlyBaseline.toFixed(1)}/hour. Suspect a retry or cron loop.`,
         );
       }
-      if (stuck > 0) {
+      if (live > 0 || residue > 0) {
         return degraded(
-          `${stuck} agent runs have been running/queued for over an hour (last hour started=${lastHour}, baseline ${hourlyBaseline.toFixed(1)}/hour).`,
+          `${live} agent run(s) running/queued for 1-${RESIDUE_AFTER_HOURS}h (last hour started=${lastHour}, baseline ${hourlyBaseline.toFixed(1)}/hour).${residueNote}`,
         );
       }
       return ok(

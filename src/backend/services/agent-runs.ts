@@ -33,11 +33,25 @@
  * ```
  */
 import { agentRunSteps, agentRunToolCalls, agentRuns } from "@backend/db";
-import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
-import { errorCodeOf, messageOf, safeJson } from "./agent-run-format";
 import { withAgentRunContext } from "./agent-run-context";
+import { errorCodeOf, messageOf, safeJson } from "./agent-run-format";
+import { recordUsage } from "./usage/metering";
+
+/**
+ * Durable Object wall-clock rate, USD per second.
+ *
+ * Cloudflare bills DO duration in GB-seconds; this is a flat per-second stand-in
+ * so the ledger has a real number to sum instead of the $0 it reported before
+ * anything wrote DO usage at all. It will be wrong in magnitude and right in
+ * shape — a runaway shows up as a curve going up, which is the whole job.
+ *
+ * ponytail: flat rate, not GB-seconds. Replace with the real figure off the next
+ * Cloudflare invoice; the calibration knob is this one constant.
+ */
+const DURABLE_OBJECT_COST_PER_SECOND_USD = 0.0000125;
 
 export { errorCodeOf, safeJson } from "./agent-run-format";
 
@@ -153,6 +167,31 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
     } catch (error) {
       console.error("[agent-runs] failed to close run:", error);
     }
+
+    // Price the run's wall-clock as Durable Object compute.
+    //
+    // WHY HERE. `DURABLE_OBJECT` has been a declared metered provider since the
+    // metering system shipped, and its ceiling has never once been able to
+    // trip — because nothing anywhere wrote a DURABLE_OBJECT usage row, so
+    // `getCycleSpend` summed to $0 forever. A budget over an unmeasured number
+    // is decoration. Every Agent, Durable Object and Workflow entry point in
+    // this repo already opens a run through `startRun`, and a run's duration IS
+    // the billable quantity for a DO, so this one writer covers all of them
+    // without touching 26 classes.
+    //
+    // Recorded on close (not open) because duration is not known until then.
+    // `recordUsage` never throws by contract.
+    const durationMs = Date.now() - startedAt.getTime();
+    await recordUsage(env, {
+      agentRunId: runId,
+      provider: "DURABLE_OBJECT",
+      model: `${input.agent}/${input.operation}`,
+      feature: input.agent,
+      latencyMs: durationMs,
+      status: status === "failed" ? "error" : "ok",
+      costUsd: (durationMs / 1000) * DURABLE_OBJECT_COST_PER_SECOND_USD,
+      meta: { operation: input.operation, targetType: input.targetType },
+    });
   };
 
   return {
@@ -215,9 +254,7 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
     },
 
     async tool(name, args, fn) {
-      return withAgentRunContext({ runId, stepId: null }, () =>
-        recordTool(name, args, fn, null),
-      );
+      return withAgentRunContext({ runId, stepId: null }, () => recordTool(name, args, fn, null));
     },
 
     succeed: (output) => finish("succeeded", { output }),
@@ -235,39 +272,39 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
     fn: () => Promise<T>,
     stepId: number | null,
   ): Promise<T> {
-      const callStart = Date.now();
+    const callStart = Date.now();
+    try {
+      const result = await fn();
       try {
-        const result = await fn();
-        try {
-          await db.insert(agentRunToolCalls).values({
-            runId,
-            stepId,
-            tool: name,
-            ok: true,
-            argsJson: safeJson(args),
-            resultJson: safeJson(result),
-            durationMs: Date.now() - callStart,
-          });
-        } catch (error) {
-          console.error("[agent-runs] failed to record tool call:", error);
-        }
-        return result;
+        await db.insert(agentRunToolCalls).values({
+          runId,
+          stepId,
+          tool: name,
+          ok: true,
+          argsJson: safeJson(args),
+          resultJson: safeJson(result),
+          durationMs: Date.now() - callStart,
+        });
       } catch (error) {
-        try {
-          await db.insert(agentRunToolCalls).values({
-            runId,
-            stepId,
-            tool: name,
-            ok: false,
-            argsJson: safeJson(args),
-            errorCode: errorCodeOf(error),
-            errorMessage: messageOf(error),
-            durationMs: Date.now() - callStart,
-          });
-        } catch (recordError) {
-          console.error("[agent-runs] failed to record failed tool call:", recordError);
-        }
-        throw error;
+        console.error("[agent-runs] failed to record tool call:", error);
       }
+      return result;
+    } catch (error) {
+      try {
+        await db.insert(agentRunToolCalls).values({
+          runId,
+          stepId,
+          tool: name,
+          ok: false,
+          argsJson: safeJson(args),
+          errorCode: errorCodeOf(error),
+          errorMessage: messageOf(error),
+          durationMs: Date.now() - callStart,
+        });
+      } catch (recordError) {
+        console.error("[agent-runs] failed to record failed tool call:", recordError);
+      }
+      throw error;
+    }
   }
 }

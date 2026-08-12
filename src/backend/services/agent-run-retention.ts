@@ -20,8 +20,8 @@
  * minute-resolution pruning.
  */
 import { agentRuns } from "@backend/db";
+import { and, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { and, inArray, lt, sql } from "drizzle-orm";
 
 /** Terminal-and-boring: safe to forget relatively soon. */
 const SHORT_RETENTION_STATUSES = ["succeeded", "cancelled"] as const;
@@ -91,6 +91,69 @@ export async function pruneAgentRuns(env: Env, now = new Date()): Promise<Retent
   }
 
   return result;
+}
+
+/**
+ * How long a run may sit in `running`/`queued` before the sweep gives up on it.
+ * Generous on purpose: the longest legitimate run here is a multi-stage render
+ * campaign, and marking a live run dead is worse than reporting a dead one late.
+ */
+export const ABANDON_AFTER_HOURS = 24;
+
+/** `error_code` written by the sweep. Groups on /admin/system/agents failures. */
+export const ABANDONED_ERROR_CODE = "ABANDONED";
+
+/**
+ * Mark runs that will never finish as `failed` / `ABANDONED`.
+ *
+ * WHY THIS EXISTS: a run row is opened by `startRun` and closed by the caller.
+ * When the isolate dies mid-run — `Worker exceeded memory limit`, an evicted
+ * Workflow step, a thrown handler — nothing ever closes it, so the row sits in
+ * `running` forever. `pruneAgentRuns` refuses to delete those by design, and
+ * rightly so, but "keep it visible" was silently implemented as "keep it
+ * visible AND keep it indistinguishable from a live run". The DO runaway
+ * watcher counts `running` rows as evidence a Durable Object is awake and
+ * billing, so 31 corpses from a crash three weeks ago pinned the whole system
+ * health page to FAILURE and hid every real runaway behind a stale alarm.
+ *
+ * `failed` + an explicit `error_code` (rather than a new `abandoned` status) is
+ * what this probe's own devOpsPlaybook prescribes: it needs no migration, no
+ * enum change, and it inherits the 90-day failed-run retention for free.
+ *
+ * Never throws — this shares the daily cron with permit sync.
+ */
+export async function sweepAbandonedRuns(env: Env, now = new Date()): Promise<number> {
+  try {
+    const db = drizzle(env.DB);
+    const cutoff = new Date(now.getTime() - ABANDON_AFTER_HOURS * 60 * 60 * 1000);
+
+    const res = await db
+      .update(agentRuns)
+      .set({
+        status: "failed",
+        errorCode: ABANDONED_ERROR_CODE,
+        errorMessage: `No terminal status recorded within ${ABANDON_AFTER_HOURS}h — the run's isolate died before it could close the row.`,
+      })
+      .where(
+        and(
+          inArray(agentRuns.status, ["running", "queued"]),
+          lt(agentRuns.createdAt, cutoff),
+          // Only rows nothing has already diagnosed. A run someone manually
+          // annotated keeps its own error_code rather than being overwritten
+          // with the generic one.
+          isNull(agentRuns.errorCode),
+        ),
+      );
+
+    const swept = (res as { meta?: { changes?: number } })?.meta?.changes ?? 0;
+    if (swept) {
+      console.log(`[agent-runs] swept ${swept} run(s) abandoned for >${ABANDON_AFTER_HOURS}h`);
+    }
+    return swept;
+  } catch (err) {
+    console.error("[agent-runs] abandoned-run sweep failed:", err);
+    return 0;
+  }
 }
 
 /**
