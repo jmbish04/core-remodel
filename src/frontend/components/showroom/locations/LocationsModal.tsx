@@ -15,7 +15,7 @@
  * store contacts as a fallback). The map degrades gracefully: if the key or the Embed API is
  * unavailable, the pane still shows the address, contacts and the "Open in Google Maps" link.
  */
-import { Building2, ExternalLink, Mail, MapPin, Phone, User } from "lucide-react";
+import { Building2, Crown, ExternalLink, Mail, MapPin, Phone, User } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -201,12 +201,16 @@ function LocationPane({
 
   return (
     <div className="flex h-full flex-col gap-4 lg:flex-row">
-      {/* Left: details */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
+      {/* Left: details — bounded on desktop so the map takes the rest. */}
+      <div className="flex min-w-0 flex-col gap-4 overflow-y-auto lg:w-96 lg:shrink-0">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-lg font-semibold tracking-tight">{location.city ?? "Location"}</h3>
-            {location.isPrimary && <Badge variant="secondary">Primary</Badge>}
+            {location.isPrimary && (
+              <Badge variant="secondary" className="gap-1">
+                <Crown className="size-3 text-amber-400" aria-hidden /> Primary
+              </Badge>
+            )}
             {location.hubName && <Badge variant="outline">{location.hubName}</Badge>}
           </div>
           <p className="mt-1 flex items-start gap-1.5 text-sm text-muted-foreground">
@@ -349,7 +353,11 @@ export function LocationsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[92vh] w-[96vw] max-w-6xl flex-col gap-3 p-4 sm:p-5">
+      {/* Near-fullscreen: override the DialogContent primitive's `sm:max-w-sm`
+          cap (twMerge keeps base vs sm variants separately, so a plain
+          `max-w-*` here would NOT beat it on desktop) so the modal truly fills
+          ~96vw × 92vh and the map gets real width. */}
+      <DialogContent className="flex h-[92vh] max-h-[92vh] w-[96vw] max-w-[96vw] flex-col gap-3 p-4 sm:max-w-[96vw] sm:p-5">
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="size-5 text-muted-foreground" aria-hidden />
@@ -393,10 +401,18 @@ export function LocationsModal({
                       : "bg-muted/40 text-foreground/80 hover:bg-muted",
                   )}
                 >
-                  <span className="font-medium">{loc.city ?? `Location ${i + 1}`}</span>
-                  {loc.isPrimary && (
-                    <span className="ml-1 text-xs opacity-70">· primary</span>
-                  )}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="font-medium">{loc.city ?? `Location ${i + 1}`}</span>
+                    {loc.isPrimary && (
+                      <Crown
+                        className={cn(
+                          "size-3.5 shrink-0",
+                          i === active ? "text-amber-200" : "text-amber-400",
+                        )}
+                        aria-label="Primary location"
+                      />
+                    )}
+                  </span>
                 </button>
               ))}
             </div>
