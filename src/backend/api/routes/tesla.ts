@@ -39,6 +39,7 @@ import {
   verifyWebhookSecret,
 } from "@backend/services/tesla";
 import { extractCoord, extractTelemetryFields } from "@backend/services/tesla/frames";
+import { loadOneStoreLocations } from "@backend/services/showroom/locations";
 import {
   getStreamControl,
   isAutoNavigateEnabled,
@@ -94,6 +95,8 @@ teslaRouter.post("/navigate", async (c) => {
     destination?: string;
     lat?: number;
     lng?: number;
+    storeId?: number;
+    locationId?: number;
   };
 
   let dest: string | null = null;
@@ -102,6 +105,38 @@ teslaRouter.post("/navigate", async (c) => {
     dest = `${body.lat},${body.lng}`;
   } else if (typeof body.destination === "string" && body.destination.trim()) {
     dest = body.destination.trim();
+  } else if (typeof body.storeId === "number") {
+    // Per-location navigate: route to the SELECTED site of a multi-location brand,
+    // not always the primary. `locationId` picks the site; omitted → the derived
+    // primary; a location with no coords → the store's flat coords/address.
+    // Fixes the hero "Navigate" always sending the car to a 5-site brand's primary.
+    const db = drizzle(c.env.DB);
+    const locs = await loadOneStoreLocations(db, body.storeId);
+    const chosen =
+      typeof body.locationId === "number"
+        ? locs.find((l) => l.id === body.locationId)
+        : (locs.find((l) => l.isPrimary) ?? locs[0]);
+    if (typeof body.locationId === "number" && !chosen) {
+      return c.json({ error: "locationId does not belong to this store" }, 400);
+    }
+    if (chosen?.latitude != null && chosen?.longitude != null) {
+      dest = `${chosen.latitude},${chosen.longitude}`;
+    } else {
+      const [s] = await db
+        .select({
+          lat: showroomStores.latitude,
+          lng: showroomStores.longitude,
+          addr: showroomStores.locationAddress,
+        })
+        .from(showroomStores)
+        .where(eq(showroomStores.id, body.storeId))
+        .limit(1);
+      dest =
+        s?.lat != null && s?.lng != null
+          ? `${s.lat},${s.lng}`
+          : (chosen?.address ?? s?.addr ?? null);
+    }
+    if (!dest) return c.json({ error: "Store has no coordinates or address to navigate to." }, 404);
   } else if (body.slug && typeof body.stopId === "number") {
     const db = drizzle(c.env.DB);
     const [stop] = await db
