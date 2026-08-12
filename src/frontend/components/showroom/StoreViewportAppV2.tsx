@@ -1605,6 +1605,7 @@ export function StoreViewportAppV2({
               onAddNote={openCreateNote}
               onEditNote={openEditNote}
               onDeleteNote={setDeleteNoteTarget}
+              locationCityById={locationCityById}
             />
           </div>
         ) : section === "view-360" ? (
@@ -2587,11 +2588,13 @@ function NotesSection({
   onAddNote,
   onEditNote,
   onDeleteNote,
+  locationCityById,
 }: {
   notes: NoteRow[];
   onAddNote: () => void;
   onEditNote: (note: NoteRow) => void;
   onDeleteNote: (note: NoteRow) => void;
+  locationCityById: Map<number, string>;
 }) {
   return (
     <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
@@ -2608,7 +2611,10 @@ function NotesSection({
         </p>
       ) : (
         <ul className="mt-4 space-y-3">
-          {notes.map((note) => (
+          {notes.map((note) => {
+            const noteLocId = (note as NoteRow & { locationId?: number | null }).locationId;
+            const noteCity = noteLocId != null ? locationCityById.get(noteLocId) : null;
+            return (
             <li key={note.id} className="group relative">
               <button
                 type="button"
@@ -2619,11 +2625,18 @@ function NotesSection({
                   <span className="truncate text-sm font-medium">
                     {note.title?.trim() || "Untitled note"}
                   </span>
-                  {note.timestamp ? (
-                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      {new Date(note.timestamp).toLocaleDateString()}
-                    </span>
-                  ) : null}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {noteCity ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <MapPin className="size-2.5" /> {noteCity}
+                      </span>
+                    ) : null}
+                    {note.timestamp ? (
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        {new Date(note.timestamp).toLocaleDateString()}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 {note.contentMarkdown?.trim() || note.contentHtml?.trim() ? (
                   <NoteBody
@@ -2663,7 +2676,8 @@ function NotesSection({
                 <Trash2 className="size-3.5" />
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>
