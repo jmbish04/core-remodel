@@ -12,6 +12,7 @@ import { generateProductDraftPrompt } from "@backend/ai/agents/ShowroomResearchA
 import { brandImages, brands, showroomBrandMappings } from "@backend/db/schema/brands/index";
 import {
   showroomStores,
+  showroomStoreLocations,
   showroomStoreType,
   showroomStoreProducts,
   showroomStoreCategory,
@@ -60,9 +61,11 @@ import {
 } from "@backend/services/showroom/onboarding";
 import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
 import {
+  loadPlaceIdOwners,
   loadStoreLocationCities,
   loadStoreLocationCounts,
   loadStoreLocations,
+  resolveBayAreaCityId,
 } from "@backend/services/showroom/locations";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
@@ -1683,6 +1686,97 @@ showroomStoresRouter.get("/:id/locations", async (c) => {
       address: p.address,
     })),
   });
+});
+
+/**
+ * POST /:id/locations — manually add a physical site to an existing showroom (0045/0047).
+ * The REST twin of the `add_showroom_location` MCP tool: structured address parts (no free-text
+ * address string), optional `placeId` with a cross-table clash guard (stores + locations), and
+ * returns the new location with its DERIVED `isPrimary`. Use this instead of `update_showroom`
+ * (which OVERWRITES the primary) or a new store (which mints a duplicate business). Lets intake's
+ * dup-warning offer "add as a location of {store}". Contract: showroom-location-contract.md §14.2.
+ */
+showroomStoresRouter.post("/:id/locations", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json({ error: "Invalid store id" }, 400);
+  }
+  const [store] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) return c.json({ error: "Store not found" }, 404);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    streetNumber?: string;
+    streetName?: string;
+    unit?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+    latitude?: number;
+    longitude?: number;
+    placeId?: string;
+    googleMapsLink?: string;
+    notes?: string;
+    notesMarkdown?: string;
+    notesHtml?: string;
+  };
+
+  // Reject an empty location — need at least a place, coords, or an address part.
+  const hasCoords = typeof body.latitude === "number" && typeof body.longitude === "number";
+  if (!body.placeId && !body.city && !body.streetName && !hasCoords) {
+    return c.json(
+      { error: "Provide at least a placeId, coordinates, or a city/street for the new location." },
+      400,
+    );
+  }
+
+  // place_id guard. The unique index `showroom_store_locations_place_id_uniq` is
+  // SINGLE-COLUMN — a Google place can exist exactly ONCE across the whole table —
+  // so ANY existing owner (even this same store) is a conflict, not an allowed
+  // re-add: inserting a dup would trip SQLITE_CONSTRAINT → 500. loadPlaceIdOwners
+  // already scans BOTH showroom_stores and showroom_store_locations, so it's the
+  // whole cross-table guard on its own. Reject with the owning store id.
+  if (body.placeId) {
+    const owner = (await loadPlaceIdOwners(db, [body.placeId])).get(body.placeId);
+    if (owner != null) {
+      return c.json(
+        { error: `placeId is already registered to showroom ${owner}.`, ownerStoreId: owner },
+        409,
+      );
+    }
+  }
+
+  const bayAreaCityId = await resolveBayAreaCityId(db, body.city ?? null);
+  const [inserted] = await db
+    .insert(showroomStoreLocations)
+    .values({
+      storeId,
+      bayAreaCityId,
+      streetNumber: body.streetNumber ?? null,
+      streetName: body.streetName ?? null,
+      unit: body.unit ?? null,
+      city: body.city ?? null,
+      state: body.state ?? null,
+      zipCode: body.zipCode ?? null,
+      latitude: hasCoords ? body.latitude! : null,
+      longitude: hasCoords ? body.longitude! : null,
+      placeId: body.placeId ?? null,
+      googleMapsLink: body.googleMapsLink ?? null,
+      notes: body.notes ?? null,
+      notesMarkdown: body.notesMarkdown ?? null,
+      notesHtml: body.notesHtml ?? null,
+    })
+    .returning();
+
+  // Return the fresh DTO for the row we just created, with its DERIVED isPrimary
+  // (adding the first site can make it primary; adding a branch usually does not).
+  const dto =
+    (await loadStoreLocations(db, [storeId])).get(storeId)?.find((l) => l.id === inserted.id) ?? null;
+  return c.json({ location: dto }, 201);
 });
 
 /**
