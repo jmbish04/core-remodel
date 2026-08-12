@@ -9,6 +9,7 @@ import {
   estimateRoomMappings,
   estimates,
   estimateSourceEvents,
+  rooms,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
 import {
@@ -17,6 +18,7 @@ import {
   flattenStructuredProperties,
 } from "@backend/services/estimate-intake";
 import { attachServiceNames } from "@backend/services/service-names";
+import { generateStructured } from "@backend/services/structured-output";
 import type { BatchItem } from "drizzle-orm/batch";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -1111,6 +1113,275 @@ estimatesRouter.patch("/line-items/:lineItemId", async (c) => {
   if (!updated) return c.json({ error: "Line item not found" }, 404);
 
   return c.json({ lineItem: updated });
+});
+
+const MAPPING_STATUSES = ["unmapped", "ai_suggested", "confirmed", "rejected"] as const;
+
+/**
+ * Human-confirm write for room/budget-track mapping on a line item.
+ *
+ * Body: `{ roomId?: number|null, budgetItemTrackId?: string|null, mappingStatus?:
+ * 'unmapped'|'ai_suggested'|'confirmed'|'rejected' }`. This is the ONLY route that
+ * ever writes `roomId` — `POST /line-items/:lineItemId/ai-suggest` only stages a
+ * guess in the `aiSuggested*` columns. If `roomId` is provided as a number and
+ * `mappingStatus` was not, the mapping auto-advances to 'confirmed'.
+ */
+estimatesRouter.patch("/line-items/:lineItemId/reconcile", async (c) => {
+  const db = drizzle(c.env.DB);
+  const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+  if (Number.isNaN(lineItemId)) {
+    return c.json({ error: "Invalid lineItemId" }, 400);
+  }
+  const body = await c.req.json().catch(() => ({}));
+
+  const patch: Partial<typeof estimateLineItems.$inferInsert> = {};
+
+  if ("roomId" in body) {
+    if (body.roomId === null) {
+      patch.roomId = null;
+    } else {
+      if (typeof body.roomId !== "number" || !Number.isInteger(body.roomId) || body.roomId <= 0) {
+        return c.json({ error: "roomId must be a positive integer or null" }, 400);
+      }
+      const room = await db.select({ id: rooms.id }).from(rooms).where(eq(rooms.id, body.roomId)).get();
+      if (!room) {
+        return c.json({ error: `roomId ${body.roomId} does not exist` }, 400);
+      }
+      patch.roomId = body.roomId;
+    }
+  }
+
+  if ("budgetItemTrackId" in body) {
+    if (body.budgetItemTrackId !== null && typeof body.budgetItemTrackId !== "string") {
+      return c.json({ error: "budgetItemTrackId must be a string or null" }, 400);
+    }
+    patch.budgetItemTrackId = body.budgetItemTrackId;
+  }
+
+  if ("mappingStatus" in body) {
+    if (!MAPPING_STATUSES.includes(body.mappingStatus)) {
+      return c.json(
+        { error: `mappingStatus must be one of ${MAPPING_STATUSES.join(", ")}` },
+        400,
+      );
+    }
+    patch.mappingStatus = body.mappingStatus;
+  }
+
+  if (typeof patch.roomId === "number" && !("mappingStatus" in body)) {
+    patch.mappingStatus = "confirmed";
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return c.json({ error: "No fields to update" }, 400);
+  }
+
+  patch.datetimeUpdated = new Date();
+
+  const [updated] = await db
+    .update(estimateLineItems)
+    .set(patch)
+    .where(eq(estimateLineItems.id, lineItemId))
+    .returning();
+  if (!updated) return c.json({ error: "Line item not found" }, 404);
+
+  return c.json({ lineItem: updated });
+});
+
+const AI_SUGGEST_SCHEMA = {
+  type: "object",
+  properties: {
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          roomId: { type: "number" },
+          confidence: { type: "number" },
+          reasoning: { type: "string" },
+        },
+        required: ["roomId", "confidence", "reasoning"],
+      },
+    },
+    suggestedCategory: { type: ["string", "null"] },
+  },
+  required: ["candidates", "suggestedCategory"],
+};
+
+interface AiSuggestModelCandidate {
+  roomId?: unknown;
+  confidence?: unknown;
+  reasoning?: unknown;
+}
+
+/**
+ * Stage an AI room/category guess for a line item — never a hard write of
+ * `roomId`. The model only ever sees the real room ids for this house and must
+ * return ids from that set; any id it hallucinates is dropped before anything
+ * touches the row. A human confirms via `PATCH .../reconcile`.
+ */
+estimatesRouter.post("/line-items/:lineItemId/ai-suggest", async (c) => {
+  try {
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
+    const db = drizzle(c.env.DB);
+    const lineItem = await db
+      .select()
+      .from(estimateLineItems)
+      .where(eq(estimateLineItems.id, lineItemId))
+      .get();
+    if (!lineItem) {
+      return c.json({ error: "Line item not found" }, 404);
+    }
+
+    const activeRooms = await db
+      .select({ id: rooms.id, roomName: rooms.roomName })
+      .from(rooms)
+      .where(eq(rooms.isActive, true))
+      .all();
+    const roomById = new Map(activeRooms.map((room) => [room.id, room]));
+
+    const roomList = activeRooms.map((room) => `${room.id}: ${room.roomName}`).join("\n") || "(none)";
+    const prompt =
+      `Line item description: "${lineItem.description}"\n` +
+      `Line total (cents): ${lineItem.lineTotalCents ?? "unknown"}\n\n` +
+      `Which room(s) does this line item belong to? Choose ONLY from these room ids:\n${roomList}\n\n` +
+      `Return up to 3 candidates ranked by confidence (0-1), each with a short reason. ` +
+      `Also suggest a short budget category label for this line item, or null if unclear.`;
+
+    // Never degrade a failed parse to {} — let generateStructured's error
+    // (StructuredOutputError, carrying both provider errors) propagate to the
+    // catch block below, which surfaces it in the response instead of hiding it.
+    const { data } = await generateStructured<{
+      candidates?: AiSuggestModelCandidate[];
+      suggestedCategory?: unknown;
+    }>(c.env, {
+      feature: "estimate_line_item_ai_suggest",
+      system:
+        "You map remodel estimate line items to rooms in a house. Respond only with JSON.",
+      prompt,
+      schema: AI_SUGGEST_SCHEMA,
+    });
+
+    // Validate every returned roomId against the live rooms set — a
+    // hallucinated id must never reach aiSuggestedRoomId (an FK column).
+    const validated = (Array.isArray(data.candidates) ? data.candidates : [])
+      .filter(
+        (cand): cand is { roomId: number; confidence: number; reasoning: string } =>
+          typeof cand.roomId === "number" &&
+          roomById.has(cand.roomId) &&
+          typeof cand.confidence === "number" &&
+          typeof cand.reasoning === "string",
+      )
+      .sort((a, b) => b.confidence - a.confidence);
+
+    const suggestedCategory =
+      typeof data.suggestedCategory === "string" ? data.suggestedCategory : null;
+    const top = validated[0] ?? null;
+
+    await db
+      .update(estimateLineItems)
+      .set({
+        aiSuggestedRoomId: top?.roomId ?? null,
+        aiSuggestedCategory: suggestedCategory,
+        mappingConfidence: top?.confidence ?? null,
+        mappingStatus: "ai_suggested",
+        datetimeUpdated: new Date(),
+      })
+      .where(eq(estimateLineItems.id, lineItemId))
+      .run();
+
+    return c.json({
+      lineItemId,
+      candidates: validated.map((cand) => ({
+        roomId: cand.roomId,
+        roomName: roomById.get(cand.roomId)?.roomName ?? null,
+        confidence: cand.confidence,
+        reasoning: cand.reasoning,
+      })),
+      suggestedCategory,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to generate AI room suggestion",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * HITL reconciliation queue: line items still `unmapped` or `ai_suggested`,
+ * joined out to their estimate/company/revision context and (when staged) the
+ * AI-suggested room's display name.
+ */
+estimatesRouter.get("/reconcile/queue", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50", 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(c.req.query("offset") || "0", 10) || 0, 0);
+
+    const rowsPlusOne = await db
+      .select({
+        lineItem: estimateLineItems,
+        estimateId: estimates.id,
+        estimateScenarioId: estimates.scenarioId,
+        companyId: estimateCompanies.id,
+        companyName: estimateCompanies.name,
+        revisionId: estimateRevisions.id,
+        revisionNumber: estimateRevisions.revisionNumber,
+        suggestedRoomName: rooms.roomName,
+      })
+      .from(estimateLineItems)
+      .leftJoin(estimateRevisions, eq(estimateLineItems.estimateRevisionId, estimateRevisions.id))
+      .leftJoin(estimates, eq(estimateRevisions.estimateId, estimates.id))
+      .leftJoin(estimateCompanies, eq(estimates.estimateCompanyId, estimateCompanies.id))
+      .leftJoin(rooms, eq(estimateLineItems.aiSuggestedRoomId, rooms.id))
+      .where(inArray(estimateLineItems.mappingStatus, ["unmapped", "ai_suggested"]))
+      .orderBy(asc(estimateLineItems.datetimeCreated))
+      .limit(limit + 1)
+      .offset(offset)
+      .all();
+
+    const hasMore = rowsPlusOne.length > limit;
+    const rows = rowsPlusOne.slice(0, limit);
+
+    return c.json({
+      items: rows.map((row) => ({
+        lineItemId: row.lineItem.id,
+        description: row.lineItem.description,
+        lineTotalCents: row.lineItem.lineTotalCents,
+        mappingStatus: row.lineItem.mappingStatus,
+        roomId: row.lineItem.roomId,
+        budgetItemTrackId: row.lineItem.budgetItemTrackId,
+        aiSuggestedRoomId: row.lineItem.aiSuggestedRoomId,
+        aiSuggestedRoomName: row.suggestedRoomName,
+        aiSuggestedCategory: row.lineItem.aiSuggestedCategory,
+        mappingConfidence: row.lineItem.mappingConfidence,
+        estimateId: row.estimateId,
+        estimateScenarioId: row.estimateScenarioId,
+        company: row.companyId ? { id: row.companyId, name: row.companyName } : null,
+        revision: row.revisionId
+          ? { id: row.revisionId, revisionNumber: row.revisionNumber }
+          : null,
+      })),
+      limit,
+      offset,
+      hasMore,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to load reconciliation queue",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
 });
 
 export { estimatesRouter };
