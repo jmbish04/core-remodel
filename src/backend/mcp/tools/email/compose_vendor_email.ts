@@ -16,7 +16,7 @@ export const composeVendorEmailTool = defineTool({
   category: "email",
   title: "Compose a vendor email payload",
   description:
-    "Assemble a send-ready vendor-email payload: resolves the recipient (via resolve_recipient's logic), pulls the reusable instructions doc, loads the chosen Drive files with their share state, and suggests attach-vs-link per file against Gmail's ~18 MiB usable budget. THIS TOOL ASSEMBLES CONTEXT ONLY — it sends nothing and changes no Drive sharing. Hand the returned payload to the google-workspace-mcp worker's gmail_send / schedule_email to actually send. If the recipient can't be resolved uniquely, this returns the same ok:false/candidates shape as resolve_recipient — ask the user rather than guessing.",
+    "Assemble a send-ready vendor-email payload: resolves the recipient (via resolve_recipient's logic), pulls the reusable instructions doc, loads the chosen Drive files with their share state, and suggests attach-vs-link per file against Gmail's ~18 MiB usable budget. THIS TOOL ASSEMBLES CONTEXT ONLY — it sends nothing and changes no Drive sharing. Hand the returned payload to the google-workspace-mcp worker's gmail_send / schedule_email to actually send. If the recipient can't be resolved uniquely, this returns the same ok:false/candidates shape as resolve_recipient — ask the user rather than guessing. Any requested driveDocumentIds that could not be resolved (deleted, inactive, or unknown) come back in missingDriveDocumentIds and are NOT included in attachments — tell the user those files are missing rather than assuming they were attached.",
   inputShape: {
     email: z.string().optional().describe("Explicit recipient email address"),
     store: z.string().optional().describe("Showroom store id or name substring"),
@@ -42,6 +42,12 @@ export const composeVendorEmailTool = defineTool({
     to: z.array(z.string()).optional(),
     subject: z.string().optional(),
     instructionsMarkdown: z.string().optional(),
+    missingDriveDocumentIds: z
+      .array(z.number().int())
+      .optional()
+      .describe(
+        "Requested driveDocumentIds that were not found (deleted, inactive, or unknown) and are not in attachments",
+      ),
     attachments: z
       .array(
         looseObject({
@@ -124,10 +130,16 @@ export const composeVendorEmailTool = defineTool({
       dispositions.map((d) => [d.driveDocumentId, d.suggestedDisposition]),
     );
 
+    // foundIds spans every chunk (files is accumulated across the whole loop above),
+    // so an id found in a later chunk is never misreported as missing.
+    const foundIds = new Set(files.map((f) => f.id));
+    const missingDriveDocumentIds = [...new Set(ids)].filter((id) => !foundIds.has(id));
+
     return {
       to: resolved.recipients.map((r) => r.email),
       subject: input.subject,
       instructionsMarkdown: instructions.markdown,
+      missingDriveDocumentIds,
       attachments: files.map((f) => ({
         driveDocumentId: f.id,
         name: f.name,
