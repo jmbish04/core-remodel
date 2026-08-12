@@ -12,6 +12,11 @@ import {
   type JulesSessionState,
 } from "@backend/services/jules/client";
 import {
+  finishJulesSessionLog,
+  setJulesSessionId,
+  startJulesSessionLog,
+} from "@backend/services/showroom/jules-session-log";
+import {
   computeClearanceHash,
   extractClearance,
   isClearanceUnchanged,
@@ -66,10 +71,17 @@ const READY_POLL_MS = 3_000;
 const WORK_GAP_MS = 2_000;
 /** Alarm cadence while waiting for a batch reply (Jules answers in minutes). */
 const REPLY_POLL_MS = 20_000;
-/** Reply-wait alarm cycles before a batch falls back to Workers-AI (~2.7 min). */
-const REPLY_MAX_CYCLES = 8;
-/** Hard lifetime ceiling — past this a job drains to fallback, then stops. */
-const MAX_LIFETIME_MS = 30 * 60 * 1_000;
+/**
+ * Reply-wait alarm cycles before a batch falls back to Workers-AI. 24 × 20s = 8
+ * min — Jules is a planning agent and a live run showed it does not answer inside
+ * a few minutes, so the budget is generous; only a genuinely dead reply falls back.
+ */
+const REPLY_MAX_CYCLES = 24;
+/**
+ * Hard lifetime ceiling. 60 min accommodates several changed-page batches each
+ * waiting up to the 8-min reply budget (unchanged pages skip the wait entirely).
+ */
+const MAX_LIFETIME_MS = 60 * 60 * 1_000;
 /**
  * Liveness guard. Re-armed at the TOP of every alarm fire, before any heavy work
  * (Browser-Render scraping, Jules round-trips). If a fire is hard-terminated by
@@ -114,6 +126,8 @@ interface PendingBatch {
 /** The whole job, persisted in KV (never in DO SQLite). */
 interface JulesClearanceJob {
   jobId: string;
+  /** Our per-sweep uuid (crypto.randomUUID) — the D1 log row's key. */
+  sessionUuid: string;
   sessionId: string | null;
   /** True once a create was attempted, so a caught error can't double-create. */
   sessionRequested: boolean;
@@ -173,8 +187,10 @@ export class JulesClearanceAgent extends DurableObject<Env> {
       }
 
       const jobId = crypto.randomUUID();
+      const sessionUuid = crypto.randomUUID();
       const job: JulesClearanceJob = {
         jobId,
+        sessionUuid,
         sessionId: null,
         sessionRequested: false,
         links,
@@ -186,8 +202,12 @@ export class JulesClearanceAgent extends DurableObject<Env> {
       };
       await this.saveJob(job);
       await this.ctx.storage.put("jobId", jobId); // the only DO-storage write besides the alarm
+      // Record the sweep in D1 (best-effort — never block the run on logging).
+      await startJulesSessionLog(this.env, { sessionUuid, jobId, linksTotal: links.length }).catch(
+        (err) => console.error("[jules-clearance] session-log insert failed:", err),
+      );
       await this.ctx.storage.setAlarm(Date.now() + 500);
-      return Response.json({ ok: true, jobId, links: links.length });
+      return Response.json({ ok: true, jobId, sessionUuid, links: links.length });
     }
 
     if (request.method === "GET" && url.pathname === "/status") {
@@ -260,6 +280,9 @@ export class JulesClearanceAgent extends DurableObject<Env> {
         job.sessionId = session.id;
         job.status = "booting";
         await this.saveJob(job);
+        await setJulesSessionId(this.env, job.sessionUuid, session.id).catch((err) =>
+          console.error("[jules-clearance] session-log id update failed:", err),
+        );
         await this.ctx.storage.setAlarm(Date.now() + BOOT_POLL_MS);
         return;
       }
@@ -444,6 +467,9 @@ export class JulesClearanceAgent extends DurableObject<Env> {
     job.status = status;
     await this.saveJob(job);
     await this.ctx.storage.deleteAlarm();
+    await finishJulesSessionLog(this.env, job.sessionUuid, status, job.summary).catch((err) =>
+      console.error("[jules-clearance] session-log finish failed:", err),
+    );
     console.info(
       `[jules-clearance] job ${job.jobId} ${status}: ${job.summary.pages} pages — ` +
         `${job.summary.recorded} recorded, ${job.summary.unchanged} unchanged, ${job.summary.empty} empty, ` +
