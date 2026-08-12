@@ -41,6 +41,7 @@ import {
   browserRunPages,
   showroomPhotosMapping,
   showroomStoreHours,
+  showroomStoreContacts,
   showroomStoreLinks,
   productPriceObservations,
   productShowroomPhotos,
@@ -1669,6 +1670,62 @@ showroomStoresRouter.get("/:id/locations", async (c) => {
   const links = await getStoreLinks(db, storeId);
   const { websiteUrl } = linksToLegacyUrls(links);
 
+  // Per-location hours + phone (ASK #8, Phase L). Additive/nullable so a location-scoped
+  // page degrades to store-level when a site has none of its own:
+  //  - hours: the site's own showroom_store_hours rows, else the brand-wide (location_id
+  //    IS NULL) rows.
+  //  - phone: the site's GENERAL_CONTACT office line; null until a per-site general
+  //    contact lands for that location.
+  const hourRows = await db
+    .select({
+      locationId: showroomStoreHours.locationId,
+      day: showroomStoreHours.day,
+      openHour: showroomStoreHours.openHour,
+      openMinute: showroomStoreHours.openMinute,
+      closeHour: showroomStoreHours.closeHour,
+      closeMinute: showroomStoreHours.closeMinute,
+    })
+    .from(showroomStoreHours)
+    .where(eq(showroomStoreHours.showroomId, storeId))
+    .all();
+  const brandHours = hourRows.filter((h) => h.locationId == null);
+  const hoursByLoc = new Map<number, typeof hourRows>();
+  for (const h of hourRows) {
+    if (h.locationId == null) continue;
+    const list = hoursByLoc.get(h.locationId) ?? [];
+    list.push(h);
+    hoursByLoc.set(h.locationId, list);
+  }
+
+  const generalContacts = await db
+    .select({
+      locationId: showroomStoreContacts.locationId,
+      phone: showroomStoreContacts.officePhoneNumber,
+    })
+    .from(showroomStoreContacts)
+    .where(
+      and(
+        eq(showroomStoreContacts.storeId, storeId),
+        eq(showroomStoreContacts.type, "GENERAL_CONTACT"),
+        eq(showroomStoreContacts.isDraft, false),
+      ),
+    )
+    .all();
+  const phoneByLoc = new Map<number, string>();
+  for (const g of generalContacts) {
+    if (g.locationId != null && g.phone) phoneByLoc.set(g.locationId, g.phone);
+  }
+
+  const enrichedLocations = locations.map((l) => {
+    const rows = hoursByLoc.get(l.id) ?? brandHours;
+    return {
+      ...l,
+      hours: rows,
+      hoursJson: rows.length ? rowsToHoursJson(rows) : null,
+      phone: phoneByLoc.get(l.id) ?? null,
+    };
+  });
+
   const pocs = await db
     .select()
     .from(showroomPocs)
@@ -1676,7 +1733,7 @@ showroomStoresRouter.get("/:id/locations", async (c) => {
     .all();
 
   return c.json({
-    locations,
+    locations: enrichedLocations,
     storePhone: store.phoneNumber,
     storeWebsite: websiteUrl,
     pocs: pocs.map((p) => ({
