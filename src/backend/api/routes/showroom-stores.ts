@@ -4663,6 +4663,9 @@ showroomStoresRouter.get("/:id/photos-gallery", async (c) => {
       authorAttributes: showroomPhotosMapping.authorAttributes,
       flagContentUri: showroomPhotosMapping.flagContentUri,
       googleMapsUri: showroomPhotosMapping.googleMapsUri,
+      // Phase L — the physical site this Places photo belongs to (null until backfilled),
+      // so the frontend can badge it with its location.
+      locationId: showroomPhotosMapping.locationId,
     })
     .from(showroomPhotosMapping)
     .where(eq(showroomPhotosMapping.showroomId, storeId))
