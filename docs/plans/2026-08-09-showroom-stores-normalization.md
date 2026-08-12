@@ -994,11 +994,15 @@ JSON-schema output (per delta 2): `{ categories: [{ id, name }], primaryCategory
 — then set `is_primary` on the `primaryCategoryId` mapping row.
 
 ### 17.D Impacted surfaces (#8)
-- **Schema/migration:** `soft_delete_reason`; `category_mapping.is_primary` + partial-unique; category merge_map + remap + deactivate.
-- **API:** `GET /categories` (return active only), `GET /api/showroom-stores` (group by is_primary), category create/map endpoints (reject inactive/duplicate names, set is_primary), `PATCH /:id` (soft_delete_reason).
-- **MCP:** the category-assignment tool(s) + `create_showroom`/scrape classifier — constrained-vocab + primary.
-- **Intake classifier (primary change):** `utils/showroom-categories.ts` (`inferShowroomCategoryIds` + `inferAndMapCategories`) — cap 1–3, explicit `primaryCategoryId` → set `is_primary`, 28-vocab descriptions. Called by `services/showroom/onboarding.ts` (intake) + `ShowroomResearchAgent/methods/backfill.ts`. Also verify `showroom-scrape-workflow.ts:949-970` (website-content classify) rides the same helper.
-- **Frontend:** directory (group by primary, one card per store), the category filter chips, the store viewport category editor (mark primary), `/admin/config` category management (merge/deactivate UI).
+
+**Role split (Justin 2026-08-12): `[BE]` = this (normalization) session · `[FE]` = viewport session.** Seam =
+the HTTP API; contract at `docs/plans/showroom-location-contract.md`.
+
+- **`[BE]` Schema/migration:** `soft_delete_reason`; `category_mapping.is_primary` + partial-unique; category merge_map + remap + deactivate.
+- **`[BE]` API:** `GET /categories` (return active only), `GET /api/showroom-stores` (expose is_primary + `locations[]` so FE can group/plot), category create/map endpoints (reject inactive/duplicate names, set is_primary), `PATCH /:id` (soft_delete_reason).
+- **`[BE]` MCP:** the category-assignment tool(s) + `create_showroom`/scrape classifier — constrained-vocab + primary.
+- **`[BE]` Intake classifier (primary change):** `utils/showroom-categories.ts` (`inferShowroomCategoryIds` + `inferAndMapCategories`) — cap 1–3, explicit `primaryCategoryId` → set `is_primary`, 28-vocab descriptions. Called by `services/showroom/onboarding.ts` (intake) + `ShowroomResearchAgent/methods/backfill.ts`. Also verify `showroom-scrape-workflow.ts:949-970` (website-content classify) rides the same helper.
+- **`[FE]` (viewport session) Frontend:** directory (group by primary, one card per store; map one-pin-per-location), category filter chips, the store viewport category editor (mark primary), `/admin/config` category management (merge/deactivate UI). The Edit-categories modal grouping already shipped (#384/#385); its future `is_primary` control is `[FE]`.
 
 ### 17.E Directory: one canonical store, shown at all its locations
 Ref: the shipped locations-UI design (`docs/superpowers/specs/2026-08-09-showroom-locations-ui-design.md`,
