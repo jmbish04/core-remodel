@@ -16,7 +16,7 @@ export const composeVendorEmailTool = defineTool({
   category: "email",
   title: "Compose a vendor email payload",
   description:
-    "Assemble a send-ready vendor-email payload: resolves the recipient (via resolve_recipient's logic), pulls the reusable instructions doc, loads the chosen Drive files with their share state, and suggests attach-vs-link per file against Gmail's ~18 MiB usable budget. THIS TOOL ASSEMBLES CONTEXT ONLY — it sends nothing and changes no Drive sharing. Hand the returned payload to the google-workspace-mcp worker's gmail_send / schedule_email to actually send. If the recipient can't be resolved uniquely, this returns the same ok:false/candidates shape as resolve_recipient — ask the user rather than guessing. Any requested driveDocumentIds that could not be resolved (deleted, inactive, or unknown) come back in missingDriveDocumentIds and are NOT included in attachments — tell the user those files are missing rather than assuming they were attached.",
+    "Assemble a send-ready vendor-email payload, then hand it to the google-workspace-mcp worker's gmail_send / schedule_email to actually send. THIS TOOL SENDS NOTHING and changes no Drive sharing. It resolves the recipient (via resolve_recipient's logic), pulls the reusable instructions doc, and loads the chosen Drive files. HOW TO USE THE RESULT: (1) pass `instructionsMarkdown` (folded together with your message) to gmail_send/schedule_email as `markdown` — that worker inlines CSS and renders markdown to Gmail-safe HTML, so you do NOT author HTML here; (2) map each item in `attachments` straight to that worker's `attachments: [{ driveFileId, as }]` using the item's `driveFileId` and `as` fields — the worker downloads+attaches an `as:'attach'` file and inserts an anyone-with-link Drive link for an `as:'link'` one, and it auto-falls-back to a link for any file over Gmail's 25 MiB cap regardless of `as`, so `as` is a preference it may override for oversize files; (3) gmail_send/schedule_email take a SINGLE `to` string — send once per address in `to` if there is more than one. If the recipient can't be resolved uniquely, this returns the same ok:false/candidates shape as resolve_recipient — ask the user rather than guessing. Any requested driveDocumentIds that could not be resolved (deleted, inactive, or unknown) come back in missingDriveDocumentIds and are NOT in attachments — tell the user those files are missing rather than assuming they were sent.",
   inputShape: {
     email: z.string().optional().describe("Explicit recipient email address"),
     store: z.string().optional().describe("Showroom store id or name substring"),
@@ -51,13 +51,17 @@ export const composeVendorEmailTool = defineTool({
     attachments: z
       .array(
         looseObject({
+          // driveFileId + as map 1:1 onto the Workspace worker's
+          // attachments: [{ driveFileId, as }] input. driveDocumentId is the
+          // core-remodel catalogue row id (kept for reference, not for sending).
+          driveFileId: z.string(),
           driveDocumentId: z.number().int(),
           name: z.string(),
           mimeType: z.string(),
           sizeBytes: z.number().int().nullable(),
           webViewUrl: z.string(),
           sharing: z.string(),
-          suggestedDisposition: z.enum(["attach", "link"]),
+          as: z.enum(["attach", "link"]),
         }),
       )
       .optional(),
@@ -93,6 +97,7 @@ export const composeVendorEmailTool = defineTool({
 
     type DriveFileRow = {
       id: number;
+      driveFileId: string;
       name: string;
       mimeType: string;
       sizeBytes: number | null;
@@ -106,6 +111,8 @@ export const composeVendorEmailTool = defineTool({
       const rows = await db
         .select({
           id: driveDocuments.id,
+          // The Google Drive file id — what the Workspace send tool references.
+          driveFileId: driveDocuments.driveId,
           name: driveDocuments.name,
           mimeType: driveDocuments.mimeType,
           sizeBytes: driveDocuments.sizeBytes,
@@ -141,13 +148,14 @@ export const composeVendorEmailTool = defineTool({
       instructionsMarkdown: instructions.markdown,
       missingDriveDocumentIds,
       attachments: files.map((f) => ({
+        driveFileId: f.driveFileId,
         driveDocumentId: f.id,
         name: f.name,
         mimeType: f.mimeType,
         sizeBytes: f.sizeBytes,
         webViewUrl: f.webViewUrl,
         sharing: f.sharing,
-        suggestedDisposition: dispositionById.get(f.id) ?? "link",
+        as: dispositionById.get(f.id) ?? "link",
       })),
     };
   },
