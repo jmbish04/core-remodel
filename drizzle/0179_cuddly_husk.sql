@@ -1,0 +1,2 @@
+ALTER TABLE `showroom_store_category_mapping` ADD `is_primary` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `sscm_one_primary_per_store` ON `showroom_store_category_mapping` (`store_id`) WHERE is_primary = 1;

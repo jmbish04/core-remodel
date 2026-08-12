@@ -1189,9 +1189,13 @@ showroomStoresRouter.get("/", async (c) => {
               eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id),
             )
             .where(inArray(showroomStoreCategoryMapping.storeId, chunk))
-            // Registration order: the first category is the store's primary type
-            // (drives the map marker colour), so keep it deterministic.
-            .orderBy(showroomStoreCategoryMapping.id),
+            // The store's is_primary category FIRST (its single directory group +
+            // map-marker colour), then registration order. Backed by the real
+            // is_primary flag now, not just insertion order.
+            .orderBy(
+              desc(showroomStoreCategoryMapping.isPrimary),
+              showroomStoreCategoryMapping.id,
+            ),
         )
           .then((catRows) => {
             const map = new Map<number, string[]>();
