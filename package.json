@@ -164,6 +164,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "3.0.14",
+    "@google/jules-sdk": "^0.2.0",
     "@mermaid-js/parser": "^1.2.0",
     "@types/lodash.throttle": "^4.1.9",
     "@types/node": "^24.12.2",

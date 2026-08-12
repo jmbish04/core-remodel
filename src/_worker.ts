@@ -30,10 +30,10 @@ import {
   type IngestSummary,
 } from "./backend/services/google/drive-ingest";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
+import { startClearanceSweep } from "./backend/services/jules/clearance-sweep";
 import { refreshPricingCatalog } from "./backend/services/pricing/catalog";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
 import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
-import { sweepShowroomSales } from "./backend/services/showroom/sales";
 import { pollVehicleForActiveDrive } from "./backend/services/tesla-poller";
 import { enforceStreamWindow } from "./backend/services/tesla/gating";
 import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
@@ -51,6 +51,7 @@ export { BidPortfolioAgent } from "./backend/ai/agents/BidPortfolioAgent";
 export { EstimateCollabHub } from "./backend/realtime/EstimateCollabHub";
 export { FloorplanSessionDO } from "./backend/realtime/FloorplanSessionDO";
 export { DiscoveryHub } from "./backend/realtime/DiscoveryHub";
+export { JulesClearanceAgent } from "./backend/durable-objects/jules-clearance-agent";
 export { GAS_A2A } from "./backend/a2a-v2/server";
 export { ImageProcessingWorkflow } from "./backend/services/image-processor/workflow.js";
 export { ImageBatchProcessingWorkflow } from "./backend/services/image-processor/batch-workflow";
@@ -450,18 +451,22 @@ const legacyHandler: ExportedHandler<Env> = {
       return;
     }
     if (event.cron === "30 13 * * 1") {
-      // Weekly showroom sale/clearance sweep. Re-scans every WEBSITE_CLEARANCE
-      // link and records a showroom_store_sales snapshot ONLY
-      // when the page content actually changed vs the last scrape.
+      // Weekly showroom sale/clearance sweep. First runs plain-fetch discovery to
+      // register any new clearance/sale/outlet links across the whole directory
+      // (sitemap.xml, or the homepage when a site has none), then hands the
+      // WEBSITE_CLEARANCE links to the Jules DO (primary; Workers-AI fallback when
+      // no JULES_API_KEY). A snapshot is only written when a page changed vs the
+      // last scrape. NOTE: Cloudflare cron day-of-week is 1=Sunday, so this fires
+      // SUNDAY 13:30 UTC, not Monday — matching the observed run history.
       ctx.waitUntil(
-        sweepShowroomSales(env)
+        startClearanceSweep(env)
           .then((r) =>
             console.log(
-              `[scheduled] showroom sales sweep: pages=${r.pagesScanned} stores=${r.storesScanned} ` +
-                `recorded=${r.recorded} unchanged=${r.unchanged} empty=${r.empty} errors=${r.errors}`,
+              `[scheduled] clearance sweep kicked off: mode=${r.mode} links=${r.links} ` +
+                `job=${r.jobId ?? "n/a"} discovery=${r.discovery ? `+${r.discovery.newLinks} links/${r.discovery.storesScanned} stores` : "skipped"}`,
             ),
           )
-          .catch((err) => console.error("[scheduled] showroom sales sweep failed:", err)),
+          .catch((err) => console.error("[scheduled] clearance sweep failed:", err)),
       );
       return;
     }
