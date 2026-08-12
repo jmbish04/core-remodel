@@ -44,3 +44,7 @@ proxmox-jobs.sqlite3
 proxmox-jobs.sqlite3-shm
 proxmox-jobs.sqlite3-wal
 proxmox_mcp.log
+
+# Showroom normalization plan — local DB exports/archives, never commit (contain full prod data)
+docs/plans/2026-08-09-showroom-stores-normalization/data/
+docs/plans/2026-08-09-showroom-stores-normalization/db-archive/

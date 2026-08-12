@@ -63,6 +63,14 @@ export const BRANCHES: ChangelogBranch[] = [
     prUrl: "https://github.com/jmbish04/core-remodel/pull/377",
   },
   {
+    branch: "claude/database-schema-audit-cleanup-271ac6",
+    title: "Showroom stores normalization — audit + migration plan (no code shipped)",
+    summary:
+      "PLAN ONLY. A 6-agent audit of showroom_stores against live prod: the location→child-table refactor is already 100% mirrored (233/233 stores have location rows; the 16 flat columns are redundant copies), the contact side is barely started (0 GENERAL_CONTACT rows; 72 pocs + 5 main_poc unmigrated), and NOTHING can drop yet because intake writes zero child rows and ~35 placeId + all geo readers still read flat columns. Ships the staged expand→contract plan plus the intake-normalization + 50-mile sibling-discovery feature preview. No source changed except this changelog + the plan doc.",
+    date: "2026-08-09",
+    status: "staged",
+  },
+  {
     branch: "feat/drive-ingestion-service",
     title: "Drive ingestion service — catalogue any Google Drive folder into D1",
     summary:
@@ -424,6 +432,47 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         kind: "changed",
         text: "GET /api/admin/drive/documents is now paginated (limit default 200, max 500; offset) instead of an unbounded read.",
+      },
+    ],
+    status: "staged",
+    prNumber: 377,
+  },
+  {
+    id: "showroom-stores-normalization",
+    branch: "claude/database-schema-audit-cleanup-271ac6",
+    date: "2026-08-09",
+    area: "Showroom",
+    title: "Showroom stores normalization — audit + zero-loss migration plan",
+    summary:
+      "PLAN ONLY, no schema shipped. A 6-agent audit measured against live prod: location data is already 100% mirrored into showroom_store_locations (233/233 stores; the 16 flat columns are redundant copies), contacts are barely migrated (0 GENERAL_CONTACT; 72 pocs + 5 flat main_poc pending), and no column can drop until intake writes child rows and ~35 placeId + all geo/drive readers move to JOINs (a dropped column is a silent undefined, not a compile error). Documents the staged expand→contract migration and the intake-normalization + 50-mile sibling-discovery feature (mapped onto our real stack, correcting the Gemini snippet).",
+    changes: [
+      {
+        kind: "added",
+        text: "docs/plans/2026-08-09-showroom-stores-normalization.md — the full plan: hard-fact table (233 active; place_id 184, address 207, lat+long 184, phone 219, email 39, main_poc 5; contacts 12/0 GENERAL_CONTACT), 16-column destination map, 5-phase expand→contract sequence with exact API + frontend filepaths, open decisions, and D1 cautions.",
+      },
+      {
+        kind: "added",
+        text: "Live prod query exports on disk under docs/plans/2026-08-09-showroom-stores-normalization/data/ (showroom-stores-list, incomplete, showroom-contacts, from-pocs dry-run, computed summary) — the receipts behind every number.",
+      },
+      {
+        kind: "added",
+        text: "Intake-normalization + sibling-discovery change-list preview: force Title/Camel Case on store name (new display normalizer, distinct from normName); root-domain dedup via normHost → attach a location under the existing parent instead of a new store; 50-mile Google Places sibling discovery gated by a website-host signal, each sibling an additional showroom_store_locations row (NO isSibling column — isPrimary is derived per #375).",
+      },
+      {
+        kind: "changed",
+        text: "Corrected the Gemini reference snippet against this repo: no new UUID-PK tables, no isSibling flag, no OpenAI-via-AI-Gateway path (repo uses Gemini-direct + JSON-schema output and existing review enrichment), extend showroom-bulk-intake-workflow.ts rather than a new ShowroomIntakeWorkflow, and pnpm run db:generate + migrate:remote rather than migrate:db.",
+      },
+      {
+        kind: "added",
+        text: "NEW requirement folded in (Phase L): site-specific content re-parents from the store to a showroom_store_location. 8 tables (visit_log, photos_mapping, ratings, contacts, images, notes, product photos/prices, store_rating) gain a nullable location_id; 5 stay brand-level (sitemap, browser_run_pages, photo_buckets, scan_log). Before/after ERD (red=removed/green=added): https://claude.ai/code/artifact/730c49ed-2dc0-42fc-a402-69fc003c3ac8",
+      },
+      {
+        kind: "added",
+        text: "Full deliverables added to the plan: exhaustive API-layer walkthrough (companion doc, every endpoint current→new + file:line + phase + breaking? + frontend consumer), frontend walkthrough (directory one-marker-per-location, viewport per-site source badges, uploads/scrape/contacts/notes retargeted to a location picker), 8-dimension agentic review plan, 34-check behavioral smoke plan, and 12 success criteria. Caught a today-broken endpoint: meta/place-exists reads flat placeId only, misses location-only place_ids.",
+      },
+      {
+        kind: "added",
+        text: "Full prod DB archive as a restore point (git-ignored, not committed): db-archive/full-dump-20260810.sql (57MB, whole DB via wrangler d1 export) + json/ (25 showroom-cluster tables). Row baselines: 244 stores, 248 locations, 12 contacts vs 72 pocs, 242 images, 479 photo mappings.",
       },
     ],
     status: "staged",
