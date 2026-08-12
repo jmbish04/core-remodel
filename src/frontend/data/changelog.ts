@@ -56,6 +56,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/budget-grid-followups",
+    title: "Budget grid usability — phase assignment + funding config",
+    summary:
+      "Two follow-ups that make the shipped budget grid usable: assign a line to a phase from the grid, and set funding accounts (Total Budget) from the UI. Plus a correctness fix — the item PATCH revision insert was dropping phaseId + the variance note.",
+    date: "2026-08-12",
+    status: "staged",
+    prNumber: 400,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/400",
+  },
+  {
     branch: "feat/vendor-email-context-layer",
     title: "Vendor-email context layer — instructions doc + recipient resolution",
     summary:
@@ -431,6 +441,22 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "budget-grid-usability",
+    branch: "claude/budget-grid-followups",
+    date: "2026-08-12",
+    tag: "0035 follow-up",
+    area: "Budget",
+    title: "Budget grid usability — phase assignment + funding config",
+    summary:
+      "The shipped grid launched degenerate: every line was Unphased and Total Budget was $0 with no UI to change either. This adds a compact per-line phase-select (PATCH /api/budget-tracker/items/{id} {phaseId} → refetch, line moves into its phase group) and a 'Set budget' funding editor on the Total-budget scorecard (loads /financial-status, edits label + amount per account, saves via PUT /financial-accounts). It also fixes a load-bearing correctness bug: the budget-item PATCH revision insert dropped phaseId and the variance note, so ANY edit silently wiped a line's phase — phaseId + variance md/html are now carried forward across revisions (undefined=keep, null=unassign). QC 11/11 preview; phase-assign persistence + carry-forward verified by round-trip.",
+    changes: [
+      { kind: "added", text: "Per-line phase assignment on the grid: ghost phase-select → PATCH /api/budget-tracker/items/{id} {phaseId} → refetch; options from GET /api/config/budget-phases." },
+      { kind: "added", text: "Funding config: 'Set budget' dialog on the Total-budget scorecard (GET /financial-status load, PUT /financial-accounts save, add/remove rows, CurrencyInput, empty-state hint)." },
+      { kind: "fixed", text: "budget-item PATCH now carries phaseId + variance-note md/html across revisions (added phaseId to BudgetTrackerPatch) — previously any edit wiped the phase assignment." },
+    ],
+    status: "staged",
+  },
   {
     id: "vendor-email-context-layer",
     branch: "feat/vendor-email-context-layer",

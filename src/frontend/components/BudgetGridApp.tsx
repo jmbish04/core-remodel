@@ -11,8 +11,10 @@
  */
 import {
   Loader2,
+  Pencil,
   Plus,
   Search,
+  Trash2,
   TriangleAlert,
   Check,
   Info,
@@ -57,6 +59,7 @@ import {
   formatUsd,
   monthlyVariance,
   netBurn,
+  slugifyAccountKey,
   type View,
 } from "./budget-grid-view";
 
@@ -100,6 +103,9 @@ type Grid = {
     phaseCount: number;
   };
 };
+
+/** Active budget phase from GET /api/config/budget-phases (bare array). */
+type BudgetPhase = { id: number; name: string; description: string | null; isActive: boolean };
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "estimate", label: "Estimate" },
@@ -228,18 +234,23 @@ function Scorecard({
   label,
   value,
   sub,
+  action,
   children,
 }: {
   label: string;
   value: string;
   sub?: React.ReactNode;
+  action?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1 rounded-lg border bg-card/40 p-4">
-      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </span>
+        {action}
+      </div>
       <span className="font-mono text-2xl font-semibold tabular-nums tracking-tight">{value}</span>
       {sub ? <span className="text-xs text-muted-foreground">{sub}</span> : null}
       {children}
@@ -404,6 +415,253 @@ function LogExpenseDialog({
   );
 }
 
+// ─── Per-line phase control ─────────────────────────────────────────────────
+
+/**
+ * Compact, quiet phase reassignment control for a single line row. The grid
+ * response doesn't carry a line's own `phaseId`, so the current value is derived
+ * from the phase group the line is rendered under (`currentId`, 0 = Unphased).
+ * The option set is the active phases plus "Unphased", and always includes the
+ * current phase even if it's since been deactivated, so the trigger never blanks.
+ */
+function PhaseSelect({
+  currentId,
+  currentName,
+  phases,
+  onAssign,
+}: {
+  currentId: number;
+  currentName: string;
+  phases: BudgetPhase[];
+  onAssign: (phaseId: number | null) => void;
+}) {
+  const options = React.useMemo(() => {
+    const byId = new Map<number, string>([[0, "Unphased"]]);
+    for (const p of phases) byId.set(p.id, p.name);
+    if (!byId.has(currentId)) byId.set(currentId, currentName);
+    return [...byId].map(([id, name]) => ({ id, name }));
+  }, [phases, currentId, currentName]);
+
+  return (
+    <Select
+      value={String(currentId)}
+      onValueChange={(v) => {
+        const id = Number(v ?? currentId);
+        if (id === currentId) return;
+        onAssign(id === 0 ? null : id);
+      }}
+    >
+      <SelectTrigger
+        aria-label={`Phase — currently ${currentName}`}
+        className="h-6 gap-1 border-0 bg-transparent px-1.5 text-xs font-normal text-muted-foreground shadow-none hover:text-foreground focus:ring-1 data-[placeholder]:text-muted-foreground [&>svg]:size-3"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.id} value={String(o.id)}>
+            {o.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// ─── Funding accounts dialog ────────────────────────────────────────────────
+
+type FundingRow = {
+  accountKey: string; // "" for a not-yet-saved row
+  accountLabel: string;
+  amountText: string;
+  amountCents: number | null;
+  notes: string | null;
+};
+
+function blankFundingRow(): FundingRow {
+  return { accountKey: "", accountLabel: "", amountText: "", amountCents: null, notes: null };
+}
+
+/**
+ * "Funding accounts" editor opened from the Total-budget scorecard. Loads the
+ * current accounts on open, edits label + amount per row, and PUTs the whole set
+ * (upsert by accountKey; new rows derive their key from the label). Refetches the
+ * grid on save so Total budget + Remaining reconcile.
+ */
+function FundingDialog({
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [rows, setRows] = React.useState<FundingRow[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    api<{
+      accounts: {
+        accountKey: string;
+        accountLabel: string;
+        amountCents: number;
+        notes: string | null;
+      }[];
+    }>("/api/budget-tracker/financial-status")
+      .then((res) => {
+        if (cancelled) return;
+        const loaded = (res.accounts ?? []).map<FundingRow>((a) => ({
+          accountKey: a.accountKey,
+          accountLabel: a.accountLabel,
+          amountText: (a.amountCents / 100).toFixed(2),
+          amountCents: a.amountCents,
+          notes: a.notes,
+        }));
+        setRows(loaded.length > 0 ? loaded : [blankFundingRow()]);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        toast.error(err instanceof Error ? err.message : "Failed to load funding accounts");
+        setRows([blankFundingRow()]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  function patchRow(index: number, patch: Partial<FundingRow>) {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }
+
+  const filled = rows.filter((r) => r.accountLabel.trim() && r.amountCents !== null);
+  const canSave = !saving && !loading && filled.length > 0;
+
+  async function save() {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const payload = filled.map((r) => ({
+        accountKey: r.accountKey || slugifyAccountKey(r.accountLabel),
+        accountLabel: r.accountLabel.trim(),
+        amountCents: r.amountCents as number,
+        notes: r.notes,
+      }));
+      await api("/api/budget-tracker/financial-accounts", {
+        method: "PUT",
+        body: JSON.stringify({ accounts: payload }),
+      });
+      toast.success("Funding updated");
+      onOpenChange(false);
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save funding");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Funding accounts</DialogTitle>
+          <DialogDescription>
+            Set your approved budget so the grid can show remaining and % used. Amounts total into
+            Total budget.
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {rows.map((row, i) => (
+              <div key={i} className="flex items-end gap-2">
+                <div className="flex flex-1 flex-col gap-1.5">
+                  {i === 0 ? (
+                    <Label htmlFor={`funding-label-${i}`} className="text-xs text-muted-foreground">
+                      Account
+                    </Label>
+                  ) : null}
+                  <Input
+                    id={`funding-label-${i}`}
+                    aria-label={`Account ${i + 1} name`}
+                    placeholder="e.g. HELOC"
+                    value={row.accountLabel}
+                    onChange={(e) => patchRow(i, { accountLabel: e.target.value })}
+                  />
+                </div>
+                <div className="flex w-40 flex-col gap-1.5">
+                  {i === 0 ? (
+                    <Label
+                      htmlFor={`funding-amount-${i}`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      Amount
+                    </Label>
+                  ) : null}
+                  <CurrencyInput
+                    id={`funding-amount-${i}`}
+                    aria-label={`Account ${i + 1} amount`}
+                    value={row.amountText}
+                    onValueChange={(text, cents) =>
+                      patchRow(i, { amountText: text, amountCents: cents })
+                    }
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label={`Remove account ${i + 1}`}
+                  disabled={rows.length === 1}
+                  onClick={() =>
+                    setRows((prev) =>
+                      prev.length === 1 ? [blankFundingRow()] : prev.filter((_, j) => j !== i),
+                    )
+                  }
+                >
+                  <Trash2 aria-hidden className="size-4" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-1 gap-1.5 self-start text-muted-foreground"
+              onClick={() => setRows((prev) => [...prev, blankFundingRow()])}
+            >
+              <Plus aria-hidden className="size-4" />
+              Add account
+            </Button>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!canSave}>
+            {saving ? <Loader2 aria-hidden className="size-4 animate-spin" /> : null}
+            Save funding
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main app ───────────────────────────────────────────────────────────────
 
 export function BudgetGridApp() {
@@ -419,6 +677,8 @@ export function BudgetGridApp() {
 
   const [collapsed, setCollapsed] = React.useState<Set<number>>(new Set());
   const [logOpen, setLogOpen] = React.useState(false);
+  const [fundingOpen, setFundingOpen] = React.useState(false);
+  const [phases, setPhases] = React.useState<BudgetPhase[]>([]);
 
   // Inline plan edit (Estimate view only): which cell is open + its draft text.
   const [editing, setEditing] = React.useState<{ trackId: string; monthIdx: number } | null>(null);
@@ -473,6 +733,31 @@ export function BudgetGridApp() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  // Active phases for the per-line reassignment control — fetched once.
+  React.useEffect(() => {
+    api<BudgetPhase[]>("/api/config/budget-phases")
+      .then((rows) => setPhases(Array.isArray(rows) ? rows : []))
+      .catch(() => {
+        /* control still offers Unphased + the line's current phase */
+      });
+  }, []);
+
+  // Reassign a line to a phase (null = Unphased) and refetch so it regroups.
+  const assignPhase = React.useCallback(
+    async (lineId: number, phaseId: number | null) => {
+      try {
+        await api(`/api/budget-tracker/items/${lineId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ phaseId }),
+        });
+        void load();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to reassign phase");
+      }
+    },
+    [load],
+  );
 
   const searchActive = query.length > 0;
   const isCollapsed = React.useCallback(
@@ -632,6 +917,17 @@ export function BudgetGridApp() {
               label="Total budget"
               value={formatUsd(sc.totalBudgetCents)}
               sub={`${sc.phaseCount} phases · ${sc.lineItemCount} line items`}
+              action={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="-mr-1.5 -mt-1.5 size-7 text-muted-foreground hover:text-foreground"
+                  aria-label="Set budget — edit funding accounts"
+                  onClick={() => setFundingOpen(true)}
+                >
+                  <Pencil aria-hidden className="size-3.5" />
+                </Button>
+              }
             />
             <Scorecard label="Spent to date" value={formatUsd(sc.spentCents)}>
               <div
@@ -869,6 +1165,14 @@ export function BudgetGridApp() {
                               <div className="flex items-center gap-2 border-l border-border pl-3">
                                 <span className="text-muted-foreground">{line.label}</span>
                                 {line.flag ? <VarianceBadge flag={line.flag} /> : null}
+                                <span className="ml-auto pl-2">
+                                  <PhaseSelect
+                                    currentId={p.id}
+                                    currentName={p.name}
+                                    phases={phases}
+                                    onAssign={(phaseId) => void assignPhase(line.id, phaseId)}
+                                  />
+                                </span>
                               </div>
                             </td>
                             {months.map((m, i) => {
@@ -987,6 +1291,8 @@ export function BudgetGridApp() {
         lines={flatLines}
         onLogged={() => void load()}
       />
+
+      <FundingDialog open={fundingOpen} onOpenChange={setFundingOpen} onSaved={() => void load()} />
     </TooltipProvider>
   );
 }

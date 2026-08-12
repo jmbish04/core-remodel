@@ -16,7 +16,22 @@ const {
   netBurn,
   cumulativeVariance,
   monthlyVariance,
+  slugifyAccountKey,
 } = await import("../../src/frontend/components/budget-grid-view.ts");
+
+// --- slugifyAccountKey (new funding-account keys) -------------------------
+assert.strictEqual(slugifyAccountKey("HELOC Draw"), "heloc_draw", "spaces -> single _");
+assert.strictEqual(
+  slugifyAccountKey("  Cash / Savings  "),
+  "cash_savings",
+  "trim + collapse punctuation",
+);
+assert.strictEqual(
+  slugifyAccountKey("401(k) Loan!!"),
+  "401_k_loan",
+  "strip non-alnum, no trailing _",
+);
+assert.strictEqual(slugifyAccountKey("Main"), "main", "already-clean label");
 
 // --- formatting -----------------------------------------------------------
 assert.strictEqual(formatUsd(123400), "$1,234", "formatUsd rounds to whole dollars, commas");

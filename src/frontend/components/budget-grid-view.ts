@@ -14,6 +14,20 @@
 
 export type View = "estimate" | "actuals" | "variance";
 
+/**
+ * Derive a stable `accountKey` from a funding-account label (lowercase, every
+ * non-alphanumeric run collapsed to a single `_`, trimmed). Only used for NEW
+ * accounts — existing rows keep their loaded key. Mirrors the backend upsert
+ * target so a re-typed label doesn't spawn a duplicate account.
+ */
+export function slugifyAccountKey(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 /** Semantic tone for a rendered cell; the component maps these to color classes. */
 export type CellTone = "plain" | "zero" | "pos" | "neg";
 

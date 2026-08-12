@@ -30,6 +30,7 @@ type BudgetTrackerPatch = {
   estimatedLowCents?: number | string | null;
   estimatedHighCents?: number | string | null;
   scenarioId?: string | null;
+  phaseId?: number | null;
   owner?: string | null;
   aiRationale?: string | null;
   isDraft?: boolean | null;
@@ -195,6 +196,14 @@ async function replaceBudgetTrackerItemRevision(
           : (parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents),
       scenarioId:
         patch.scenarioId === null ? null : normalizeString(patch.scenarioId) || current.scenarioId,
+      // Carry the grid phase forward across revisions: undefined = keep current,
+      // explicit null = unassign. Without this line, any edit silently wipes the
+      // phase (and the item drops back into the grid's "Unphased" group).
+      phaseId: patch.phaseId === undefined ? current.phaseId : patch.phaseId,
+      // Variance note has no PATCH field yet — carry it forward so an unrelated
+      // edit can't drop the authored note (0035 write-contract).
+      varianceNoteMarkdown: current.varianceNoteMarkdown,
+      varianceNoteHtml: current.varianceNoteHtml,
       owner: patch.owner === null ? null : normalizeString(patch.owner) || current.owner,
       aiRationale:
         patch.aiRationale === null
