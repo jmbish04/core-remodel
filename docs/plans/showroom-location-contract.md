@@ -3,8 +3,16 @@
 **Purpose:** durable contract between the **normalization** work (schema + backend; owns the data) and the
 **viewport** rebuild (`StoreViewportApp.tsx`; pure consumer). If a field or its timing changes, it changes here first.
 
-**Owners:** normalization = schema, `showroom_store_locations`, `location_id` rollout, merge-candidate applies,
-intake classifier. viewport = the consuming UI (location selector, per-location badges, `?loc=<id>`).
+**Role split (locked by Justin 2026-08-12): BACKEND = normalization session · FRONTEND = viewport session.**
+Clean seam at the HTTP API — this doc is the contract across it.
+
+| Owner | Scope |
+|---|---|
+| **Backend** (normalization) | All D1 schema + migrations (`is_primary`, `soft_delete_reason`, `location_id` on the Phase-L child tables); every API endpoint's shape + query (`/:id/locations` enrichment, the `/:id` JOIN cutover, `locations[]` on the list, group-by-primary support, `/:id/categories` primary write, `/meta/categories`); MCP tools; the intake category classifier (`utils/showroom-categories.ts`, `onboarding.ts`); merge-candidate applies; data backfills; dedup/remap. **I make the data + the JSON exist and be correct.** |
+| **Frontend** (viewport) | Every React island + Astro page that consumes the above: the store viewport (location selector, per-location badges, `?loc=<id>`), the directory (map one-pin-per-location `flatMap`, card group-by-primary), category chips/filters, the Edit-categories modal's future `is_primary` control, `/admin/config` category-management UI. **They render + wire what the API returns.** |
+
+Rule: **backend changes a field → updates this doc → pings frontend. Frontend needs a new field → asks here,
+backend adds it to `/:id/locations` (never a parallel fetch).** Neither edits the other's layer.
 
 **Golden rule (both agree): DECOUPLED + DEFENSIVE.** The viewport reads `location_id` **where the column
 exists today**, and **degrades to store-level** when it's null or the column hasn't shipped. Neither PR blocks
