@@ -38,6 +38,7 @@ export * from "./sale_item_images";
 export * from "./sale_item_colors";
 export * from "./sale_watch";
 export * from "./sale_scrape_runs";
+export * from "./jules_clearance_sessions";
 export * from "./weekly_sale_ad";
 export * from "./contacts";
 export * from "./product_intel";

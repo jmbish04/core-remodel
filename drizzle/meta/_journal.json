@@ -533,6 +533,13 @@
       "when": 1786255744226,
       "tag": "0175_curved_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 176,
+      "version": "6",
+      "when": 1786523174314,
+      "tag": "0176_neat_dagger",
+      "breakpoints": true
     }
   ]
 }

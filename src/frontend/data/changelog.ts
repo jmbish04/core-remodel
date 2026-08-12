@@ -79,7 +79,7 @@ export const BRANCHES: ChangelogBranch[] = [
     summary:
       "The weekly showroom sale/clearance sweep now hands its pages to a repoless Google Jules session as the PRIMARY extractor, using the paid subscription's ~1M-token context for the heavy analysis. A new native-alarm Durable Object (JulesClearanceAgent) stands the session up, waits for the VM to boot, then feeds scraped pages in small batches and reads back one JSON reply per batch — so the sweep is no longer bound by the ~15-minute scheduled-invocation wall that was truncating it. Cost is bounded like TeslaStreamDO: job state lives in KV (never DO SQLite), each alarm fire does at most a few pages, and the alarm is deleted the instant the job finishes so the DO goes dormant. Workers-AI is the fallback on any Jules outage or unparseable reply, moved off kimi-k2.6 (a reasoning model that returns empty content for structured output — the reason most snapshots were empty) to kimi-k2.7-code with thinking disabled. The SDK itself can't run on Workers (its bundle statically imports node:fs/os), so we call the Jules REST API directly; @google/jules-sdk stays a dev dependency for its types. Also closes the coverage gap: plain-fetch sitemap/homepage discovery finds and registers clearance links across all stores, not just the 6 a shallow scrape happened to crawl.",
     date: "2026-08-11",
-    status: "staged",
+    status: "shipped",
     prNumber: 380,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/380",
   },
@@ -533,6 +533,10 @@ export const CHANGELOG: ChangelogEntry[] = [
       },
       {
         kind: "fixed",
+        text: "Follow-up (0176_wistful migration): gave Jules more time — the per-batch reply budget is now 8 min (was 2.7) and the job lifetime 60 min, after a live run showed Jules doesn't answer inside a few minutes and was losing to the Workers-AI fallback every time. Plus a new jules_clearance_sessions D1 table recording each sweep's session_uuid (crypto.randomUUID), the Jules API session id, timestamps and the final outcome — so a billed Jules run is auditable from D1, not just the DO's ephemeral KV.",
+      },
+      {
+        kind: "fixed",
         text: "Live-run fix (found by QC --sweep against prod right after deploy): the DO went dormant stuck in 'booting' — a fire hard-terminated by the runtime mid-scrape skipped its re-arm, and a hard kill isn't a catchable JS throw so the outer try/catch never re-armed either. Added a liveness guard: every alarm fire re-arms a 90s safety alarm BEFORE any heavy work, which every normal path overwrites with a tighter cadence; only a killed handler lets it survive, so the DO always wakes again. Plus phase logging and a persisted 'running' state before the scrape.",
       },
       {
@@ -540,7 +544,7 @@ export const CHANGELOG: ChangelogEntry[] = [
         text: "Hardening from an independent code review (local reviewer, codra offline): (1) the Jules reply was detected by comparing the Worker's Date.now() against Jules's server createTime — a cross-clock compare that under skew silently filtered the real reply out and fell back forever; now baselined on Jules's own timeline before the send. (2) The 24s in-alarm reply poll would time out before a Jules VM (which answers in minutes) ever replied, so Jules was primary in name only while still paying for the VM — the reply wait is now ALARM-DRIVEN (send → persist pending → read on a later fire, ~2.7 min budget, then per-page fallback). (3) The Jules session was never torn down — now archived in finish and on the lifetime→fallback flip so a booted VM is never leaked. (4) Concurrent kickoffs on the singleton DO clobbered a running job and leaked its session — /start now returns the in-flight job instead. (5) A lifetime-ceiling job now drains its remaining links through Workers-AI instead of reporting a clean 'done' with nothing extracted. Plus: persistSaleSnapshot supersede+insert is now one db.batch; discovery dedupe normalizes http-vs-https; a private-host guard on discovery fetches.",
       },
     ],
-    status: "staged",
+    status: "shipped",
     prNumber: 380,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/380",
   },
