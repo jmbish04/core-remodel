@@ -98,7 +98,8 @@ import {
   UploadPhotoModal,
   type StoreCategoryChip,
 } from "./hero";
-import { LocationsSpot } from "./locations/LocationsModal";
+import { type StoreLocation } from "./locations/LocationsModal";
+import { LocationSwitcher } from "./viewport-v2/LocationSwitcher";
 import { asLinkType } from "./intake/LinksField";
 import { absoluteHref } from "./hero/SocialLinks";
 import type { HoursJson } from "./intake/hours-types";
@@ -571,9 +572,12 @@ function ScrapeBadge({
 
 export function StoreViewportAppV2({
   id,
+  locationId,
   initialSection = "brands-products",
 }: {
   id: number;
+  /** Selected location (V2 location-centric routing). Undefined → primary site. */
+  locationId?: number;
   initialSection?: SectionKey;
 }) {
   const [store, setStore] = useState<StoreDetail | null>(null);
@@ -608,6 +612,14 @@ export function StoreViewportAppV2({
   const [avgVisitRating, setAvgVisitRating] = useState<number | null>(null);
   const [docsCount, setDocsCount] = useState(0);
   const [docsOpen, setDocsOpen] = useState(false);
+
+  // V2 location-centric: the store's physical sites + the selected one. Legacy
+  // POCs come back on the same payload — unioned into Contacts (they're the only
+  // contact source for some stores until Phase-L migrates pocs → contacts).
+  const [locations, setLocations] = useState<StoreLocation[]>([]);
+  const [locationPocs, setLocationPocs] = useState<
+    Array<{ id: number; fullName: string | null; title: string | null; phone: string | null; email: string | null }>
+  >([]);
 
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
@@ -832,6 +844,30 @@ export function StoreViewportAppV2({
         if (!cancelled) setDocsCount(docs.length);
       } catch {
         /* leave 0 */
+      }
+    })();
+    void (async () => {
+      try {
+        const res = await fetch(`/api/showroom-stores/${id}/locations`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          locations?: StoreLocation[];
+          pocs?: Array<{
+            id: number;
+            fullName: string | null;
+            title: string | null;
+            phone: string | null;
+            email: string | null;
+          }>;
+        };
+        if (!cancelled) {
+          setLocations(data.locations ?? []);
+          setLocationPocs(data.pocs ?? []);
+        }
+      } catch {
+        /* leave empty — degrade to a single store-level view */
       }
     })();
     return () => {
@@ -1119,6 +1155,18 @@ export function StoreViewportAppV2({
 
   // ── Bento sections ──────────────────────────────────────────────────────────
 
+  // V2 location-centric: the selected physical site drives the site-varying hero
+  // widgets (address / map / navigate / 360 / call / hours). Falls back to the
+  // primary, then the first, then null (single store-level view when no rows).
+  const activeLoc = useMemo(() => {
+    if (locations.length === 0) return null;
+    return (
+      (locationId != null ? locations.find((l) => l.id === locationId) : undefined) ??
+      locations.find((l) => l.isPrimary) ??
+      locations[0]
+    );
+  }, [locations, locationId]);
+
   // The store's 360° walkthrough (Matterport or other), if a SHOWROOM_TOUR link
   // exists. Surfaced in the Photos section and flagged on its bento tile.
   const tourUrl = useMemo(
@@ -1266,24 +1314,22 @@ export function StoreViewportAppV2({
               />
             </div>
 
-            {(store.cityName || store.hubName) ? (
+            {(activeLoc?.city || store.cityName || store.hubName) ? (
               <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
                 <MapPin className="size-3.5" />
-                {[store.cityName, store.hubName].filter(Boolean).join(" · ")}
+                {[activeLoc?.city ?? store.cityName, activeLoc?.hubName ?? store.hubName]
+                  .filter(Boolean)
+                  .join(" · ")}
               </div>
             ) : null}
 
-            {/* V2 item 12: locations lifted up under the name/city. Count + city
-                chips; opens the locations modal. (Per-location page switching is
-                Phase B.) Hidden by LocationsSpot itself when single-location. */}
-            <div className="mt-2">
-              <LocationsSpot
-                storeId={store.id}
-                storeName={store.name}
-                locationCount={store.locationCount ?? 0}
-                locationCities={store.locationCities ?? []}
-              />
-            </div>
+            {/* V2 location-centric: switch the whole page between physical sites.
+                Renders nothing for a single-location store. */}
+            <LocationSwitcher
+              storeId={store.id}
+              locations={locations}
+              activeId={activeLoc?.id ?? null}
+            />
 
             {/* Google rating — always shown when Places supplied one, regardless
                 of whether the homeowner has visited/rated the showroom. */}
@@ -1346,23 +1392,10 @@ export function StoreViewportAppV2({
               <p className="mt-2 text-sm text-muted-foreground">{store.description}</p>
             ) : null}
 
-            {/* Phone number kept as text above the buttons — nice to see the
-                number, plus the big Call button below for on-the-go. */}
-            {store.phoneNumber ? (
-              <div className="mt-3 text-[13px]">
-                <a
-                  href={`tel:${store.phoneNumber.replace(/[^\d+]/g, "")}`}
-                  className="inline-flex items-center gap-1.5 font-medium text-sky-400 hover:text-sky-300"
-                >
-                  <Phone className="size-3.5" />
-                  {formatPhone(store.phoneNumber)}
-                </a>
-              </div>
-            ) : null}
-
-            {/* V2 item 5: equal-size hero buttons — Linked Pages (opens the links
-                modal), Navigate (Tesla), Call. Same height/shape, each flexes to
-                fill the row evenly. */}
+            {/* V2 item 5 + location-centric: equal-size hero buttons — Linked
+                Pages (opens the links modal), Navigate (Tesla, to the SELECTED
+                location's coords), Call. Same height/shape, flex evenly. The
+                phone text line was dropped — the Call button covers it. */}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 variant="outline"
@@ -1371,10 +1404,11 @@ export function StoreViewportAppV2({
               >
                 <Link2 className="size-4" /> Linked Pages
               </Button>
-              {store.latitude != null && store.longitude != null ? (
+              {(activeLoc?.latitude ?? store.latitude) != null &&
+              (activeLoc?.longitude ?? store.longitude) != null ? (
                 <NavigateTeslaButton
-                  latitude={store.latitude}
-                  longitude={store.longitude}
+                  latitude={(activeLoc?.latitude ?? store.latitude) as number}
+                  longitude={(activeLoc?.longitude ?? store.longitude) as number}
                   className="h-12 min-w-40 flex-1 gap-2"
                 />
               ) : null}
@@ -1552,7 +1586,7 @@ export function StoreViewportAppV2({
             />
           </div>
         ) : section === "contacts" ? (
-          <ContactsSection contacts={contacts} storeId={id} />
+          <ContactsSection contacts={contacts} pocs={locationPocs} storeId={id} />
         ) : section === "visits-notes" ? (
           // V2 item 1 + 10: Visits + Notes merged; the visit-rating block that
           // used to sit in the hero now lives at the top of this section.
@@ -1574,9 +1608,9 @@ export function StoreViewportAppV2({
           <View360Section
             tourUrl={tourUrl}
             storeId={id}
-            placeId={store.placeId}
-            lat={store.latitude}
-            lng={store.longitude}
+            placeId={activeLoc?.placeId ?? store.placeId}
+            lat={activeLoc?.latitude ?? store.latitude}
+            lng={activeLoc?.longitude ?? store.longitude}
           />
         ) : (
           <PhotosSection
@@ -2365,12 +2399,37 @@ function BrandsProductsSection({
  * ManagePocsSection.
  */
 /**
- * Contacts tab (V2 item 3) — one flat "Contacts" list. The old separate
- * GENERAL_CONTACT "Store contact" card is dropped (it duplicated the hero
- * header). Each contact carries a tel: auto-dial, a clickable-email action menu
- * (ContactEmailMenu), and an unread-email badge that opens the store inbox.
+ * Contacts tab (V2 item 3 + location-centric) — one flat "Contacts" list unioned
+ * from BOTH the newer showroom_store_contacts and the legacy showroom_pocs (some
+ * stores only have pocs until Phase-L migrates them; reading one source showed 0).
+ * Dedupes by email. Each contact: tel: auto-dial, a clickable-email action menu,
+ * and an unread-email badge that opens the store inbox.
  */
-function ContactsSection({ contacts, storeId }: { contacts: ContactRow[]; storeId: number }) {
+interface Person {
+  key: string;
+  name: string;
+  typeLabel: string;
+  office: string | null;
+  ext: string | null;
+  mobile: string | null;
+  email: string | null;
+}
+
+function ContactsSection({
+  contacts,
+  pocs,
+  storeId,
+}: {
+  contacts: ContactRow[];
+  pocs: Array<{
+    id: number;
+    fullName: string | null;
+    title: string | null;
+    phone: string | null;
+    email: string | null;
+  }>;
+  storeId: number;
+}) {
   // Per-contact unread: match each contact's email against the store's
   // domain-matched Gmail threads (by `fromRecipient`) and tally unread per addr.
   const [unreadByEmail, setUnreadByEmail] = useState<Map<string, number>>(new Map());
@@ -2399,13 +2458,49 @@ function ContactsSection({ contacts, storeId }: { contacts: ContactRow[]; storeI
     };
   }, [storeId]);
 
+  // Union both contact sources, dedupe by email (a migrated person appears in
+  // both once Phase-L runs — show them once).
+  const people = useMemo<Person[]>(() => {
+    const out: Person[] = [];
+    const seen = new Set<string>();
+    for (const c of contacts) {
+      const email = c.emailAddress?.toLowerCase() ?? null;
+      if (email) seen.add(email);
+      out.push({
+        key: `c${c.id}`,
+        name:
+          [c.firstName, c.lastName].filter(Boolean).join(" ").trim() ||
+          (c.type === "GENERAL_CONTACT" ? "Store contact" : "Contact"),
+        typeLabel: c.type.replace(/_/g, " ").toLowerCase(),
+        office: c.officePhoneNumber,
+        ext: c.officePhoneExtension,
+        mobile: c.mobilePhoneNumber,
+        email: c.emailAddress,
+      });
+    }
+    for (const p of pocs) {
+      const email = p.email?.toLowerCase() ?? null;
+      if (email && seen.has(email)) continue;
+      out.push({
+        key: `p${p.id}`,
+        name: p.fullName?.trim() || "Contact",
+        typeLabel: p.title?.trim() || "contact",
+        office: p.phone,
+        ext: null,
+        mobile: null,
+        email: p.email,
+      });
+    }
+    return out;
+  }, [contacts, pocs]);
+
   return (
     <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
       <div className="flex items-center gap-2">
         <Users className="size-4 text-muted-foreground" />
-        <h2 className="text-base font-semibold">Contacts ({contacts.length})</h2>
+        <h2 className="text-base font-semibold">Contacts ({people.length})</h2>
       </div>
-      {contacts.length === 0 ? (
+      {people.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">
           No contacts yet. Add reps from the{" "}
           <a href="/admin/shopping/contacts" className="text-sky-400 hover:text-sky-300">
@@ -2415,12 +2510,12 @@ function ContactsSection({ contacts, storeId }: { contacts: ContactRow[]; storeI
         </p>
       ) : (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {contacts.map((c) => (
+          {people.map((p) => (
             <ContactCardV2
-              key={c.id}
-              contact={c}
+              key={p.key}
+              person={p}
               storeId={storeId}
-              unread={c.emailAddress ? (unreadByEmail.get(c.emailAddress.toLowerCase()) ?? 0) : 0}
+              unread={p.email ? (unreadByEmail.get(p.email.toLowerCase()) ?? 0) : 0}
             />
           ))}
         </div>
@@ -2438,24 +2533,21 @@ function emailFromAddress(raw: string): string | null {
 
 /** One contact: name + type, tel: dials, email action menu, unread badge. */
 function ContactCardV2({
-  contact,
+  person,
   storeId,
   unread,
 }: {
-  contact: ContactRow;
+  person: Person;
   storeId: number;
   unread: number;
 }) {
-  const name =
-    [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() ||
-    (contact.type === "GENERAL_CONTACT" ? "Store contact" : "Contact");
   return (
     <div className="rounded-lg bg-muted/40 p-4 ring-1 ring-border/40">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{name}</p>
-          <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            {contact.type.replace(/_/g, " ").toLowerCase()}
+          <p className="truncate text-sm font-semibold">{person.name}</p>
+          <p className="truncate font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            {person.typeLabel}
           </p>
         </div>
         {unread > 0 ? (
@@ -2470,30 +2562,28 @@ function ContactCardV2({
         ) : null}
       </div>
       <div className="mt-2 flex flex-col gap-1.5 text-sm">
-        {contact.officePhoneNumber ? (
+        {person.office ? (
           <a
-            href={`tel:${telHref(contact.officePhoneNumber, contact.officePhoneExtension)}`}
+            href={`tel:${telHref(person.office, person.ext ?? undefined)}`}
             className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
           >
             <Phone className="size-4" />
             <span className="tabular-nums">
-              {fmtPhone(contact.officePhoneNumber)}
-              {contact.officePhoneExtension ? ` ext. ${contact.officePhoneExtension}` : ""}
+              {fmtPhone(person.office)}
+              {person.ext ? ` ext. ${person.ext}` : ""}
             </span>
           </a>
         ) : null}
-        {contact.mobilePhoneNumber ? (
+        {person.mobile ? (
           <a
-            href={`tel:${telHref(contact.mobilePhoneNumber)}`}
+            href={`tel:${telHref(person.mobile)}`}
             className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
           >
             <Phone className="size-4" />
-            <span className="tabular-nums">{fmtPhone(contact.mobilePhoneNumber)}</span>
+            <span className="tabular-nums">{fmtPhone(person.mobile)}</span>
           </a>
         ) : null}
-        {contact.emailAddress ? (
-          <ContactEmailMenu email={contact.emailAddress} storeId={storeId} />
-        ) : null}
+        {person.email ? <ContactEmailMenu email={person.email} storeId={storeId} /> : null}
       </div>
     </div>
   );
@@ -2913,10 +3003,3 @@ function VisitRatingCard({
  * card). Any string that doesn't reduce to exactly 10 digits is returned
  * unchanged (still valid for a tel: link).
  */
-function formatPhone(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const digits = raw.replace(/\D/g, "");
-  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
-  if (ten.length !== 10) return raw;
-  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)} - ${ten.slice(6)}`;
-}
