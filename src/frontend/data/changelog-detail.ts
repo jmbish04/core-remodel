@@ -377,6 +377,53 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       migrations: [],
     },
   },
+  "drive-ingestion-review-followups": {
+    slug: "drive-ingestion-review-followups",
+    branch: "fix/drive-ingestion-review-followups",
+    prNumber: 377,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/377",
+    subtitle: "Three review fixes on the Drive ingestion service (PR #374)",
+    introduction:
+      "An independent reviewer (Cursor, gpt-5.6-sol-high) run over the *merged* PR #374 caught three real defects the build's own multi-agent review chain missed. Two of them are interactions BETWEEN fixes from the same wave — a class a diff-scoped review structurally cannot see, because each change looks correct in isolation.",
+    problem:
+      "The Drive ingestion service (PR #374) shipped with three latent defects, only visible once the fixes in that wave were considered together:\n\n" +
+      "1. **Scan lease released unconditionally.** A scan that ran past the 30-minute staleness window and had its lease legitimately stolen by another scan would still clear the lease on exit — clearing the THIEF's newer lease, not its own — letting a third scan run concurrently against the same root.\n\n" +
+      "2. **The supersede compensating write could never run.** The partial `UNIQUE (root_id, drive_id) WHERE is_active = 1` index, added in the SAME fix wave as the insert-then-link compensation, rejects the reactivation once the replacement row is already active. So a transient failure of the `supersededById` link threw out of the catch block and aborted the entire scan — the compensation it was supposed to be was dead on arrival.\n\n" +
+      "3. **Sharing changes were invisible.** The change-detection diff compared name, parent and content hash but NOT sharing state. A Drive permission change with no rename/move/edit was classified `unchanged`, so D1 kept the stale sharing value forever — and that value is what decides whether a Drive link may be emailed to an outside vendor.",
+    approach:
+      "### 1. Lease ownership token\n`acquireScanLease` now returns the lease token it wrote (the `scanStartedAt` timestamp, read back so it matches D1's second granularity), and release is conditional: `WHERE scanStartedAt = <token>`. A scan can only clear the lease it actually holds, so a stolen-then-released lease no longer opens a concurrency window.\n\n" +
+      "### 2. Split insert-failure from link-failure\nThe two failure modes are now handled apart, on both the document and folder supersede paths: an **insert** failure reactivates the prior row (safe); a **link** failure leaves it (the replacement is already live), instead of letting the partial-unique index turn a compensating write into a scan-aborting throw.\n\n" +
+      "### 3. Metadata-update action\nSharing is now part of the diff. A change to sharing alone triggers a new **metadata-update** action that updates the row IN PLACE — no bogus revision, no re-embed — for both documents and folders, and a `metadataUpdated` counter surfaces it in the ingest summary. A subtle asymmetry, because Drive omits `allowFileDiscovery` when false, is covered by the unit tests.",
+    apiChanges: [
+      "GET /api/admin/drive/documents — now paginated (limit default 200, max 500; offset) instead of an unbounded read.",
+      "No new endpoints; no migration. Behavior fixes to the existing ingest + documents routes.",
+    ],
+    filesTouched: [
+      "src/backend/services/google/drive-ingest.ts (lease token, split compensation, metadata-update action)",
+      "src/backend/services/google/drive-diff.ts (sharing added to the change diff)",
+      "src/backend/services/google/drive-diff.test.ts (unit tests: sharing-omit asymmetry, multi-parent dedup)",
+      "src/backend/api/routes/admin-drive-ingest.ts (documents route pagination)",
+      "scripts/qc/pr_374.mjs (QC harness, reused)",
+      "src/frontend/data/changelog.ts (this entry)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Lease release is now conditional on the token the scan wrote",
+        lang: "ts",
+        code: `// acquire returns the token; release only clears the lease we actually hold\nconst token = await acquireScanLease(db, rootId); // = the scanStartedAt it wrote\ntry {\n  // …scan…\n} finally {\n  await db.update(driveRoots)\n    .set({ scanStartedAt: null })\n    .where(and(eq(driveRoots.id, rootId), eq(driveRoots.scanStartedAt, token)));\n  // a stolen-then-released lease no longer clears the thief's newer lease\n}`,
+      },
+    ],
+    diagrams: [],
+    verification: {
+      qcScript: "scripts/qc/pr_374.mjs + src/backend/services/google/drive-diff.test.ts",
+      command: "pnpm run test:pr 374 (QC) · drive-diff unit tests (custom harness)",
+      output:
+        "Backfilled detail for an already-merged + deployed PR (#377, 2026-08-10). Not re-run in this backfill session; the fixes shipped to prod and are covered by the drive-diff unit tests (sharing-omit asymmetry, multi-parent dedup) added in the same PR, plus the pr_374 QC harness. No migration.",
+      ranAt: "2026-08-10",
+      migrations: [],
+    },
+  },
   "drive-ingestion-service": {
     slug: "drive-ingestion-service",
     branch: "feat/drive-ingestion-service",
