@@ -122,6 +122,59 @@ There are **two** MCP servers in this repo; do not conflate them:
 - **Add a tool:** drop `tools/<name>.ts` exporting a `ToolDef`, add one line to
   `tools/index.ts`. That's it — the transport picks it up.
 
+## Local agent tooling — `local-agent-control` and friends
+
+Installed on this machine (`~/.local/bin`, rebuilt 2026-08-12). Auth is
+**local-first**: these read the machine's existing CLI/SDK login state or the
+local `tokens` CLI. **Do not put provider API keys in `orchestrator.toml`.**
+
+| Command | What it is for |
+| --- | --- |
+| `local-ai-orchestrator` | Run one task across several local agents (codex / claude / cursor / antigravity) and compare. |
+| `local-agent-control` | Control plane: `status`, `start`, `stop`, `serve`, `open`. Monitor UI + FastMCP on `https://127.0.0.1:4318`. |
+| `local-github-control` | `create-pr`, `pr-discussion`, `review-pr`, `merge-pr`, `update-pr-branch`, `sync-pr`, `patch-pr`. |
+| `local-cloudflare-control` | Cloudflare resource creation + Workers deployment inspection. |
+| `cursor-review <abs-repo-path> <pr-number>` | Local Cursor PR review, no Cursor cloud. |
+
+**Use it for a second opinion when the review bot is down** — that is the case it
+earns its keep in. The canonical fan-out:
+
+```bash
+local-ai-orchestrator health --profile default        # readiness
+local-ai-orchestrator run "<grounded task>" --provider claude --provider antigravity
+local-ai-orchestrator show-run <run-id>
+```
+
+Rules learned the hard way (2026-08-11/12):
+
+- **`health` is a CONFIG check, not an auth check.** It reported all four
+  providers `ready` while three then failed on execution. Treat a shallow
+  `health` pass as "the config parses", nothing more. Use `--active` when you
+  need to know they can actually answer, and expect the real failure at `run`.
+- **Ground the prompt in real files.** Cite paths and line numbers and state what
+  is already known. An ungrounded prompt gets you a confident restatement of the
+  diff. A grounded one found two real defects in PR #382.
+- **The starter `orchestrator.toml` sets `max_turns = 8` for claude**, which is
+  far too low for anything that has to read files — it dies with
+  `Reached maximum number of turns`. Raise it (40 still was not enough for a
+  full-diff review; antigravity completed the same task).
+- **`.orchestrator-state/` is per-machine run state — gitignored, never commit it.**
+
+### Known broken, as of 2026-08-12
+
+- **`cursor-review` cannot parse this repo's remote**: `Unsupported GitHub remote
+  URL: ssh://git@ssh.github.com:443/jmbish04/core-remodel.git` (the SSH-over-443
+  form). Auth itself is fixed and no longer needs a Cursor login. **Do NOT
+  "fix" this by rewriting `origin`** — worktrees share `.git/config`, so changing
+  the remote URL changes it for every concurrent session on this machine.
+- **The orchestrator's `--provider cursor` path still fails** with
+  `missing_api_key: Agent.create requires api_key`, even though `health` calls it
+  ready. The bridge path (`cursor-review`) and the SDK path have different auth;
+  only the bridge was fixed.
+
+Until both are resolved, use `--provider claude --provider antigravity` for
+fan-out reviews and say in the PR which reviewer actually ran.
+
 ## Third-party CLIs — read `--help` BEFORE you run it (MANDATORY)
 
 Applies to `shadcn`, `npx <anything>` — any CLI that writes files or touches infrastructure.
@@ -622,10 +675,53 @@ After the PR is open and conflict-free:
    *why* it does not apply. Never blanket-accept and never blanket-ignore.
 3. **Patch the PR** with the fixes, push, let CI go green.
 4. **Clear any conflicts**, then **merge**.
-5. **Delete your preview worker**: `pnpm run preview:delete`, run from the branch's
-   worktree (it derives the name from the current branch). One preview worker is
-   created per branch and nothing reaps them — then `pnpm run preview:cleanup`
-   to sweep any whose branch is already gone.
+5. **Delete your preview worker — IMMEDIATELY, IN THE SAME TURN AS THE MERGE.**
+   See the mandatory rule below; this is not a later-cleanup item.
+
+### 2a. Merging a PR that has a preview REQUIRES deleting that preview (MANDATORY)
+
+**If you deployed a preview for a branch, deleting it is part of merging that
+branch — not a follow-up, not a nice-to-have, and never something to leave for
+the user.** The instant the merge succeeds, run, from that branch's worktree:
+
+```bash
+pnpm run preview:delete              # tears down THIS branch's preview
+pnpm run preview:cleanup -- --apply  # sweeps any whose branch is gone from origin
+```
+
+Rules, all of them non-negotiable:
+
+- **Do not ask permission.** Deleting the preview you created is authorized by
+  the act of creating it. It is guarded (ledger allowlist, `wcrp-` prefix check,
+  production-name check — see the preview-ledger section), so it cannot touch
+  anything you did not deploy.
+- **Run it from the branch's own worktree, BEFORE you remove that worktree.**
+  `preview:delete` derives the worker name from the current branch. Delete the
+  worktree first and you have orphaned the worker with no easy way to name it.
+- **Merging via `gh pr merge --auto` still counts.** Auto-merge lands without
+  you watching, so either poll for the merge and then delete, or delete right
+  after you confirm it merged. "The merge happened while I was away" is not an
+  exemption — see the `--auto` trap in the deploy notes.
+- **A closed-without-merging PR gets the same treatment.** The preview exists to
+  review a branch; the branch is done either way.
+- **If deletion fails, say so explicitly in your final message**, with the worker
+  name, so it can be removed by hand. Never let a failed cleanup pass silently —
+  a silent failure is how they accumulate.
+- **Report it.** The turn that merges a PR states in its summary that the preview
+  was deleted, naming it. If you cannot say that, you have not finished.
+
+Why this is a hard rule: one preview worker is created per branch, **nothing
+reaps them**, and this account already carries 184 Workers. Every orphan is
+clutter that the next agent has to reason around and that the user ends up
+cleaning by hand. The cleanup takes one command and belongs to whoever created
+the preview.
+
+When you finish any piece of work — merged or not — also sweep the strays:
+
+```bash
+pnpm run preview:list                # what the ledger thinks exists
+pnpm run preview:cleanup -- --apply  # delete those whose branch is gone
+```
 
 > HISTORICAL (pre-2026-07-25): a branch build going GREEN meant the build had
 > deployed your branch to **production**. The Cloudflare↔GitHub integration is now
@@ -840,15 +936,32 @@ defaults to production, which runs `main`; QC'ing an unmerged branch against it
 tests code your branch has not shipped, and reads as "my endpoint 404s" when the
 truth is "not merged yet". Use `--preview`.
 
-#### Clean up your preview when you are done
+#### Deleting your preview is PART OF MERGING (MANDATORY)
 
-One worker per branch and nothing reaps them. **Delete yours when the PR merges**
-(step 5 of the review loop), and sweep orphans when you finish a piece of work:
+One worker per branch, **nothing reaps them**, and this account already carries
+184 Workers. So the rule is not "clean up when convenient" — it is:
+
+> **The turn that merges (or closes) a PR is the turn that deletes that PR's
+> preview worker. Same turn. No exceptions, no asking first.**
 
 ```bash
-pnpm run preview:delete              # from the branch's worktree, before tearing it down
+pnpm run preview:delete              # from the branch's worktree, BEFORE removing it
 pnpm run preview:cleanup -- --apply  # anything whose branch is gone from origin
 ```
+
+- **Never ask permission.** Creating the preview authorized deleting it, and the
+  ledger guard below makes it impossible to hit anything you did not deploy.
+- **Order matters:** run it from the branch's worktree while that worktree still
+  exists. `preview:delete` derives the worker name from the current branch;
+  remove the worktree first and you have orphaned a worker you can no longer name.
+- **`gh pr merge --auto` is not an exemption.** Poll for the merge, then delete.
+- **Closed-without-merge counts too.** The branch is done either way.
+- **Say it in your summary**, naming the worker. If deletion failed, say that
+  explicitly with the name so a human can finish it — a silent failure here is
+  exactly how the pile builds up.
+
+The full statement of this rule lives with the PR workflow, in
+"§2a. Merging a PR that has a preview REQUIRES deleting that preview".
 
 #### The preview ledger — why deletion is not "list and match a prefix"
 
