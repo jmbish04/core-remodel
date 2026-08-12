@@ -113,6 +113,169 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "vendor-email-context-layer": {
+    slug: "vendor-email-context-layer",
+    branch: "feat/vendor-email-context-layer",
+    prNumber: 379,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/379",
+    subtitle: "PR 2a of 3 · the context layer a vendor email is composed from — sends nothing",
+    introduction:
+      "This is the second PR in the vendor-email arc (PR 1 was Drive ingestion, #374). It builds the layer a vendor email is COMPOSED from — a reusable boilerplate/guidance doc, and a recipient lookup that resolves an address or a showroom store+contact reference without ever guessing. The actual send (Gmail draft/attach/schedule mechanics) is explicitly out of scope and lives on the separate google-workspace-mcp worker; this PR assembles the payload that worker would send.",
+    problem:
+      "Composing a vendor email today means re-deriving the same three things by hand every time: what boilerplate/etiquette guidance applies (how to address a trade contact, what to always mention), who the actual recipient address is (a showroom store row does not carry one address — it carries zero-or-more contacts, and picking the wrong one sends the email to the wrong person), and which Drive files to attach vs link (Gmail caps a message at 25 MiB and there is no single place that already knows a file's size and share state together).\n" +
+      "The showroom_store_contacts table already holds contacts, but nothing resolves 'a store name' or 'a store + a role like billing' down to one address — an ambiguous or unmatched reference has no defined behavior, so the natural failure mode is a caller guessing or falling through to whatever came back first.",
+    approach:
+      "Four pieces, each doing one thing, composed by the tool that actually gets called in a chat:\n" +
+      "1. **email_instructions** (migration 0176) — a single row (id=1) holding the boilerplate doc as markdown (canonical) + html (sanitized render cache), following the repo's existing rich-text storage rule. `getInstructions`/`upsertInstructions` in one service so the API route and the MCP tools cannot diverge, and `sanitizeNoteHtml` runs on every write — raw html is never persisted.\n" +
+      "2. **resolveRecipient** — an explicit `email` wins outright (after a pragmatic format check). Otherwise a `store` reference is matched by numeric id or a `LIKE %needle%` name substring against `showroom_stores`, then narrowed to that store's contacts that actually HAVE an email address, optionally narrowed again by a `contact` name/role substring. Every branch that cannot resolve to exactly one recipient returns a structured `{ ok:false, reason: no_match|ambiguous|invalid, candidates }` — this mirrors the repo's ambiguous-parent doctrine (rooms, receipts): stage/report, never guess.\n" +
+      "3. **compose_vendor_email** (MCP, read-only) — calls resolveRecipient, loads the instructions doc, loads the requested Drive documents (from PR #374's catalogue) chunked at 20 ids to stay under D1's 100-bound-param cap, and runs `suggestDispositions` (a 18 MiB running-budget bin-pack — Gmail's 25 MiB cap minus ~1.33x base64 inflation) to mark each file attach vs link. If the recipient does not resolve, this tool returns the SAME ok:false/candidates shape as resolve_recipient rather than swallowing it, so the calling agent surfaces the ambiguity to the human instead of picking a candidate.\n" +
+      "4. **/admin/email/instructions** — an admin-gated editor page for the boilerplate doc, using the same PlateJS-backed rich-text pattern (`{ markdown, html }` via `onChange`) the repo already uses for store/visit notes, rather than a bare textarea.\n" +
+      "Everything sits behind `requireAccessAuth` on `/api/email/*` (worker bearer / admin cookie), matching every other admin-only surface in the repo.",
+    apiChanges: [
+      "GET /api/email/instructions -> { markdown, html, updatedAt }.",
+      "PUT /api/email/instructions accepts { markdown, html }, sanitizes html on write, returns { markdown, html }.",
+      "GET /api/email/resolve-recipient?email=|store=&contact= -> ResolveResult. Always HTTP 200 — ok:false with a reason (no_match | ambiguous | invalid) and candidates[] is a valid resolved result, not an error status.",
+      'MCP tools (category "email"): get_email_instructions, update_email_instructions, resolve_recipient, compose_vendor_email (all registered in src/backend/mcp/tools/email/index.ts).',
+      "No send endpoint exists or is planned here — compose_vendor_email's payload is handed to the google-workspace-mcp worker's gmail_send / schedule_email.",
+    ],
+    filesTouched: [
+      "drizzle/0176_yielding_human_fly.sql, src/backend/db/schema/email/email_instructions.ts",
+      "src/backend/services/email/instructions.ts, resolve-recipient.ts (+ .test.ts), disposition.ts (+ .test.ts)",
+      "src/backend/api/routes/email.ts, src/backend/api/index.ts (requireAccessAuth gate + app.route mount)",
+      "src/backend/mcp/tools/email/{get_email_instructions,update_email_instructions,resolve_recipient,compose_vendor_email,index}.ts",
+      "src/frontend/components/email/EmailInstructionsEditor.tsx, src/frontend/pages/admin/email/instructions.astro",
+      "scripts/qc/pr_379.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0176_yielding_human_fly",
+        sql: `CREATE TABLE \`email_instructions\` (
+\t\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+\t\`instructions_markdown\` text DEFAULT '' NOT NULL,
+\t\`instructions_html\` text DEFAULT '' NOT NULL,
+\t\`updated_at\` integer DEFAULT (unixepoch()) NOT NULL
+);`,
+      },
+    ],
+    code: [
+      {
+        title: "resolveRecipient — never guesses (src/backend/services/email/resolve-recipient.ts)",
+        lang: "ts",
+        code: `export type ResolveResult =
+  | { ok: true; recipients: ResolvedRecipient[] }
+  | {
+      ok: false;
+      reason: "no_match" | "ambiguous" | "invalid";
+      message: string;
+      candidates: ResolvedRecipient[];
+    };
+
+// An explicit address wins outright (after a format check); otherwise the
+// store match must land on exactly one row, and that store's matching
+// contacts must land on exactly one email — anything else is reported, not
+// guessed.
+if (storeRows.length > 1) {
+  return {
+    ok: false,
+    reason: "ambiguous",
+    message: \`"\${input.store}" matched \${storeRows.length} stores; be specific\`,
+    candidates: storeRows.map((s) => ({ email: "", name: s.name, storeId: s.id, storeName: s.name, contactType: null })),
+  };
+}`,
+      },
+      {
+        title: "suggestDispositions — attach vs link against the Gmail budget (disposition.ts)",
+        lang: "ts",
+        code: `export const GMAIL_ATTACH_BUDGET_BYTES = 18 * 1024 * 1024; // 25 MiB cap, minus ~1.33x base64 inflation
+
+export function suggestDispositions(files, budgetBytes = GMAIL_ATTACH_BUDGET_BYTES) {
+  let used = 0;
+  return files.map((f) => {
+    if (f.sizeBytes == null || used + f.sizeBytes > budgetBytes) {
+      return { driveDocumentId: f.driveDocumentId, suggestedDisposition: "link" as const };
+    }
+    used += f.sizeBytes;
+    return { driveDocumentId: f.driveDocumentId, suggestedDisposition: "attach" as const };
+  });
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "how a vendor email gets composed",
+        title: "compose_vendor_email assembles, it never sends",
+        description:
+          "Every arrow into compose_vendor_email is a read. The only thing that leaves this worker is the assembled payload, handed to a different worker that owns the actual Gmail send.",
+        code: `flowchart TD
+  A[compose_vendor_email input: email/store/contact, subject, driveDocumentIds] --> B[resolveRecipient]
+  B -->|ok:false| C[return ok:false + candidates - ask the human]
+  B -->|ok:true| D[getInstructions - the boilerplate doc]
+  A --> E[load driveDocuments by id, chunked 20]
+  E --> F[suggestDispositions vs 18 MiB budget]
+  D --> G[assemble payload: to, subject, instructionsMarkdown, attachments]
+  F --> G
+  G --> H["google-workspace-mcp worker\ngmail_send / schedule_email (OUT OF SCOPE HERE)"]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_379.mjs",
+      command: "node scripts/qc/pr_379.mjs --preview   (and without --preview for production)",
+      ranAt: "2026-08-11",
+      source: `// The capability gate + the load-bearing sanitize assertion.
+const probe = await client.get("/api/email/instructions");
+if (probe.status === 404) {
+  checks.info("pending merge/deploy — GET /api/email/instructions returned 404 ...");
+  checks.finish();
+  return;
+}
+// PUT then GET: markdown round-trips exactly, html has the <script> stripped.
+checks.ok(
+  "GET after PUT: html is sanitized — <script> tag stripped",
+  typeof after.json?.html === "string" && !after.json.html.includes("<script"),
+  \`got \${JSON.stringify(after.json?.html)}\`,
+);
+// Always restore the shared row afterward — PUT overwrites the single row.
+const restore = await client.req("PUT", "/api/email/instructions", {
+  body: { markdown: original.markdown, html: original.html },
+});`,
+      output: `$ node scripts/qc/pr_379.mjs --preview
+
+PR #379 QC — vendor-email context layer
+  target: https://wcrp-feat-vendor-email-context-layer.hacolby.workers.dev
+
+  ✓ target reachable (https://wcrp-feat-vendor-email-context-layer.hacolby.workers.dev)
+  ✓ GET /api/email/instructions returns 200 (the surface is expected to exist on this target)
+  ✓ PUT /api/email/instructions accepts { markdown, html } -> 200
+  ✓ GET after PUT: markdown round-trips exactly
+  ✓ GET after PUT: html is sanitized — <script> tag stripped
+  ✓ GET after PUT: sanitized html still keeps the safe markup
+  ✓ restored the original instructions row (shared state left clean)
+  ✓ resolve-recipient?email=<valid address> -> ok:true, recipients[0].email matches
+  ✓ resolve-recipient?email=<malformed> -> ok:false, reason:invalid
+  ✓ resolve-recipient?store=<unknown> -> ok:false, reason:no_match
+    store lookup for "Pietrafina" -> status 200, body {"ok":false,"reason":"no_match","message":"no store matched \\"Pietrafina\\"","candidates":[]}
+
+10 passed, 0 failed
+
+
+$ node scripts/qc/pr_379.mjs      # production regression guard, pre-merge
+
+PR #379 QC — vendor-email context layer
+  target: https://core-remodel.hacolby.workers.dev
+
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
+    pending merge/deploy — GET /api/email/instructions returned 404. Expected on production pre-merge; every assertion below is skipped rather than failed.
+
+1 passed, 0 failed`,
+      migrations: [
+        {
+          tag: "0176_yielding_human_fly",
+          appliedRemote: true,
+          note: "Applied via pnpm run migrate:remote and verified: email_instructions present on the remote DB.",
+        },
+      ],
+    },
+  },
   "showroom-stores-normalization": {
     slug: "showroom-stores-normalization",
     branch: "claude/database-schema-audit-cleanup-271ac6",
