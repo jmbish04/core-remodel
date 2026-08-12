@@ -30,6 +30,7 @@ import {
   type ClearanceDetails,
   type ClearanceItem,
 } from "@backend/db/schema/showroom/index";
+import { meteredAiRun } from "@backend/services/usage/metered-ai";
 import { parseStructuredResponse } from "@backend/utils/ai-json";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -374,7 +375,13 @@ export async function extractClearance(
   markdown: string,
 ): Promise<ClearanceDetails | null> {
   try {
-    const raw = (await env.AI.run(
+    // Metered: `meteredAiRun` checks the WORKERS_AI spend breaker BEFORE the call
+    // (throws SpendBlockedError when over the ceiling — caught below → null, so a
+    // tripped breaker halts extraction spend without blanking a snapshot) and
+    // records usage after. The Browser-Rendering scrape is separately gated inside
+    // `scrapeUrl`. See services/usage/metered-ai.
+    const raw = (await meteredAiRun(
+      env,
       EXTRACT_MODEL as Parameters<typeof env.AI.run>[0],
       {
         messages: [
@@ -391,6 +398,7 @@ export async function extractClearance(
         chat_template_kwargs: { thinking: false },
         gateway: { id: env.AI_GATEWAY_ID },
       } as Parameters<typeof env.AI.run>[1],
+      { feature: "clearance_extract" },
     )) as { response?: unknown } & Partial<ClearanceDetails>;
 
     const source = parseStructuredResponse<ClearanceDetails>(raw, "showroom clearance extraction");
@@ -439,10 +447,16 @@ async function embedSaleSnapshot(
     .join("\n");
   if (!text.trim()) return;
 
-  const embeddingResult = (await env.AI.run(
+  // Metered too — the embedding is a WORKERS_AI call. A tripped breaker throws
+  // here; the caller wraps embedSaleSnapshot in try/catch (embedding is
+  // best-effort), so a blocked embed never fails the snapshot write.
+  const embeddingResult = (await meteredAiRun(
+    env,
     EMBED_MODEL,
-    { text: [text.slice(0, 4_000)] },
-    { gateway: { id: env.AI_GATEWAY_ID } },
+    { text: [text.slice(0, 4_000)], gateway: { id: env.AI_GATEWAY_ID } } as Parameters<
+      typeof env.AI.run
+    >[1],
+    { feature: "clearance_embed" },
   )) as { data: number[][] };
 
   const values = embeddingResult.data?.[0];
