@@ -85,6 +85,13 @@ const DEDUP_MOVE: Array<{
   key: string;
   pk: SQLiteColumn;
   keyCols: SQLiteColumn[];
+  /**
+   * Extra columns to overwrite when a loser row is MOVED (not dropped). Used to defuse a
+   * partial-unique-on-a-flag that a plain repoint would trip — e.g. category_mapping's
+   * `sscm_one_primary_per_store`: a moved loser's `is_primary` must be cleared so the
+   * keeper keeps its own single primary. Field names are drizzle (camelCase).
+   */
+  clearOnMove?: Record<string, unknown>;
 }> = [
   {
     label: "showroom_store_links",
@@ -117,6 +124,9 @@ const DEDUP_MOVE: Array<{
     key: "storeId",
     pk: showroomStoreCategoryMapping.id,
     keyCols: [showroomStoreCategoryMapping.categoryId],
+    // A moved loser mapping must not carry a second is_primary into the keeper —
+    // sscm_one_primary_per_store is a partial unique on (store) WHERE is_primary=1.
+    clearOnMove: { isPrimary: false },
   },
   {
     label: "store_pa_mapping",
@@ -151,8 +161,14 @@ function chunk<T>(xs: T[], size = D1_IN_CHUNK): T[][] {
   return out;
 }
 const changesOf = (r: unknown) => Number((r as { meta?: { changes?: number } })?.meta?.changes ?? 0);
+const snakeToCamel = (s: string) => s.replace(/_([a-z])/g, (_m, ch: string) => ch.toUpperCase());
+// Rows come back keyed by drizzle FIELD names (camelCase); `col.name` is the DB column
+// (snake_case). Read the snake key first, then fall back to camel, so MULTIWORD keyCols
+// (categoryId -> category_id, showroomTagId -> showroom_tag_id) actually distinguish rows
+// instead of every row collapsing to one placeholder key -- which previously made the
+// DEDUP pass drop all-but-one loser row for category/tag/product/brand mappings on a merge.
 const keyOf = (row: Record<string, unknown>, cols: SQLiteColumn[]) =>
-  cols.map((c) => String(row[c.name] ?? "∅")).join("");
+  cols.map((c) => String(row[c.name] ?? row[snakeToCamel(c.name)] ?? "∅")).join("");
 
 /**
  * Person identity for a contact — matches the from-pocs backfill key so the two dedup
@@ -262,7 +278,7 @@ export async function remapStoreChildren(
         if (part.length) {
           const res = await db
             .update(t.table)
-            .set({ [t.key]: keeperId } as Record<string, number>)
+            .set({ [t.key]: keeperId, ...(t.clearOnMove ?? {}) } as Record<string, unknown>)
             .where(inArray(t.pk, part))
             .run();
           moved += changesOf(res);
