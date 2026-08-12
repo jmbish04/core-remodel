@@ -206,27 +206,31 @@ export function CategoryChipsEditor({
             <div className={`${TOUCH_DIALOG_BODY_CLASS} flex flex-col gap-5`}>
               {grouped.map(({ group, items }) => (
                 <section key={group} className="space-y-2">
-                  <h3 className="flex items-center gap-2 border-b border-border/40 pb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  <h3 className="flex items-center gap-2 border-b border-border/40 pb-1.5 font-mono text-[13px] font-semibold uppercase tracking-wider text-foreground/75">
                     {group}
-                    <span className="text-muted-foreground/50">{items.length}</span>
+                    <span className="text-[11px] font-normal text-muted-foreground/60">
+                      {items.length}
+                    </span>
                   </h3>
-                  {/* min-h-12 + size-6 checkbox: a category list is the single most
-                      mis-tapped control in the viewport from a car screen. Checked
-                      rows get a filled highlight so selection reads at a glance. */}
+                  {/* The whole row is the tap target (min-h-12 label), so the box
+                      can be modest: size-5 keeps the check icon proportional (the
+                      shared Checkbox's check is size-3 — a size-6 box left it a tiny
+                      12px tick floating in 24px). The name label is the dominant text.
+                      Checked rows get a filled highlight so selection reads at a glance. */}
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {items.map((opt) => {
                       const isOn = selected.has(opt.id);
                       return (
                         <label
                           key={opt.id}
-                          className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-base ring-1 transition-colors ${
+                          className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-[17px] font-medium ring-1 transition-colors ${
                             isOn
                               ? "bg-primary/10 ring-primary/50"
                               : "ring-border/40 hover:bg-muted/60"
                           }`}
                         >
                           <Checkbox
-                            className="size-6"
+                            className="size-5"
                             checked={isOn}
                             onCheckedChange={() => toggle(opt.id)}
                           />
