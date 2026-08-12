@@ -617,9 +617,6 @@ export function StoreViewportAppV2({
   // POCs come back on the same payload — unioned into Contacts (they're the only
   // contact source for some stores until Phase-L migrates pocs → contacts).
   const [locations, setLocations] = useState<StoreLocation[]>([]);
-  const [locationPocs, setLocationPocs] = useState<
-    Array<{ id: number; fullName: string | null; title: string | null; phone: string | null; email: string | null }>
-  >([]);
 
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
@@ -852,20 +849,8 @@ export function StoreViewportAppV2({
           credentials: "include",
         });
         if (!res.ok) return;
-        const data = (await res.json()) as {
-          locations?: StoreLocation[];
-          pocs?: Array<{
-            id: number;
-            fullName: string | null;
-            title: string | null;
-            phone: string | null;
-            email: string | null;
-          }>;
-        };
-        if (!cancelled) {
-          setLocations(data.locations ?? []);
-          setLocationPocs(data.pocs ?? []);
-        }
+        const data = (await res.json()) as { locations?: StoreLocation[] };
+        if (!cancelled) setLocations(data.locations ?? []);
       } catch {
         /* leave empty — degrade to a single store-level view */
       }
@@ -1586,7 +1571,7 @@ export function StoreViewportAppV2({
             />
           </div>
         ) : section === "contacts" ? (
-          <ContactsSection contacts={contacts} pocs={locationPocs} storeId={id} />
+          <ContactsSection contacts={contacts} storeId={id} />
         ) : section === "visits-notes" ? (
           // V2 item 1 + 10: Visits + Notes merged; the visit-rating block that
           // used to sit in the hero now lives at the top of this section.
@@ -2417,17 +2402,9 @@ interface Person {
 
 function ContactsSection({
   contacts,
-  pocs,
   storeId,
 }: {
   contacts: ContactRow[];
-  pocs: Array<{
-    id: number;
-    fullName: string | null;
-    title: string | null;
-    phone: string | null;
-    email: string | null;
-  }>;
   storeId: number;
 }) {
   // Per-contact unread: match each contact's email against the store's
@@ -2458,15 +2435,12 @@ function ContactsSection({
     };
   }, [storeId]);
 
-  // Union both contact sources, dedupe by email (a migrated person appears in
-  // both once Phase-L runs — show them once).
-  const people = useMemo<Person[]>(() => {
-    const out: Person[] = [];
-    const seen = new Set<string>();
-    for (const c of contacts) {
-      const email = c.emailAddress?.toLowerCase() ?? null;
-      if (email) seen.add(email);
-      out.push({
+  // Single source: showroom_store_contacts (the pocs→contacts migration ran in
+  // PR #398, so /api/showroom-contacts is authoritative; the legacy pocs rows
+  // still exist and would double every person if unioned).
+  const people = useMemo<Person[]>(
+    () =>
+      contacts.map((c) => ({
         key: `c${c.id}`,
         name:
           [c.firstName, c.lastName].filter(Boolean).join(" ").trim() ||
@@ -2476,23 +2450,9 @@ function ContactsSection({
         ext: c.officePhoneExtension,
         mobile: c.mobilePhoneNumber,
         email: c.emailAddress,
-      });
-    }
-    for (const p of pocs) {
-      const email = p.email?.toLowerCase() ?? null;
-      if (email && seen.has(email)) continue;
-      out.push({
-        key: `p${p.id}`,
-        name: p.fullName?.trim() || "Contact",
-        typeLabel: p.title?.trim() || "contact",
-        office: p.phone,
-        ext: null,
-        mobile: null,
-        email: p.email,
-      });
-    }
-    return out;
-  }, [contacts, pocs]);
+      })),
+    [contacts],
+  );
 
   return (
     <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
