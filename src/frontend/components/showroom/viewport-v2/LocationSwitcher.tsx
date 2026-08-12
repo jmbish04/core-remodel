@@ -9,7 +9,7 @@
  *
  * Temporary V2 component; on promotion the hrefs drop the `/v2` segment.
  */
-import { Crown } from "lucide-react";
+import { Crown, Star } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { StoreLocation } from "../locations/LocationsModal";
@@ -51,6 +51,9 @@ export function LocationSwitcher({
                   : "bg-muted/50 text-foreground/80 hover:bg-muted",
               )}
             >
+              {active && (
+                <Star className="size-3.5 shrink-0 fill-current" aria-label="Currently viewing" />
+              )}
               <span className="font-medium">{loc.city ?? "Location"}</span>
               {loc.isPrimary && (
                 <Crown

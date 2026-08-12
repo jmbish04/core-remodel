@@ -118,6 +118,10 @@ interface Store {
   locationCount?: number;
   locationCities?: string[];
   hubRoute: string | null;
+  /** Distinct region hubs across ALL of the brand's locations (backend #5). A
+      multi-region brand must appear in every region tab it has a site in, not
+      just its primary hub. Falls back to `[hubRoute]` when absent. */
+  hubRoutes?: string[] | null;
   hubName: string | null;
   /** Captured coordinates — power the individual map markers when zoomed in. */
   latitude: number | null;
@@ -3132,14 +3136,24 @@ export function ShowroomsDirectoryApp({ initialTab = "grouped" }: { initialTab?:
   const regionCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of filtered) {
-      if (s.hubRoute && HUBS[s.hubRoute]) m.set(s.hubRoute, (m.get(s.hubRoute) ?? 0) + 1);
+      // Set-valued: count the brand once per region it has ANY location in, so a
+      // multi-region brand keeps every region tab alive (not just its primary).
+      const hubs = s.hubRoutes?.length ? s.hubRoutes : s.hubRoute ? [s.hubRoute] : [];
+      for (const h of hubs) {
+        if (HUBS[h]) m.set(h, (m.get(h) ?? 0) + 1);
+      }
     }
     return m;
   }, [filtered]);
 
   // Region-narrowed set fed to both the grouped experience and the map.
   const regionStores = useMemo(
-    () => (region == null ? filtered : filtered.filter((s) => s.hubRoute === region)),
+    () =>
+      region == null
+        ? filtered
+        : filtered.filter((s) =>
+            s.hubRoutes?.length ? s.hubRoutes.includes(region) : s.hubRoute === region,
+          ),
     [filtered, region],
   );
 

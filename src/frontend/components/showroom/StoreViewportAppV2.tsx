@@ -1152,6 +1152,13 @@ export function StoreViewportAppV2({
     );
   }, [locations, locationId]);
 
+  // location_id → city, for badging merged records (contacts today; notes/photos
+  // once their reads expose location_id).
+  const locationCityById = useMemo(
+    () => new Map(locations.map((l) => [l.id, l.city ?? "Location"])),
+    [locations],
+  );
+
   // The store's 360° walkthrough (Matterport or other), if a SHOWROOM_TOUR link
   // exists. Surfaced in the Photos section and flagged on its bento tile.
   const tourUrl = useMemo(
@@ -1246,8 +1253,10 @@ export function StoreViewportAppV2({
   // Prefer the polled status; fall back to the store row's value on first paint.
   const effectiveScrapeStatus: ScrapeStatus = scrapeStatus ?? store.scrapeStatus ?? "idle";
 
-  // Call target: the selected site's phone (backend #8), else the store line.
-  const callPhone = activeLoc?.phone ?? store.phoneNumber;
+  // Call ALWAYS dials the store's main advertised line (Google/website front
+  // desk) — never a per-location general contact. Per-rep numbers live in the
+  // Contacts section; the main line + extension is the right default here.
+  const callPhone = store.phoneNumber;
 
   return (
     <main className="w-full px-4 py-10 md:px-8">
@@ -1576,7 +1585,11 @@ export function StoreViewportAppV2({
             />
           </div>
         ) : section === "contacts" ? (
-          <ContactsSection contacts={contacts} storeId={id} />
+          <ContactsSection
+            contacts={contacts}
+            storeId={id}
+            locationCityById={locationCityById}
+          />
         ) : section === "visits-notes" ? (
           // V2 item 1 + 10: Visits + Notes merged; the visit-rating block that
           // used to sit in the hero now lives at the top of this section.
@@ -2403,14 +2416,18 @@ interface Person {
   ext: string | null;
   mobile: string | null;
   email: string | null;
+  /** City of the location this contact belongs to (merged-record badge). */
+  locationCity: string | null;
 }
 
 function ContactsSection({
   contacts,
   storeId,
+  locationCityById,
 }: {
   contacts: ContactRow[];
   storeId: number;
+  locationCityById: Map<number, string>;
 }) {
   // Per-contact unread: match each contact's email against the store's
   // domain-matched Gmail threads (by `fromRecipient`) and tally unread per addr.
@@ -2445,18 +2462,22 @@ function ContactsSection({
   // still exist and would double every person if unioned).
   const people = useMemo<Person[]>(
     () =>
-      contacts.map((c) => ({
-        key: `c${c.id}`,
-        name:
-          [c.firstName, c.lastName].filter(Boolean).join(" ").trim() ||
-          (c.type === "GENERAL_CONTACT" ? "Store contact" : "Contact"),
-        typeLabel: c.type.replace(/_/g, " ").toLowerCase(),
-        office: c.officePhoneNumber,
-        ext: c.officePhoneExtension,
-        mobile: c.mobilePhoneNumber,
-        email: c.emailAddress,
-      })),
-    [contacts],
+      contacts.map((c) => {
+        const locId = (c as ContactRow & { locationId?: number | null }).locationId;
+        return {
+          key: `c${c.id}`,
+          name:
+            [c.firstName, c.lastName].filter(Boolean).join(" ").trim() ||
+            (c.type === "GENERAL_CONTACT" ? "Store contact" : "Contact"),
+          typeLabel: c.type.replace(/_/g, " ").toLowerCase(),
+          office: c.officePhoneNumber,
+          ext: c.officePhoneExtension,
+          mobile: c.mobilePhoneNumber,
+          email: c.emailAddress,
+          locationCity: locId != null ? (locationCityById.get(locId) ?? null) : null,
+        };
+      }),
+    [contacts, locationCityById],
   );
 
   return (
@@ -2514,6 +2535,11 @@ function ContactCardV2({
           <p className="truncate font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             {person.typeLabel}
           </p>
+          {person.locationCity ? (
+            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <MapPin className="size-2.5" /> {person.locationCity}
+            </span>
+          ) : null}
         </div>
         {unread > 0 ? (
           <a
