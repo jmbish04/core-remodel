@@ -1357,6 +1357,26 @@ showroomStoresRouter.get("/", async (c) => {
           longitude: l.longitude,
           isPrimary: l.isPrimary,
         })),
+        // Distinct region hubs across ALL the brand's sites, so a multi-region
+        // brand shows in EVERY region tab it has a location in — not just its
+        // primary hub. Route derived per location from coords/zip. Always includes
+        // the store's own effective hub. Contract: showroom-location-contract.md §5.
+        hubRoutes: Array.from(
+          new Set(
+            [
+              effectiveHubRoute,
+              ...(locationsById.get(r.store.id) ?? []).map(
+                (l) =>
+                  classifyBayAreaRegion({
+                    latitude: l.latitude,
+                    longitude: l.longitude,
+                    zipCode: l.zipCode,
+                    address: l.city,
+                  })?.route ?? null,
+              ),
+            ].filter((x): x is string => Boolean(x)),
+          ),
+        ),
       };
 
       if (includes.has("categories")) {
