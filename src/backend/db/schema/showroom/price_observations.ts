@@ -5,6 +5,7 @@ import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core
 // Direct leaf imports — avoid circular refs through the showroom barrel.
 import { showroomStoreProducts } from "./store_products";
 import { showroomStores } from "./stores";
+import { showroomStoreLocations } from "./store_location";
 import { productShowroomPhotos } from "./product_photos";
 
 /**
@@ -30,6 +31,16 @@ export const productPriceObservations = sqliteTable(
 
     /** Set when sourceType = 'showroom'. */
     showroomId: integer("showroom_id").references(() => showroomStores.id, {
+      onDelete: "set null",
+    }),
+
+    /**
+     * Physical site the price was observed at (Phase L, plan 0031). Set only when
+     * sourceType = 'showroom'. Nullable = brand-level, online, or not-yet-backfilled;
+     * FK → showroom_store_locations, ON DELETE SET NULL. Backfilled to the store's
+     * primary location.
+     */
+    locationId: integer("location_id").references(() => showroomStoreLocations.id, {
       onDelete: "set null",
     }),
 

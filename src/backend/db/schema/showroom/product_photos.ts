@@ -11,6 +11,7 @@ import {
 
 import { showroomStoreProducts } from "./store_products";
 import { showroomStores } from "./stores";
+import { showroomStoreLocations } from "./store_location";
 import { productPhotoBuckets } from "./product_photo_buckets";
 
 /**
@@ -38,6 +39,16 @@ export const productShowroomPhotos = sqliteTable(
 
     /** Nullable — a photo may come from an online source, not a showroom. */
     showroomId: integer("showroom_id").references(() => showroomStores.id, {
+      onDelete: "set null",
+    }),
+
+    /**
+     * Physical site this product photo was taken at (Phase L, plan 0031). Set only when
+     * showroomId is set. Nullable = online, brand-level, or not-yet-backfilled; FK →
+     * showroom_store_locations, ON DELETE SET NULL. Backfilled to the store's primary
+     * location.
+     */
+    locationId: integer("location_id").references(() => showroomStoreLocations.id, {
       onDelete: "set null",
     }),
 
