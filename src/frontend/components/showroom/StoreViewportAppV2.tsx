@@ -1619,6 +1619,7 @@ export function StoreViewportAppV2({
         ) : (
           <PhotosSection
             storeId={id}
+            locationCityById={locationCityById}
             galleryPhotos={galleryPhotos}
             photos={photos}
             uploading={uploading}
@@ -2782,6 +2783,7 @@ function TourCard({ url }: { url: string }) {
  */
 function PhotosSection({
   storeId,
+  locationCityById,
   galleryPhotos,
   photos,
   uploading,
@@ -2793,6 +2795,7 @@ function PhotosSection({
   onDeleteGalleryPhoto,
 }: {
   storeId: number;
+  locationCityById: Map<number, string>;
   galleryPhotos: GalleryPhoto[];
   photos: ShowroomPhoto[];
   uploading: boolean;
@@ -2841,19 +2844,28 @@ function PhotosSection({
         ) : (
           <>
             <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-              {galleryPhotos.map((p, i) => (
-                <div key={p.id} className="group/gthumb relative">
-                  <GalleryThumb photo={p} index={i} onOpen={onOpenGallery} />
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onDeleteGalleryPhoto(p.id); }}
-                    className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/gthumb:opacity-100"
-                    title="Delete photo"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                </div>
-              ))}
+              {galleryPhotos.map((p, i) => {
+                const locId = (p as GalleryPhoto & { locationId?: number | null }).locationId;
+                const city = locId != null ? locationCityById.get(locId) : null;
+                return (
+                  <div key={p.id} className="group/gthumb relative">
+                    <GalleryThumb photo={p} index={i} onOpen={onOpenGallery} />
+                    {city ? (
+                      <span className="pointer-events-none absolute bottom-1 left-1 z-10 inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        <MapPin className="size-2.5" /> {city}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onDeleteGalleryPhoto(p.id); }}
+                      className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/gthumb:opacity-100"
+                      title="Delete photo"
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
             <p className="mt-3 text-[11px] text-muted-foreground/60">
               Photos courtesy of the business &amp; Google Maps contributors.
