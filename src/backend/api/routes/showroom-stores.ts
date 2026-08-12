@@ -1780,6 +1780,46 @@ showroomStoresRouter.post("/:id/locations", async (c) => {
 });
 
 /**
+ * GET /:id/keeper — resolve the surviving KEEPER for a merged-away store by following the
+ * `keeper_store_id` chain to its end (a keeper can itself have been merged later). Returns
+ * `{ keeperStoreId: number | null }`: null when this store was never merged (it IS live, or is
+ * the keeper). The store-detail PAGE uses this to 302 a deep-link on a loser id onto the live
+ * keeper, so ~stale links heal instead of 404-ing. Contract: showroom-location-contract.md.
+ */
+showroomStoresRouter.get("/:id/keeper", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json({ error: "Invalid store id" }, 400);
+  }
+  // Walk the chain with a visited-set guard so a (bad-data) cycle can't hang the request.
+  const seen = new Set<number>();
+  let current = storeId;
+  let keeper: number | null = null;
+  let first = true;
+  while (!seen.has(current)) {
+    seen.add(current);
+    const [row] = await db
+      .select({ keeperStoreId: showroomStores.keeperStoreId })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, current))
+      .limit(1);
+    if (!row) {
+      // A missing ORIGINAL id (deleted/typo'd deep-link) 404s like GET /:id, so the
+      // page shows not-found rather than a silent no-redirect. A missing keeper mid
+      // chain just stops (return what we have).
+      if (first) return c.json({ error: "Store not found" }, 404);
+      break;
+    }
+    first = false;
+    if (row.keeperStoreId == null) break;
+    keeper = row.keeperStoreId;
+    current = row.keeperStoreId;
+  }
+  return c.json({ keeperStoreId: keeper });
+});
+
+/**
  * POST /:id/streetview-render — quota gate + usage log for a billable Street
  * View render.
  *

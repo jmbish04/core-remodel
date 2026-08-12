@@ -363,7 +363,7 @@ export const dedupShowroomStores = defineTool({
       for (const ids of chunk(p.deleteIds)) {
         const res = await db
           .update(showroomStores)
-          .set({ isActive: false, updatedAt: new Date() })
+          .set({ isActive: false, keeperStoreId: p.keepId, updatedAt: new Date() })
           .where(inArray(showroomStores.id, ids))
           .run();
         storesMerged += changesOf(res);

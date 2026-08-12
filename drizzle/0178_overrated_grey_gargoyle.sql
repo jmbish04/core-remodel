@@ -1,0 +1,1 @@
+ALTER TABLE `showroom_stores` ADD `keeper_store_id` integer;

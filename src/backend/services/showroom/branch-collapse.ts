@@ -202,11 +202,13 @@ export async function collapseCandidate(
       state = "CHILDREN_REMAPPED";
     }
 
-    // CHILDREN_REMAPPED → soft-delete the now-emptied branch store.
+    // CHILDREN_REMAPPED → soft-delete the now-emptied branch store, stamping the
+    // keeper it was folded into so deep-links redirect and writes 409 (not just a
+    // bare is_active=0, which reads as a restorable deactivation).
     if (state === "CHILDREN_REMAPPED") {
       await db
         .update(showroomStores)
-        .set({ isActive: false, updatedAt: new Date() })
+        .set({ isActive: false, keeperStoreId: keeper.storeId, updatedAt: new Date() })
         .where(eq(showroomStores.id, b.storeId))
         .run();
       await setMemberState(b.id, "RETIRED");
