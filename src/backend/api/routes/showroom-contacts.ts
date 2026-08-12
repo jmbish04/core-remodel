@@ -22,6 +22,7 @@ import {
   showroomStoreLinks,
   showroomPocs,
 } from "@backend/db/schema/showroom/index";
+import { loadStoreLocations } from "@backend/services/showroom/locations";
 import {
   CONTACT_TYPES,
   inferContactType,
@@ -696,47 +697,116 @@ showroomContactsRouter.post("/backfill/from-pocs", async (c) => {
       ),
     );
 
-  const plan = {
-    pocs: pocs.length,
-    mainPocs: storesWithMain.length,
-    apply,
+  const plan = { pocs: pocs.length, mainPocs: storesWithMain.length, apply };
+
+  // Resolve each store's PRIMARY location — a migrated contact attaches to the site (Phase L).
+  const storeIds = Array.from(
+    new Set([...pocs.map((p) => p.showroomId), ...storesWithMain.map((s) => s.id)]),
+  );
+  const locsByStore = await loadStoreLocations(db, storeIds);
+  const primaryLocId = (sid: number): number | null =>
+    locsByStore.get(sid)?.find((l) => l.isPrimary)?.id ?? null;
+
+  // Dedup vs contacts that already exist (source pocs are deduped, but an overlapping
+  // main_poc / a re-run must never create a second identical person). Key = store +
+  // normalized name + phone + email.
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+  const personKey = (sid: number, name: string | null, phone: string | null, email: string | null) =>
+    `${sid}|${norm(name)}|${norm(phone)}|${norm(email)}`;
+  const existing = await db
+    .select({
+      storeId: showroomStoreContacts.storeId,
+      firstName: showroomStoreContacts.firstName,
+      lastName: showroomStoreContacts.lastName,
+      officePhoneNumber: showroomStoreContacts.officePhoneNumber,
+      mobilePhoneNumber: showroomStoreContacts.mobilePhoneNumber,
+      emailAddress: showroomStoreContacts.emailAddress,
+    })
+    .from(showroomStoreContacts);
+  const seen = new Set(
+    existing
+      .filter((e) => e.storeId != null)
+      .map((e) =>
+        personKey(
+          e.storeId as number,
+          `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim(),
+          e.officePhoneNumber ?? e.mobilePhoneNumber,
+          e.emailAddress,
+        ),
+      ),
+  );
+
+  const splitName = (full: string | null | undefined) => {
+    const t = (full ?? "").trim();
+    if (!t) return { firstName: null as string | null, lastName: null as string | null };
+    const i = t.lastIndexOf(" ");
+    return i === -1
+      ? { firstName: t, lastName: null as string | null }
+      : { firstName: t.slice(0, i), lastName: t.slice(i + 1) };
   };
-  if (!apply) return c.json({ ...plan, note: "dry run — pass ?apply=true to write" }, 200);
+
+  // Stage people, MAIN POCs FIRST so the primary designation wins over a duplicate poc
+  // row for the same person (which would otherwise be staged non-primary first).
+  const staged: Array<{
+    storeId: number;
+    fullName: string | null;
+    phone: string | null;
+    email: string | null;
+    isPrimary: boolean;
+  }> = [];
+  let skippedDupes = 0;
+  const stage = (
+    storeId: number,
+    fullName: string | null,
+    phone: string | null,
+    email: string | null,
+    isPrimary: boolean,
+  ) => {
+    const k = personKey(storeId, fullName, phone, email);
+    if (seen.has(k)) {
+      skippedDupes++;
+      return;
+    }
+    seen.add(k);
+    staged.push({ storeId, fullName, phone, email, isPrimary });
+  };
+  for (const s of storesWithMain) {
+    stage(s.id, s.mainPocFullname, s.mainPocPhoneNumber, s.mainPocEmailAddress, true);
+  }
+  for (const p of pocs) {
+    stage(p.showroomId, p.fullName, p.phone, p.email, false);
+  }
+
+  if (!apply) {
+    return c.json(
+      {
+        ...plan,
+        wouldCreate: staged.length,
+        wouldSetPrimary: staged.filter((r) => r.isPrimary).length,
+        skippedDupes,
+        note: "dry run — pass ?apply=true to write",
+      },
+      200,
+    );
+  }
 
   let created = 0;
-  for (const p of pocs) {
-    const res = await fieldOutContacts(db, {
-      storeId: p.showroomId,
-      people: [
-        {
-          fullName: p.fullName,
-          title: p.title,
-          phone: p.phone,
-          emailAddress: p.email,
-          notes: p.title ? `Title: ${p.title}` : null,
-        },
-      ],
-      urls: p.website ? [{ url: p.website, type: "WEBSITE" }] : undefined,
-      address: p.address ?? undefined,
+  for (const r of staged) {
+    const name = splitName(r.fullName);
+    await db.insert(showroomStoreContacts).values({
+      storeId: r.storeId,
+      locationId: primaryLocId(r.storeId),
+      type: "OTHER",
+      firstName: name.firstName,
+      lastName: name.lastName,
+      officePhoneNumber: r.phone,
+      emailAddress: r.email,
+      isPrimary: r.isPrimary,
     });
-    created += res.contactIds.length;
-  }
-  for (const s of storesWithMain) {
-    const res = await fieldOutContacts(db, {
-      storeId: s.id,
-      people: [
-        {
-          fullName: s.mainPocFullname,
-          phone: s.mainPocPhoneNumber,
-          emailAddress: s.mainPocEmailAddress,
-          type: "OTHER",
-        },
-      ],
-    });
-    created += res.contactIds.length;
+    created++;
   }
 
-  return c.json({ ...plan, created }, 200);
+  return c.json({ ...plan, created, skippedDupes }, 200);
 });
 
 // ─── Contact log CRUD ─────────────────────────────────────────────────────────
