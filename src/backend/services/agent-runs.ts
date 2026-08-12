@@ -41,17 +41,40 @@ import { errorCodeOf, messageOf, safeJson } from "./agent-run-format";
 import { recordUsage } from "./usage/metering";
 
 /**
- * Durable Object wall-clock rate, USD per second.
+ * Durable Object DURATION rate, USD per wall-clock second of an agent run.
  *
- * Cloudflare bills DO duration in GB-seconds; this is a flat per-second stand-in
- * so the ledger has a real number to sum instead of the $0 it reported before
- * anything wrote DO usage at all. It will be wrong in magnitude and right in
- * shape — a runaway shows up as a curve going up, which is the whole job.
+ * Derived, not guessed: Cloudflare bills DO duration at $12.50 per million
+ * GB-seconds, and a DO is allotted 128 MB, so one GB-second is eight DO-seconds
+ * — $12.50 / 1e6 / 8 ≈ $0.0000015625 per DO-second.
  *
- * ponytail: flat rate, not GB-seconds. Replace with the real figure off the next
- * Cloudflare invoice; the calibration knob is this one constant.
+ * WHAT THIS DOES NOT COVER, AND WHY THAT MATTERS
+ * ----------------------------------------------
+ * Duration is only one of three DO SKUs. Requests ($0.15/million) and, crucially,
+ * STORAGE ROW READS are not counted here at all — and rows read is exactly what
+ * the big incident was. `services/safety/do-circuit-breaker.ts` records it
+ * first-hand: `RemodelOrchestrator` billed "537 BILLION Durable Object row reads
+ * in 30 days (~$512, and climbing)", and states plainly that "the cost driver was
+ * DO-SQLite *rows read* from an unbounded, self-multiplying schedule table — not
+ * wall-clock, not writes."
+ *
+ * So be precise about what this buys. This budget catches a runaway in AGENT RUN
+ * VOLUME OR DURATION — a retry loop, a workflow that never terminates, a cron
+ * widened by accident. It would NOT have caught the #162 incident, and claiming
+ * otherwise would recreate the exact failure this change exists to fix: a number
+ * that looks like protection and is not.
+ *
+ * That gap is already covered by a DIFFERENT and complementary guard — the
+ * kill-switch in `services/safety/do-circuit-breaker.ts`, which every
+ * alarm-bearing DO consults on each fire and which trips on the runaway SIGNAL
+ * (schedule-table growth, fire rate) rather than on a dollar total. Spend ceiling
+ * and runaway kill-switch are two different questions; do not merge them, and do
+ * not add a third.
+ *
+ * ponytail: duration only, flat per-second. Add row-read accounting when there is
+ * a cheap way to attribute it; calibrate against the next invoice. The knob is
+ * this one constant.
  */
-const DURABLE_OBJECT_COST_PER_SECOND_USD = 0.0000125;
+const DURABLE_OBJECT_COST_PER_SECOND_USD = 0.0000015625;
 
 export { errorCodeOf, safeJson } from "./agent-run-format";
 

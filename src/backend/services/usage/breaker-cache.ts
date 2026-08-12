@@ -34,6 +34,16 @@
  *
  * ANY config write MUST call `invalidateBreakerCache`. A manual break that takes
  * a minute to bite is not a break-glass control.
+ *
+ * NOT THE ONLY BREAKER, AND NOT A REPLACEMENT FOR THE OTHER ONE
+ * -------------------------------------------------------------
+ * `services/safety/do-circuit-breaker.ts` is a separate, complementary guard. It
+ * answers "is a Durable Object misbehaving RIGHT NOW?" from a runaway signal
+ * (schedule-table growth, alarm fire rate) and hard-stops on that alone. This one
+ * answers "have we spent too much this cycle?" from a dollar total. The two catch
+ * different failures — the #162 incident ($512 of DO row reads) is invisible to a
+ * duration-based spend total and was caught by signal, not by cost. Keep them
+ * separate, and do not add a third.
  */
 
 import type { MeteredProvider, SpendDecision } from "./metering";

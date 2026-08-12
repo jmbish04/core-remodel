@@ -161,9 +161,15 @@ export const HEALTH_PROBES: HealthProbe[] = [
         `SELECT COUNT(*) FROM worker_emails WHERE ${NOT_PARKED} AND created_at < ?`,
         now - 6 * 3600,
       );
+      // The denominator must exclude parked mail too, or the ratio silently
+      // dilutes. With parked rows counted in `week` but not in `weekStuck`, a
+      // week of 90 parked Gmail messages and 10 genuinely stuck worker emails
+      // scores 10/100 = 10% and reports healthy — when in fact 100% of the mail
+      // the pipeline was actually responsible for is stuck. Both sides of the
+      // ratio now cover the same population: mail the pipeline had to process.
       const week = await scalar(
         env.DB,
-        "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ?",
+        "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ? AND ai_status <> 'pending_approval'",
         now - 7 * DAY,
       );
       const weekStuck = await scalar(
@@ -184,10 +190,12 @@ export const HEALTH_PROBES: HealthProbe[] = [
       }
       if (stuck > 0) {
         return degraded(
-          `${stuck} email(s) older than 6h are still status='pending' (7d volume: ${week}).${parked}`,
+          `${stuck} email(s) older than 6h are still status='pending' (7d volume excl. parked: ${week}).${parked}`,
         );
       }
-      return ok(`No email older than 6h stuck in 'pending'. 7d volume: ${week}.${parked}`);
+      return ok(
+        `No email older than 6h stuck in 'pending'. 7d volume excl. parked: ${week}.${parked}`,
+      );
     },
   }),
 
