@@ -70,6 +70,15 @@ const REPLY_POLL_MS = 20_000;
 const REPLY_MAX_CYCLES = 8;
 /** Hard lifetime ceiling — past this a job drains to fallback, then stops. */
 const MAX_LIFETIME_MS = 30 * 60 * 1_000;
+/**
+ * Liveness guard. Re-armed at the TOP of every alarm fire, before any heavy work
+ * (Browser-Render scraping, Jules round-trips). If a fire is hard-terminated by
+ * the runtime mid-work — which skips the precise re-arm and is NOT a catchable JS
+ * throw — this stale alarm still wakes the DO instead of leaving it dormant. Every
+ * normal path sets a tighter alarm that overwrites this; only a killed handler
+ * lets it survive.
+ */
+const SAFETY_ALARM_MS = 90_000;
 /** KV key namespace + TTL for the job document. */
 const KV_PREFIX = "jules:clearance:";
 const KV_TTL_SECONDS = 24 * 60 * 60;
@@ -199,6 +208,13 @@ export class JulesClearanceAgent extends DurableObject<Env> {
       return;
     }
 
+    // Liveness guard FIRST — before any heavy work — so a hard-terminated fire
+    // still wakes the DO. Every path below sets a tighter alarm over this one.
+    await this.ctx.storage.setAlarm(Date.now() + SAFETY_ALARM_MS);
+    console.info(
+      `[jules-clearance] alarm job=${job.jobId} status=${job.status} cursor=${job.cursor}/${job.links.length} session=${job.sessionId ?? "none"}`,
+    );
+
     const client = await JulesClient.fromEnv(this.env);
     // No key at runtime → finish the remainder on the Workers-AI path.
     if (!client && job.status !== "fallback") {
@@ -270,6 +286,7 @@ export class JulesClearanceAgent extends DurableObject<Env> {
       }
 
       job.status = "running";
+      await this.saveJob(job); // persist before the heavy scrape so state is visible
       await this.scrapeAndSend(job, client);
     } catch (err) {
       console.error(`[jules-clearance] alarm error (job ${job.jobId}):`, err);
