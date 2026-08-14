@@ -62,6 +62,7 @@ function midpointCents(low: number | null, high: number | null): number {
 
 /** 'over' if spending has blown past a nonzero commitment, 'watch' at 80%+, else 'ok'. */
 function riskLevel(spentCents: number, committedCents: number): RoomFinance["riskLevel"] {
+  if (committedCents === 0 && spentCents > 0) return "over"; // spend against zero commitment is over-budget
   if (spentCents > committedCents && committedCents > 0) return "over";
   if (spentCents > 0.8 * committedCents) return "watch";
   return "ok";
@@ -117,6 +118,12 @@ export async function loadRoomsFinance<
   // committedCents: the FULL midpoint per room LINK — an item mapped to two
   // rooms contributes its whole midpoint to each (no splitting). Mirrors
   // get_budget_report.ts's `byRoomMap` aggregation, same M:N shape.
+  //
+  // ponytail: known limitation — an item mapped to N rooms gives each room
+  // the full commitment, so a per-room over/watch check can under-trigger
+  // vs the portfolio total (which counts that item's midpoint once). See
+  // `totals` below, computed independently from the room split for this
+  // reason, and `inbox.ts`'s over_range alert which has the same caveat.
   const committedByRoom = new Map<number, number>();
   for (const link of itemRoomLinks) {
     const item = itemById.get(link.budgetTrackerItemId);
@@ -151,15 +158,25 @@ export async function loadRoomsFinance<
     };
   });
 
-  const totals = roomsOut.reduce(
-    (acc, room) => ({
-      committedCents: acc.committedCents + room.committedCents,
-      spentCents: acc.spentCents + room.spentCents,
-      remainingCents: acc.remainingCents + room.remainingCents,
-      openMaterials: acc.openMaterials + room.openMaterials,
-    }),
-    { committedCents: 0, spentCents: 0, remainingCents: 0, openMaterials: 0 },
+  // Totals are computed DIRECTLY from the active source arrays, independent
+  // of the per-room split above — summing the room rows instead would (a)
+  // double-count an item's commitment once per room it's linked to, and
+  // (b) drop portfolio-level (roomId=null) expenses/materials entirely.
+  const committedCents = activeItems.reduce(
+    (sum, item) => sum + midpointCents(item.estimatedLowCents, item.estimatedHighCents),
+    0,
   );
+  const spentCents = activeExpenses.reduce((sum, expense) => sum + expense.amountCents, 0);
+  const openMaterials = activeMaterials.reduce(
+    (count, material) => count + (material.isPurchased ? 0 : 1),
+    0,
+  );
+  const totals = {
+    committedCents,
+    spentCents,
+    remainingCents: committedCents - spentCents,
+    openMaterials,
+  };
 
   return { rooms: roomsOut, totals };
 }

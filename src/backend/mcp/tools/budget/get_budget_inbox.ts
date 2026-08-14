@@ -40,7 +40,7 @@ export const getBudgetInbox = defineTool({
     const inbox = await loadBudgetInbox(db);
 
     const bySeverity = { critical: 0, warning: 0, info: 0 };
-    for (const alert of inbox.alerts) bySeverity[alert.severity] += 1;
+    for (const alert of inbox.alerts) bySeverity[alert.severity] = (bySeverity[alert.severity] ?? 0) + 1;
 
     const summary =
       inbox.alerts.length === 0

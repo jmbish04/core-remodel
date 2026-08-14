@@ -12,7 +12,12 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
  * Every alert is DERIVED from a live query, never fabricated: an alert type
  * is omitted entirely when its source set is empty (no "0 issues" alert).
  */
-import { budgetFundingAccounts, budgetTrackerItems, estimateLineItems } from "@backend/db";
+import {
+  budgetFundingAccounts,
+  budgetTrackerItems,
+  estimateLineItems,
+  estimateRevisions,
+} from "@backend/db";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { loadRoomsFinance } from "./rooms-finance";
@@ -54,7 +59,16 @@ export async function loadBudgetInbox<
     db
       .select({ id: estimateLineItems.id })
       .from(estimateLineItems)
-      .where(inArray(estimateLineItems.mappingStatus, ["unmapped", "ai_suggested"]))
+      // Scoped to the LATEST revision only — otherwise lines from old/draft
+      // revisions of the same estimate are counted too. Kept in sync with
+      // GET /reconcile/queue in api/routes/estimates.ts.
+      .innerJoin(estimateRevisions, eq(estimateLineItems.estimateRevisionId, estimateRevisions.id))
+      .where(
+        and(
+          inArray(estimateLineItems.mappingStatus, ["unmapped", "ai_suggested"]),
+          eq(estimateRevisions.isLatest, true),
+        ),
+      )
       .all(),
     loadRoomsFinance(db),
     db.select({ amountCents: budgetFundingAccounts.amountCents }).from(budgetFundingAccounts).all(),
@@ -82,6 +96,10 @@ export async function loadBudgetInbox<
   }
 
   // --- over_range: one alert PER room that has blown past its committed midpoint.
+  // ponytail: known limitation — an item mapped to N rooms gives each room the
+  // full commitment threshold (see rooms-finance.ts), so this per-room check
+  // can under-trigger vs the portfolio total even when totals.spentCents (used
+  // below by no_funding) already reflects the true portfolio-wide spend.
   for (const room of roomsFinance.rooms) {
     if (room.spentCents > room.committedCents && room.committedCents > 0) {
       alerts.push({
