@@ -30,6 +30,7 @@ import {
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { classifyStoreCategoriesDryRun } from "@backend/utils/showroom-categories";
 import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import { faviconService } from "@backend/services/favicon";
 import {
@@ -904,4 +905,39 @@ showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
 
   if (!apply) result.notes.push("DRY RUN — nothing written. Re-send with apply:true.");
   return c.json(result, 200);
+});
+
+/**
+ * GET /backfill/categorize-dry-run?limit=&offset= — DRY-RUN category predictions
+ * for showrooms that currently have ZERO category mappings. Writes NOTHING; runs
+ * the classifier (gemini-2.5-flash) over a slice and returns the predictions so a
+ * human can review before any apply. `total` is the full uncategorized count so a
+ * caller can page through with offset.
+ *
+ * Response 200: { total, offset, limit, results: CategoryDryRunPrediction[] }
+ */
+showroomBackfillRouter.get("/backfill/categorize-dry-run", async (c) => {
+  const db = drizzle(c.env.DB);
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 15, 1), 25);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+
+  // Uncategorized = active store with no category_mapping row. Compute the whole
+  // set with two cheap (AI-free) queries, then classify only the requested slice.
+  const mapped = await db
+    .selectDistinct({ storeId: showroomStoreCategoryMapping.storeId })
+    .from(showroomStoreCategoryMapping);
+  const mappedSet = new Set(mapped.map((m) => m.storeId));
+  const active = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.isActive, true))
+    .orderBy(showroomStores.id);
+  const uncategorized = active.map((s) => s.id).filter((id) => !mappedSet.has(id));
+
+  const slice = uncategorized.slice(offset, offset + limit);
+  const results = await Promise.all(
+    slice.map((id) => classifyStoreCategoriesDryRun(c.env, id, [])),
+  );
+
+  return c.json({ total: uncategorized.length, offset, limit, results }, 200);
 });
