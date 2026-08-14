@@ -16,16 +16,16 @@
  * this only adds.
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
-
-import { brands } from "@backend/db/schema/brands/brands";
-import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
-import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
-import { categories } from "@backend/db/schema/config/categories";
-import { brandCategories } from "@backend/db/schema/config/brand_categories";
 import { generateStructuredOutput } from "@backend/ai/providers";
+import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
+import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
+import { brands } from "@backend/db/schema/brands/brands";
+import { brandCategories } from "@backend/db/schema/config/brand_categories";
+import { categories } from "@backend/db/schema/config/categories";
+import { SpendBlockedError } from "@backend/services/usage/metered-ai";
 import { z } from "@hono/zod-openapi";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 const BATCH = 10;
 
@@ -79,9 +79,7 @@ export async function assignBrandCategories(env: Env): Promise<CategoryAssignmen
   if (catRows.length === 0) return report;
 
   // Only brands with NO category yet — additive backfill, never a reclassify.
-  const alreadyMapped = await db
-    .select({ brandId: brandCategories.brandId })
-    .from(brandCategories);
+  const alreadyMapped = await db.select({ brandId: brandCategories.brandId }).from(brandCategories);
   const mappedSet = new Set(alreadyMapped.map((r) => r.brandId));
 
   const allBrands = await db
@@ -147,6 +145,10 @@ For each brand, return the category ids that apply — usually one or two, occas
         temperature: 0,
       });
     } catch (err) {
+      // See assign-primary-type: a spend block applies to every remaining batch,
+      // so continuing just logs the same refusal N times and reports the whole
+      // run as "skipped" rather than "stopped, out of budget".
+      if (err instanceof SpendBlockedError) throw err;
       console.error(`[assign-categories] batch ${i / BATCH} failed:`, err);
       report.skipped += batch.length;
       continue;

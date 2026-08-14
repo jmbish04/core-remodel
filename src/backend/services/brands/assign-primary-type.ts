@@ -17,14 +17,14 @@
  * default. Each batch is independent — a bad one is logged and skipped.
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { eq, inArray, sql } from "drizzle-orm";
-
-import { brands } from "@backend/db/schema/brands/brands";
-import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
-import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { generateStructuredOutput } from "@backend/ai/providers";
+import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
+import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
+import { brands } from "@backend/db/schema/brands/brands";
+import { SpendBlockedError } from "@backend/services/usage/metered-ai";
 import { z } from "@hono/zod-openapi";
+import { eq, inArray, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 const BATCH = 10;
 
@@ -136,10 +136,12 @@ Return one assignment per brand, using the brand's numeric id and the numeric id
         temperature: 0,
       });
     } catch (err) {
-      console.error(
-        `[assign-primary] batch ${i / BATCH} failed:`,
-        err,
-      );
+      // A spend block applies to every remaining batch too, so skipping and
+      // continuing would grind through the whole brand list logging the same
+      // refusal per batch and finish reporting "skipped: 900" as if the work had
+      // merely been unlucky. Abort and say why.
+      if (err instanceof SpendBlockedError) throw err;
+      console.error(`[assign-primary] batch ${i / BATCH} failed:`, err);
       report.skipped += batch.length;
       continue;
     }

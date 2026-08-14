@@ -9,9 +9,11 @@
  */
 import { z } from "zod";
 
-import { generateStructuredOutput } from "../../ai/providers";
-import { nodeOpSchema } from "./edit";
 import type { SceneGraph } from "./shapes";
+
+import { generateStructuredOutput } from "../../ai/providers";
+import { SpendBlockedError } from "../usage/metered-ai";
+import { nodeOpSchema } from "./edit";
 
 const editPlanSchema = z.object({
   ops: z.array(nodeOpSchema).max(50),
@@ -24,7 +26,10 @@ function summarizeGraph(graph: SceneGraph): string {
   const nodes = (graph?.nodes as Record<string, Record<string, unknown>>) ?? {};
   const lines = Object.entries(nodes)
     .slice(0, 400)
-    .map(([id, n]) => `${id}: type=${n.type ?? "?"} parent=${n.parentId ?? "none"} name=${n.name ?? ""}`);
+    .map(
+      ([id, n]) =>
+        `${id}: type=${n.type ?? "?"} parent=${n.parentId ?? "none"} name=${n.name ?? ""}`,
+    );
   return lines.join("\n");
 }
 
@@ -48,13 +53,23 @@ export async function proposeEdits(
         },
         {
           role: "user",
-          content:
-            `INTENT: ${input.intent}\n\nBOUNDS: ${input.boundsNote}\n\nCURRENT NODES:\n${summarizeGraph(input.graph)}`,
+          content: `INTENT: ${input.intent}\n\nBOUNDS: ${input.boundsNote}\n\nCURRENT NODES:\n${summarizeGraph(input.graph)}`,
         },
       ],
     });
     return editPlanSchema.parse(plan);
   } catch (err) {
+    // A budget stop is a POLICY state, not a model failure, and the two must not
+    // collapse into the same answer. Degrading here returns a structurally valid
+    // EditPlan with zero ops — the caller reads that as success and creates a
+    // variant with no edits. For a genuine AI failure that is the intended
+    // graceful path; for "you are over your spend ceiling" it is a wrong answer
+    // dressed as a right one, and the user has no way to tell that the fix is to
+    // raise a budget rather than to retry.
+    //
+    // So let it propagate. The error message names the provider, the spend and
+    // the ceiling, which is exactly what the operator needs to see.
+    if (err instanceof SpendBlockedError) throw err;
     return {
       ops: [],
       rationale: `AI edit unavailable (${err instanceof Error ? err.message : "error"}); variant created without intent edits.`,

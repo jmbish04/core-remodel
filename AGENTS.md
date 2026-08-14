@@ -1,6 +1,7 @@
 # AGENTS.md — Grounding Profile & Architectural Alignment Map
 
 ## Repository Overview
+
 This repository (`jmbish04/core-remodel`) is a complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions.
 The default branch is `main`.
 
@@ -81,12 +82,15 @@ verify and use the exact scripts defined in `package.json`:
 - `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually using this command to prevent heap out of memory errors, because the project's build process does not perform type checking.
 
 ## Cloudflare Durable Objects (MANDATORY)
+
 - **NEVER use `this.schedule()`** — The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 
 ## System Identity & Role Enforcements
+
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
 
 ## Detected Structural Components
+
 - **Routing Tier:** Hono API Framework (Serving OpenAPI v3.1.0)
 - **Frontend Layer:** Astro Web Engine + Shadcn (Default Dark Theme Architecture)
 - **Data Persistence:** Drizzle ORM + D1 Serverless SQL Storage Core
@@ -95,6 +99,7 @@ You are an elite Senior Engineer operating within the Google Antigravity IDE fra
 ## The renovation-studio MCP server — one file per tool
 
 There are **two** MCP servers in this repo; do not conflate them:
+
 1. The OAuth connector at `src/backend/mcp/` (0015 — see the "MCP Server" section
    below). Claude.ai custom connector.
 2. **The bearer-auth "renovation-studio" server at `src/backend/api/routes/mcp/`**
@@ -121,6 +126,59 @@ There are **two** MCP servers in this repo; do not conflate them:
   list_showroom_contacts, list_failed_business_cards, resolve_business_card.
 - **Add a tool:** drop `tools/<name>.ts` exporting a `ToolDef`, add one line to
   `tools/index.ts`. That's it — the transport picks it up.
+
+## Local agent tooling — `local-agent-control` and friends
+
+Installed on this machine (`~/.local/bin`, rebuilt 2026-08-12). Auth is
+**local-first**: these read the machine's existing CLI/SDK login state or the
+local `tokens` CLI. **Do not put provider API keys in `orchestrator.toml`.**
+
+| Command                                     | What it is for                                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `local-ai-orchestrator`                     | Run one task across several local agents (codex / claude / cursor / antigravity) and compare.                |
+| `local-agent-control`                       | Control plane: `status`, `start`, `stop`, `serve`, `open`. Monitor UI + FastMCP on `https://127.0.0.1:4318`. |
+| `local-github-control`                      | `create-pr`, `pr-discussion`, `review-pr`, `merge-pr`, `update-pr-branch`, `sync-pr`, `patch-pr`.            |
+| `local-cloudflare-control`                  | Cloudflare resource creation + Workers deployment inspection.                                                |
+| `cursor-review <abs-repo-path> <pr-number>` | Local Cursor PR review, no Cursor cloud.                                                                     |
+
+**Use it for a second opinion when the review bot is down** — that is the case it
+earns its keep in. The canonical fan-out:
+
+```bash
+local-ai-orchestrator health --profile default        # readiness
+local-ai-orchestrator run "<grounded task>" --provider claude --provider antigravity
+local-ai-orchestrator show-run <run-id>
+```
+
+Rules learned the hard way (2026-08-11/12):
+
+- **`health` is a CONFIG check, not an auth check.** It reported all four
+  providers `ready` while three then failed on execution. Treat a shallow
+  `health` pass as "the config parses", nothing more. Use `--active` when you
+  need to know they can actually answer, and expect the real failure at `run`.
+- **Ground the prompt in real files.** Cite paths and line numbers and state what
+  is already known. An ungrounded prompt gets you a confident restatement of the
+  diff. A grounded one found two real defects in PR #382.
+- **The starter `orchestrator.toml` sets `max_turns = 8` for claude**, which is
+  far too low for anything that has to read files — it dies with
+  `Reached maximum number of turns`. Raise it (40 still was not enough for a
+  full-diff review; antigravity completed the same task).
+- **`.orchestrator-state/` is per-machine run state — gitignored, never commit it.**
+
+### Known broken, as of 2026-08-12
+
+- **`cursor-review` cannot parse this repo's remote**: `Unsupported GitHub remote
+URL: ssh://git@ssh.github.com:443/jmbish04/core-remodel.git` (the SSH-over-443
+  form). Auth itself is fixed and no longer needs a Cursor login. **Do NOT
+  "fix" this by rewriting `origin`** — worktrees share `.git/config`, so changing
+  the remote URL changes it for every concurrent session on this machine.
+- **The orchestrator's `--provider cursor` path still fails** with
+  `missing_api_key: Agent.create requires api_key`, even though `health` calls it
+  ready. The bridge path (`cursor-review`) and the SDK path have different auth;
+  only the bridge was fixed.
+
+Until both are resolved, use `--provider claude --provider antigravity` for
+fan-out reviews and say in the PR which reviewer actually ran.
 
 ## Third-party CLIs — read `--help` BEFORE you run it (MANDATORY)
 
@@ -212,6 +270,7 @@ The Worker hosts an OAuth-gated MCP server so Claude (claude.ai custom connector
 or Claude Code) can manage the remodel by chat. Plan: `docs/0015_mcp_server/IMPLEMENTATION_PLAN.md`.
 
 **Architecture**
+
 - **OAuth**: `@cloudflare/workers-oauth-provider` wraps the Worker's default export
   in `src/_worker.ts`. It owns `/oauth/token`, `/oauth/register`, and the
   `.well-known` metadata; it delegates `/oauth/authorize` (the consent screen,
@@ -240,6 +299,7 @@ JSON-RPC shim at `src/backend/api/routes/mcp.ts` (`/api/mcp`) is a small back-co
 surface — NOT this registry; do not confuse the two.
 
 **To ADD or CHANGE a tool (do this every time):**
+
 1. Add a new `src/backend/mcp/tools/<domain>/<tool_name>.ts` exporting
    `export const <camelName> = defineTool({...})` (name = bare snake_case verb, NO
    prefix; hand-written Zod v4 `inputShape` — never import drizzle-zod; correct
@@ -276,6 +336,7 @@ grouped by session in `mcp_sessions`. Claude also writes two backlogs during
 chats via the `ops` tools, and coding agents are expected to work them:
 
 > **Before starting Worker code work, check the MCP ops backlog:**
+>
 > - **Open bugs:** `mcp_agent_issues` where `status='open'` — read via
 >   `pnpm run mcp:issues`, the `list_agent_issues` MCP tool, or
 >   `GET /api/mcp-ops/issues?status=open` (admin-gated). Fix what you can; when a
@@ -301,9 +362,9 @@ sizes and redacts secret-ish keys.
 
 **NEVER call `db.transaction()`. It does not work on D1 and never has.**
 
-D1 rejects SQL `BEGIN` outright — error 7500, *"To execute a transaction, please
+D1 rejects SQL `BEGIN` outright — error 7500, _"To execute a transaction, please
 use the state.storage.transaction() ... APIs instead of the SQL BEGIN TRANSACTION
-or SAVEPOINT statements."* Verified against both local and production D1.
+or SAVEPOINT statements."_ Verified against both local and production D1.
 `drizzle-orm@0.33.0`'s D1 driver implements `.transaction()` by issuing raw
 `begin`/`commit` as separate statements, so the call throws on its **first**
 statement. The code inside the callback never runs at all.
@@ -336,7 +397,7 @@ do not pretend the batch covers it.
 
 **D1 rejects any single statement with more than 100 bound values:**
 `D1_ERROR: too many SQL variables at offset <n>: SQLITE_ERROR`. The offset is a
-character position in the generated SQL, so it points *into the VALUES list*, not
+character position in the generated SQL, so it points _into the VALUES list_, not
 at a named column — easy to misread as a schema problem.
 
 It bites two shapes, both where the list length is not yours to control:
@@ -397,6 +458,7 @@ D1 section), so the broken insert never executed. One shortcut hid behind
 another.
 
 **Rules:**
+
 - A child row references its parent by `parentId` INTEGER FK. Always.
 - Need the name for display? `JOIN` in the query, or resolve it in the service
   layer. It is one line. Write the line.
@@ -436,6 +498,7 @@ them and the email does not say which. The correct handling is:
 
 Guessing silently is worse than asking. A wrong mapping propagates into budget,
 takeoffs and comparisons, and nothing downstream can tell it was a guess.
+
 ## AI calls: structured output with a JSON schema (MANDATORY)
 
 **Every** AI call that produces data the code will read — workflows, extraction,
@@ -473,10 +536,10 @@ a broken field for months.
 ### The one sanctioned exception: Gemini + Google Search grounding
 
 Gemini **cannot** combine `tools: [{ googleSearch: {} }]` with `responseSchema` /
-`responseMimeType` on `gemini-2.5-*` — the API returns 400 *"controlled
-generation is not supported with google_search tool"*. Grounded calls therefore
-instruct the JSON shape in the prompt and parse defensively (strip ``` fences,
-slice first `{` to last `}`), with a non-grounded schema-constrained fallback.
+`responseMimeType` on `gemini-2.5-*` — the API returns 400 _"controlled
+generation is not supported with google_search tool"_. Grounded calls therefore
+instruct the JSON shape in the prompt and parse defensively (strip ```fences,
+slice first`{`to last`}`), with a non-grounded schema-constrained fallback.
 `services/google/maps.ts` is the reference implementation.
 
 If you hit this, do NOT quietly drop the schema on an ungrounded call — the
@@ -495,6 +558,7 @@ definition + mapping pair and a proper multi-select component (shadcn / shadcn
 registry — there is always one).
 
 **Definition table** (one per multi-select vocabulary, e.g. `colors`, `categories`):
+
 - `id` INTEGER PK autoincrement (ALWAYS)
 - `name` TEXT NOT NULL (ALWAYS)
 - `description` TEXT (ALWAYS)
@@ -502,12 +566,14 @@ registry — there is always one).
 - domain extras when useful (e.g. colors get `hex_code`)
 
 **Mapping table** (join the definition to the owning object, e.g. `photo_colors`):
+
 - `id` INTEGER PK autoincrement (ALWAYS)
 - `<def>_id` FK → the definition table (ALWAYS an FK)
 - `<object>_id` FK → the owning row (ALWAYS an FK)
 - UNIQUE index on `(<def>_id, <object>_id)` (ALWAYS — no duplicate mappings)
 
 **API (per multi-select), ALWAYS provide:**
+
 - list all active options (for the autoselect component)
 - create an "Other" option from the UI (returns the new definition row)
 - create/replace the mappings as part of a form submit AND standalone (for backfills)
@@ -515,6 +581,7 @@ registry — there is always one).
 - search/filter owning objects by mapping(s)
 
 **UX, ALWAYS:**
+
 - support "Other" (creates a new definition + selects it)
 - if the definition has `hex_code`, show a color swatch in the option (`[▧] Name`) and a color picker when creating "Other"
 - show the option **display name**, never the option id
@@ -537,6 +604,7 @@ category with no subcategory.
 ## Reusable data-entry components (USE THESE — do not hand-roll)
 
 **Currency / price** → `@/components/ui/currency-input` `<CurrencyInput>`.
+
 - Renders a `$`-prepended field; `onValueChange(text, cents)` hands back BOTH the
   verbatim text and integer cents. NEVER a bare `<Input>` for money.
 - **D1 for currency: store BOTH** a `<field>_text` TEXT column (verbatim, e.g.
@@ -548,6 +616,7 @@ category with no subcategory.
 review context, drive notes, HITL context, etc.) is captured with the **PlateJS** editor
 (`@/components/showroom/OverviewNoteEditor` `<OverviewNoteEditor>`, or an equivalent Plate host),
 which emits `{ markdown, html }` via `onChange`. NEVER a bare `<textarea>` for a note field.
+
 - **D1 for rich text: store BOTH** a `<field>_markdown` TEXT column AND a `<field>_html` TEXT
   column. The markdown is the portable/round-trippable source of truth; the html is the
   render-ready cache. Never persist only one. The API accepts both (sanitize the html on write);
@@ -619,13 +688,56 @@ After the PR is open and conflict-free:
    whichever is posting.)
 2. **Read every comment and judge it.** AI review comments are frequently right and
    sometimes wrong or inapplicable. Fix the applicable ones; for the rest, reply saying
-   *why* it does not apply. Never blanket-accept and never blanket-ignore.
+   _why_ it does not apply. Never blanket-accept and never blanket-ignore.
 3. **Patch the PR** with the fixes, push, let CI go green.
 4. **Clear any conflicts**, then **merge**.
-5. **Delete your preview worker**: `pnpm run preview:delete`, run from the branch's
-   worktree (it derives the name from the current branch). One preview worker is
-   created per branch and nothing reaps them — then `pnpm run preview:cleanup`
-   to sweep any whose branch is already gone.
+5. **Delete your preview worker — IMMEDIATELY, IN THE SAME TURN AS THE MERGE.**
+   See the mandatory rule below; this is not a later-cleanup item.
+
+### 2a. Merging a PR that has a preview REQUIRES deleting that preview (MANDATORY)
+
+**If you deployed a preview for a branch, deleting it is part of merging that
+branch — not a follow-up, not a nice-to-have, and never something to leave for
+the user.** The instant the merge succeeds, run, from that branch's worktree:
+
+```bash
+pnpm run preview:delete              # tears down THIS branch's preview
+pnpm run preview:cleanup -- --apply  # sweeps any whose branch is gone from origin
+```
+
+Rules, all of them non-negotiable:
+
+- **Do not ask permission.** Deleting the preview you created is authorized by
+  the act of creating it. It is guarded (ledger allowlist, `wcrp-` prefix check,
+  production-name check — see the preview-ledger section), so it cannot touch
+  anything you did not deploy.
+- **Run it from the branch's own worktree, BEFORE you remove that worktree.**
+  `preview:delete` derives the worker name from the current branch. Delete the
+  worktree first and you have orphaned the worker with no easy way to name it.
+- **Merging via `gh pr merge --auto` still counts.** Auto-merge lands without
+  you watching, so either poll for the merge and then delete, or delete right
+  after you confirm it merged. "The merge happened while I was away" is not an
+  exemption — see the `--auto` trap in the deploy notes.
+- **A closed-without-merging PR gets the same treatment.** The preview exists to
+  review a branch; the branch is done either way.
+- **If deletion fails, say so explicitly in your final message**, with the worker
+  name, so it can be removed by hand. Never let a failed cleanup pass silently —
+  a silent failure is how they accumulate.
+- **Report it.** The turn that merges a PR states in its summary that the preview
+  was deleted, naming it. If you cannot say that, you have not finished.
+
+Why this is a hard rule: one preview worker is created per branch, **nothing
+reaps them**, and this account already carries 184 Workers. Every orphan is
+clutter that the next agent has to reason around and that the user ends up
+cleaning by hand. The cleanup takes one command and belongs to whoever created
+the preview.
+
+When you finish any piece of work — merged or not — also sweep the strays:
+
+```bash
+pnpm run preview:list                # what the ledger thinks exists
+pnpm run preview:cleanup -- --apply  # delete those whose branch is gone
+```
 
 > HISTORICAL (pre-2026-07-25): a branch build going GREEN meant the build had
 > deployed your branch to **production**. The Cloudflare↔GitHub integration is now
@@ -660,11 +772,11 @@ gh run watch <run-id> --exit-status                    # non-zero if it fails
 
 Inputs, and what they mean:
 
-| Input | Use |
-| --- | --- |
-| `confirm` | Must be the literal string `deploy`. A typo aborts the run — that is the point. |
+| Input            | Use                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `confirm`        | Must be the literal string `deploy`. A typo aborts the run — that is the point.                        |
 | `run_migrations` | Leave `true`. Set `false` only when you have already applied the migrations by hand AND verified them. |
-| `allow_non_main` | Leave `false`. Deploying a non-`main` ref puts unreviewed code on production. |
+| `allow_non_main` | Leave `false`. Deploying a non-`main` ref puts unreviewed code on production.                          |
 
 **Always deploy from `main`, after merging.** If the Action fails, read the log
 before retrying — a failed deploy usually means a migration did not apply, and
@@ -767,8 +879,8 @@ Consequences you must internalise:
    `core-remodel`.
 2. **A branch build FAILING was often the only thing protecting production.**
    The common failure is `10074 — Cannot apply new-sqlite-class migration to
-   class 'RenovationAgent' that is already depended on by existing Durable
-   Objects`, which fires because the branch's DO migration tag collides with
+class 'RenovationAgent' that is already depended on by existing Durable
+Objects`, which fires because the branch's DO migration tag collides with
    production's.
 3. Do **not** "fix" that 10074 by bumping the DO migration tag to make a branch
    build pass. That does not repair anything — it removes the last guard and
@@ -806,7 +918,7 @@ Evaluated and rejected for the per-branch case, for two reasons:
 from the top-level one at deploy time and overrides only what must differ (name,
 crons, routes, workflow names). Nothing is duplicated, so nothing can drift.
 
-An environment would still be a reasonable fit for one *stable, long-lived*
+An environment would still be a reasonable fit for one _stable, long-lived_
 target — a permanent `staging` worker, say — where the duplication is written
 once and reviewed. It is the wrong tool for ephemeral per-branch previews.
 
@@ -840,15 +952,32 @@ defaults to production, which runs `main`; QC'ing an unmerged branch against it
 tests code your branch has not shipped, and reads as "my endpoint 404s" when the
 truth is "not merged yet". Use `--preview`.
 
-#### Clean up your preview when you are done
+#### Deleting your preview is PART OF MERGING (MANDATORY)
 
-One worker per branch and nothing reaps them. **Delete yours when the PR merges**
-(step 5 of the review loop), and sweep orphans when you finish a piece of work:
+One worker per branch, **nothing reaps them**, and this account already carries
+184 Workers. So the rule is not "clean up when convenient" — it is:
+
+> **The turn that merges (or closes) a PR is the turn that deletes that PR's
+> preview worker. Same turn. No exceptions, no asking first.**
 
 ```bash
-pnpm run preview:delete              # from the branch's worktree, before tearing it down
+pnpm run preview:delete              # from the branch's worktree, BEFORE removing it
 pnpm run preview:cleanup -- --apply  # anything whose branch is gone from origin
 ```
+
+- **Never ask permission.** Creating the preview authorized deleting it, and the
+  ledger guard below makes it impossible to hit anything you did not deploy.
+- **Order matters:** run it from the branch's worktree while that worktree still
+  exists. `preview:delete` derives the worker name from the current branch;
+  remove the worktree first and you have orphaned a worker you can no longer name.
+- **`gh pr merge --auto` is not an exemption.** Poll for the merge, then delete.
+- **Closed-without-merge counts too.** The branch is done either way.
+- **Say it in your summary**, naming the worker. If deletion failed, say that
+  explicitly with the name so a human can finish it — a silent failure here is
+  exactly how the pile builds up.
+
+The full statement of this rule lives with the PR workflow, in
+"§2a. Merging a PR that has a preview REQUIRES deleting that preview".
 
 #### The preview ledger — why deletion is not "list and match a prefix"
 
@@ -902,10 +1031,62 @@ never create or edit a `CHANGELOG.md`.
    output — plus, when the PR changed schema, each migration tag with whether it has been
    applied to the **remote** DB. Never fabricate or paraphrase results; paste what ran.
 
+5. **Task list + preview lifecycle** → the change list is also the WORK TRACKER for the
+   PR. See the next section; it is mandatory, not decorative.
+
 **Every changelog entry MUST surface, on the frontend:** the **git branch name**, the **PR
-number**, the **tests that were run and their results**, and (when schema changed) **remote
-migration status**. These are not optional metadata — they are how a reader answers "is this
-actually live and actually verified?" without leaving the page.
+number**, the **tests that were run and their results**, (when schema changed) **remote
+migration status**, and **the preview worker's name and whether it has been torn down**.
+These are not optional metadata — they are how a reader answers "is this actually live,
+actually verified, and did anyone clean up after it?" without leaving the page.
+
+### The change list is the task tracker — and it owns the preview worker (MANDATORY)
+
+When you create the PR change list you are also creating the **task list for this PR**.
+Track it with the `TaskCreate` / `TaskUpdate` tools, and **update the status of each task
+as you enter and leave that phase** — not in one batch at the end. A task list written
+once and never touched again is a to-do list, not a tracker, and it is how a preview
+worker survives its own PR.
+
+**Every PR's task list MUST contain these, in this order:**
+
+| #   | Task                                                              | Marked `completed` when                            |
+| --- | ----------------------------------------------------------------- | -------------------------------------------------- |
+| 1   | Worktree fresh vs `origin/main`                                   | `git log HEAD..origin/main` is 0                   |
+| 2   | Implement the change                                              | code written, `tsc --noEmit` at baseline           |
+| 3   | Changelog rows (BRANCHES + CHANGELOG + PhaseDetail) written to D1 | the `/admin/changelog/<slug>` link resolves        |
+| 4   | **Deploy preview** — record the worker name in the task           | `pnpm run deploy:preview` printed a URL            |
+| 5   | QC against preview AND production                                 | both runs pasted into the entry                    |
+| 6   | Open PR, link the changelog                                       | PR URL exists                                      |
+| 7   | Review comments addressed                                         | each judged, applied or answered                   |
+| 8   | Merge                                                             | `gh pr view` says `MERGED`                         |
+| 9   | **DELETE THE PREVIEW WORKER** — `pnpm run preview:delete`         | the worker is gone AND the changelog entry says so |
+
+**Task 9 is what closes the PR out. A PR is not finished when it merges — it is finished
+when its preview worker is gone.** If you mark task 8 complete and stop, you have left
+litter, and the user has to find it and remove it by hand.
+
+Rules for tasks 4 and 9 specifically:
+
+- **Task 4 records the worker name** (e.g. `wcrp-<branch-slug>`) in the task text and in
+  the changelog entry's verification block. A preview whose name is only in your scrollback
+  is a preview nobody else can find later.
+- **Task 9 runs from the branch's worktree, BEFORE that worktree is removed** —
+  `preview:delete` derives the name from the current branch.
+- **Never ask permission for task 9.** Creating the preview authorized deleting it.
+- **If task 9 fails, do NOT mark it complete.** Leave it in progress, say so in your final
+  message with the worker name, and state that it needs a manual
+  `npx wrangler delete --name <worker>`.
+- **If you never deployed a preview, mark tasks 4 and 9 as not applicable rather than
+  silently dropping them** — "there was no preview" and "I forgot" must be
+  distinguishable from the outside.
+
+Then sweep anything left behind by earlier work:
+
+```bash
+pnpm run preview:list                # what the ledger knows, per branch
+pnpm run preview:cleanup -- --apply  # delete every preview whose branch is gone
+```
 
 **The PR description MUST contain a direct link to the changelog entry**, every time:
 
@@ -925,7 +1106,7 @@ curl -X POST "$BASE/api/changelog/entries" -H 'content-type: application/json' \
 This bundled data is the seed + SSR fallback. The source of truth is D1: after deploy run
 `POST /api/changelog/seed` once (idempotent), or push entries live with
 `POST /api/changelog/entries` (upsert by slug — never overwrites another branch's rows). Because
-D1 accumulates across branches, the static file's only job is to carry *your* branch's additions;
+D1 accumulates across branches, the static file's only job is to carry _your_ branch's additions;
 do not delete another branch's entries to resolve a merge conflict — append yours.
 
 ## Project Commands & Conventions

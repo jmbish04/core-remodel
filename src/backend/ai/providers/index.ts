@@ -6,6 +6,9 @@
  * and route through the active provider (currently Workers AI only).
  */
 
+import { createGeminiClient } from "@backend/services/render/providers/gemini-stage-provider";
+import { assertCanSpend } from "@backend/services/usage/metered-ai";
+import { recordUsage } from "@backend/services/usage/metering";
 import { z } from "zod";
 
 import type { GptOssMessage } from "../models/gpt-oss-120b";
@@ -13,7 +16,6 @@ import type { AIProvider } from "./base";
 
 import { getModelRegistry } from "../models";
 import { WorkersAIProvider } from "./workers-ai";
-import { createGeminiClient } from "@backend/services/render/providers/gemini-stage-provider";
 
 // Re-export the shared message type for consumers
 export type { GptOssMessage as ChatMessage } from "../models/gpt-oss-120b";
@@ -58,6 +60,16 @@ export async function generateStructuredOutput<TSchema extends z.ZodTypeAny>(
   const provider = getProvider(env);
   const model = getModelRegistry(env).extract;
 
+  // The breaker sits HERE rather than at the 15 call sites, because this is the
+  // choke point every structured extraction already funnels through — and it
+  // was previously spending on both the Workers AI path AND the Gemini fallback
+  // without checking a ceiling or writing a usage row. `assertCanSpend` throws
+  // SpendBlockedError, which is the correct outcome: a caller that cannot tell
+  // "the model said nothing" from "we are out of budget" would retry into the
+  // ceiling forever.
+  await assertCanSpend(env, "WORKERS_AI");
+  const startedAt = Date.now();
+
   try {
     const raw = await provider.invokeStructured(
       model,
@@ -73,8 +85,30 @@ export async function generateStructuredOutput<TSchema extends z.ZodTypeAny>(
       { cacheTtl: opts.cacheTtl },
     );
 
-    return opts.schema.parse(raw);
+    const parsed = opts.schema.parse(raw);
+    await recordUsage(env, {
+      provider: "WORKERS_AI",
+      model: model.id,
+      feature: opts.schemaName ? `structured:${opts.schemaName}` : "structured",
+      latencyMs: Date.now() - startedAt,
+      status: "ok",
+    });
+    return parsed;
   } catch (workersAiErr) {
+    // Record the failed primary attempt before falling back. Without this a
+    // retry storm on the Workers AI path is invisible in the ledger and the
+    // Gemini fallback looks like the only thing costing money.
+    await recordUsage(env, {
+      provider: "WORKERS_AI",
+      model: model.id,
+      feature: opts.schemaName ? `structured:${opts.schemaName}` : "structured",
+      latencyMs: Date.now() - startedAt,
+      status: "error",
+      errorMessage:
+        workersAiErr instanceof Error
+          ? workersAiErr.message.slice(0, 500)
+          : String(workersAiErr).slice(0, 500),
+    });
     // Workers AI structured output has proven unreliable in prod — the
     // kimi extract path returns empty/unparseable content, which surfaces here
     // as a throw and silently zeroed every downstream extraction. Rather than
@@ -159,7 +193,9 @@ function toGeminiSchema(node: unknown): unknown {
   if (node && typeof node === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-      if (["$schema", "additionalProperties", "$ref", "definitions", "default", "$id"].includes(k)) {
+      if (
+        ["$schema", "additionalProperties", "$ref", "definitions", "default", "$id"].includes(k)
+      ) {
         continue;
       }
       out[k] = toGeminiSchema(v);

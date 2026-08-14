@@ -72,6 +72,35 @@ export interface Verification {
   ranAt?: string;
   /** Remote state of each migration this change introduced. */
   migrations?: MigrationStatus[];
+  /**
+   * The per-branch preview worker this PR deployed, and whether it has been
+   * torn down.
+   *
+   * WHY THIS IS ON THE PAGE. One preview worker is created per branch, nothing
+   * reaps them, and the account carries ~190 Workers — so "is there a stale
+   * preview out there?" was a question only answerable by listing every Worker
+   * on the account and reasoning about branch names. Recording it beside the QC
+   * output makes the answer readable: a `deployed` badge on a merged entry is
+   * litter somebody still has to remove.
+   *
+   * `none` is a real, distinct state. A change that never needed a preview and a
+   * change whose author forgot to record one must not look identical.
+   */
+  previewWorker?: PreviewWorkerStatus;
+}
+
+/** One PR's preview worker and its teardown state. */
+export interface PreviewWorkerStatus {
+  /** Worker name as deployed, e.g. `wcrp-claude-my-branch`. */
+  name: string;
+  /**
+   * `deployed` — still live on Cloudflare, still costing clutter.
+   * `deleted`  — torn down; the PR is genuinely finished.
+   * `none`     — this change never deployed a preview (docs-only, say).
+   */
+  status: "deployed" | "deleted" | "none";
+  /** Anything a reader needs: why it is still up, or when it went away. */
+  note?: string;
 }
 
 export interface PhaseDetail {
@@ -113,6 +142,246 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "health-probe-truth-and-spend-breaker": {
+    slug: "health-probe-truth-and-spend-breaker",
+    subtitle:
+      "System health audit — /admin/system/health, the agent run ledger, and the spend breaker",
+    branch: "worktree-bridge-cse_016Rp7EJTqbFmvTpUX2cUvWw",
+    prNumber: 382,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/382",
+
+    introduction: `System health was reporting **degraded**. This is the audit of what was
+actually wrong, and the fixes for the parts that were fixable in one PR.
+
+The short version: of the five failing probes, **two were measuring the wrong
+thing**. They were not reporting a broken system — they were the broken part.
+And because both counted rows without any upper bound on age, one bad day pinned
+them red permanently, so every genuinely new problem would have arrived behind an
+alarm nobody could distinguish from the stale one.`,
+
+    problem: `**Failing probe 1 — "the email pipeline is not completing".**
+
+The probe counted \`worker_emails.status = 'pending'\` and called more than 25%
+of a week's mail being pending a pipeline failure. But the 0042 AI trust gate
+deliberately *parks* Gmail-sourced mail: \`pipeline.ts\` returns early on
+\`deferAiUntilApproval\` and leaves the row \`pending\` with
+\`ai_status = 'pending_approval'\`, waiting for a human to approve the AI step.
+
+Pulling the actual rows off production settled it — **22 of 26 pending rows were
+parked, not stuck**, every one of them \`source = 'gmail'\`. Mail waiting on you
+is not mail the pipeline dropped.
+
+**Failing probe 2 — "a Durable Object is likely awake and billing".**
+
+Worse, because it is a *billing* alarm and it was crying wolf. It counted
+\`running\`/\`queued\` rows older than an hour, with no upper bound. The 31 rows on
+production were **6 to 16 days old** — and the probe's own message said
+\`Last hour started=0\`. Nothing had started. Nothing was awake.
+
+They were corpses. A run row is opened by \`startRun\` and closed by the caller,
+so when an isolate dies mid-run the row is never closed. Two real crash modes
+produced these, both visible in the ledger: \`Worker exceeded memory limit\` (15
+showroom scrape runs) and a Browser Rendering 422 navigation timeout (8 more).
+
+**And the budget that could never trip.**
+
+\`DURABLE_OBJECT\` has been a declared metered provider since the metering system
+shipped. It has a config page, a ceiling, a breaker. It also had **no writer
+anywhere in the codebase**, so \`getCycleSpend\` summed to \`$0\` for ever and the
+ceiling was unreachable by construction. Meanwhile \`generateStructuredOutput\`,
+which 15 call sites funnel through, spent on the Workers AI path *and* its Gemini
+fallback while checking no ceiling and writing no usage row at all.`,
+
+    approach: `**1. Teach the probes what they are looking at.** The email probe excludes
+parked rows from *both* sides of its ratio — excluding them from only the
+numerator silently diluted the signal. The DO watcher splits stuck runs by age;
+only runs younger than 24h can raise a billing FAILURE.
+
+**2. Close the runs that will never close themselves.** \`sweepAbandonedRuns\`
+marks runs stuck past 24h as \`failed\` / \`ABANDONED\` on the daily cron. Using
+\`failed\` + an error code rather than a new status is what the probe's own
+\`devOpsPlaybook\` prescribed: no migration, no enum change, and it inherits the
+90-day failed-run retention.
+
+**3. Measure Durable Object spend once, at the choke point.** Every Agent, DO and
+Workflow already opens a run through \`startRun\`, and a run's duration *is* the
+billable quantity, so its close prices the wall-clock — one writer for 26
+classes. Enforcement deliberately does **not** live there: \`startRun\` is
+contractually non-throwing, so the check sits in \`dispatchDueWorkflows\`, where
+declining skips the tick and leaves the schedule untouched.
+
+**4. Make the brake cheap enough to use.** \`canSpend\` is two D1 queries, one a
+\`SUM\` over an append-only table — fine on an admin page, far too expensive in
+front of every AI call. \`breaker-cache.ts\` caches the **decision** in KV: D1
+stays authoritative, nothing is incremented in KV (Workers KV has no atomic
+increment, and a lost increment under-reports spend), TTL is asymmetric (allow
+30s, deny 300s), a miss falls through to the fail-closed D1 path, and every
+config write invalidates so break-glass controls bite immediately.
+
+**5. Do not let a budget stop look like an empty answer.** A spend block now
+propagates instead of degrading to a zero-op result or a silent per-batch skip.`,
+
+    apiChanges: [
+      "POST /api/health/session — `email_pipeline_processing_liveness` and `do_agent_run_volume_watcher` change verdict on the same data. No shape change.",
+      "GET /api/config/usage — unchanged shape; DURABLE_OBJECT `spendUsd` is now a real number instead of a structural $0.",
+      "GET /api/admin/agents/failures — gains an `ABANDONED` error-code group once the daily sweep fires.",
+      "canSpend(env, provider, { fresh?: boolean }) — new optional third argument so admin surfaces never render a cached spend figure.",
+    ],
+
+    filesTouched: [
+      "src/backend/services/usage/breaker-cache.ts (new)",
+      "src/backend/services/usage/metering.ts",
+      "src/backend/services/agent-runs.ts",
+      "src/backend/services/agent-run-retention.ts",
+      "src/backend/services/workflow-dispatcher.ts",
+      "src/backend/ai/providers/index.ts",
+      "src/backend/services/pascal/ai-edit.ts",
+      "src/backend/services/brands/{assign-primary-type,assign-brand-categories,type-consolidation}.ts",
+      "src/backend/realtime/health.ts",
+      "src/backend/services/email/health.ts",
+      "src/_worker.ts",
+      "AGENTS.md, package.json (preview cleanup on merge)",
+      "scripts/qc/pr_382.mjs (new)",
+    ],
+
+    migrations: [],
+
+    code: [
+      {
+        title: "The email probe — parked is not stuck, on BOTH sides of the ratio",
+        lang: "ts",
+        code: `const NOT_PARKED = "status = 'pending' AND ai_status <> 'pending_approval'";
+
+// The denominator must exclude parked mail too, or the ratio silently dilutes:
+// 90 parked Gmail messages + 10 genuinely stuck worker emails scores 10% and
+// reports healthy, when 100% of the mail the pipeline owned is stuck.
+const week = await scalar(env.DB,
+  "SELECT COUNT(*) FROM worker_emails WHERE created_at >= ? AND ai_status <> 'pending_approval'",
+  now - 7 * DAY);`,
+      },
+      {
+        title: "Splitting live spend from dead ledger rows",
+        lang: "ts",
+        code: `// Past this age a \`running\` row cannot be live spend — the isolate that
+// owned it is long gone.
+const RESIDUE_AFTER_HOURS = 24;
+
+// Only \`live\` can raise a billing FAILURE. \`residue\` is always reported.
+if (live >= 25) return failure(\`\${live} agent runs stuck ... \${residueNote}\`);
+if (live > 0 || residue > 0) return degraded(\`...\${residueNote}\`);`,
+      },
+      {
+        title: "Closing an abandoned run without destroying its diagnosis",
+        lang: "ts",
+        code: `// An earlier version put \`isNull(errorCode)\` in the WHERE clause to avoid
+// clobbering a manual annotation. That did the opposite of the intent: it
+// EXCLUDED those rows from the sweep, so a run that logged a non-fatal error and
+// then died stayed \`running\` for ever — the most informative row, permanently
+// stranded. Select the value instead of filtering on it.
+.set({
+  status: "failed",
+  errorCode: sql\`COALESCE(\${agentRuns.errorCode}, \${ABANDONED_ERROR_CODE})\`,
+})
+.where(and(inArray(agentRuns.status, ["running", "queued"]), lt(agentRuns.createdAt, cutoff)));`,
+      },
+      {
+        title: "Asymmetric TTL — a stale allow costs money, a stale deny does not",
+        lang: "ts",
+        code: `const ALLOW_TTL_SECONDS = 30;
+const DENY_TTL_SECONDS = 300;
+
+// \`read_error\` means D1 was unreadable. Pinning a deny for five minutes over one
+// blip would turn a momentary hiccup into an outage of every metered feature.
+if (decision.reason === "read_error") return;
+await env.CACHE.put(cacheKey(decision.provider), JSON.stringify(decision), {
+  expirationTtl: decision.allowed ? ALLOW_TTL_SECONDS : DENY_TTL_SECONDS,
+});`,
+      },
+    ],
+
+    diagrams: [
+      {
+        caption: "Where the breaker sits, and what is authoritative",
+        title: "Spend decision path — KV caches the answer, D1 owns the truth",
+        description: `The only thing written to KV is a **decision**, and it is only ever
+replaced, never incremented. A KV miss is not an answer — it falls through to D1,
+which fails closed. That is what stops a cache outage from quietly becoming an
+unlimited spending permit.`,
+        code: `flowchart TD
+  CALL["AI call / workflow dispatch"] --> CS["canSpend(provider)"]
+  CS --> KV{"KV: cached decision?"}
+  KV -->|hit| RET["allow / deny"]
+  KV -->|miss, error, or fresh:true| D1CFG["D1 project_system_variables"]
+  D1CFG --> D1SUM["D1 gemini_usage_log<br/>SUM(estimated_cost_usd) this cycle"]
+  D1SUM --> DEC["decideSpend()"]
+  DEC --> WRITE["cache decision<br/>allow 30s / deny 300s"]
+  WRITE --> RET
+  D1SUM -.->|read fails| CLOSED["FAIL CLOSED: deny<br/>(never cached)"]
+  CONFIG["admin edits a budget"] --> INV["invalidateBreakerCache()"]
+  INV --> KV
+  RUN["startRun close"] --> LEDGER["recordUsage DURABLE_OBJECT<br/>wall-clock priced"]
+  LEDGER --> D1SUM`,
+      },
+      {
+        caption: "Why a crashed run looked like a live Durable Object",
+        title: "Agent run lifecycle — the gap the sweep closes",
+        code: `stateDiagram-v2
+  [*] --> running: startRun()
+  running --> succeeded: run.succeed()
+  running --> failed: run.fail()
+  running --> orphaned: isolate dies<br/>(memory limit, evicted step)
+  orphaned --> orphaned: nothing closes it — stays 'running' for ever
+  orphaned --> failed: sweepAbandonedRuns()<br/>error_code = ABANDONED
+  succeeded --> [*]: pruned after 30d
+  failed --> [*]: pruned after 90d`,
+      },
+    ],
+
+    verification: {
+      qcScript: "scripts/qc/pr_382.mjs",
+      command: "pnpm run test:pr 382 -- --preview   /   pnpm run test:pr 382",
+      ranAt: "2026-08-12",
+      source: `// The two probe fixes are assertions about CLASSIFICATION, not about the app
+// doing more work, so "does the endpoint 200" would pass either way. The
+// meaningful check is: given the same prod data, does the probe still call it a
+// FAILURE?
+check("parked (pending_approval) mail no longer reads as FAILURE",
+  email.result !== "FAILURE", \`result=\${email.result} — \${email.details}\`);
+check("aged residue does not raise a billing FAILURE",
+  doWatcher.result !== "FAILURE", \`result=\${doWatcher.result} — \${doWatcher.details}\`);`,
+      output: `PREVIEW: 21 passed, 0 failed — counts={"success":77,"degraded":10,"failure":3}
+  email probe: DEGRADED — 4 email(s) older than 6h are still status='pending'
+               (7d volume excl. parked: 0). 23 awaiting your approval (not stuck).
+  DO watcher:  DEGRADED — 0 agent run(s) running/queued for 1-24h (last hour started=0).
+               (plus 31 run(s) older than 24h — dead ledger rows, not live spend)
+
+PRODUCTION regression run (pre-merge): 16 passed, 0 failed
+  Still the pre-fix probes (FAILURE) — pending merge/deploy.
+
+DURABLE_OBJECT writer proven live on the preview by triggering one real agent run
+(pricing catalog refresh; no model spend):
+  DURABLE_OBJECT spendUsd = 0.000044925   (was structurally $0 — no writer existed)
+
+NET EFFECT: failing probes 5 → 3. The 3 that remain are real and are NOT fixed by
+this PR: Tesla telemetry stale, 6 duplicate brand groups, 9 mappings pointing at
+retired brands.
+
+REVIEW: the Gemini/codra bot was offline and the Cursor CLI could not run (see the
+PR thread). An adversarial pass via the local orchestrator found two real defects,
+both fixed here; two more were found by reviewing this PR's own diff.
+
+Typecheck: npx tsc --noEmit — pre-existing baseline only, zero introduced
+(diffed before/after with git stash).
+Migrations: none.`,
+      migrations: [],
+      previewWorker: {
+        name: "wcrp-worktree-bridge-cse-016rp7ejtqbfmvtpux2cuvww",
+        status: "deleted",
+        note: "Torn down. This entry is also the first user of the previewWorker field it introduces.",
+      },
+    },
+  },
+
   "budget-grid-usability": {
     slug: "budget-grid-usability",
     branch: "claude/budget-grid-followups",
