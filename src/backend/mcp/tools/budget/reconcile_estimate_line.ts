@@ -75,8 +75,12 @@ export const reconcileEstimateLine = defineTool({
       patch.mappingStatus = input.mappingStatus;
     }
 
-    if (typeof patch.roomId === "number" && !input.mappingStatus) {
-      patch.mappingStatus = "confirmed";
+    if (!input.mappingStatus) {
+      if (typeof patch.roomId === "number") {
+        patch.mappingStatus = "confirmed";
+      } else if (patch.roomId === null) {
+        patch.mappingStatus = "unmapped";
+      }
     }
 
     if (Object.keys(patch).length === 0) {

@@ -24,6 +24,7 @@ interface QueueItem {
   description: string | null;
   lineTotalCents: number | null;
   mappingStatus: MappingStatus;
+  roomId: number | null;
   aiSuggestedRoomId: number | null;
   aiSuggestedRoomName: string | null;
   aiSuggestedCategory: string | null;
@@ -121,8 +122,9 @@ export function EstimateReconcileApp() {
   }
 
   async function handleConfirm(lineItemId: number) {
-    const roomId = selectedRoom[lineItemId];
-    if (!roomId) {
+    const item = items.find((it) => it.lineItemId === lineItemId);
+    const roomId = selectedRoom[lineItemId] ?? item?.roomId ?? item?.aiSuggestedRoomId ?? null;
+    if (roomId == null) {
       toast.error("Pick a room before confirming.");
       return;
     }
@@ -133,7 +135,7 @@ export function EstimateReconcileApp() {
         body: JSON.stringify({ roomId, mappingStatus: "confirmed" }),
       });
       toast.success("Mapping confirmed.");
-      setItems((prev) => prev.filter((item) => item.lineItemId !== lineItemId));
+      void loadQueue(0);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to confirm mapping");
     } finally {
@@ -149,7 +151,7 @@ export function EstimateReconcileApp() {
         body: JSON.stringify({ mappingStatus: "rejected" }),
       });
       toast.success("Mapping rejected.");
-      setItems((prev) => prev.filter((item) => item.lineItemId !== lineItemId));
+      void loadQueue(0);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to reject mapping");
     } finally {
@@ -190,7 +192,8 @@ export function EstimateReconcileApp() {
     <div className="flex flex-col gap-4">
       {items.map((item) => {
         const rowCandidates = candidates[item.lineItemId];
-        const roomId = selectedRoom[item.lineItemId] ?? item.aiSuggestedRoomId ?? null;
+        const roomId =
+          selectedRoom[item.lineItemId] ?? item.roomId ?? item.aiSuggestedRoomId ?? null;
         const busy = savingId === item.lineItemId;
 
         return (

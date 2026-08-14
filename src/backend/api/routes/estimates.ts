@@ -1168,8 +1168,12 @@ estimatesRouter.patch("/line-items/:lineItemId/reconcile", async (c) => {
     patch.mappingStatus = body.mappingStatus;
   }
 
-  if (typeof patch.roomId === "number" && !("mappingStatus" in body)) {
-    patch.mappingStatus = "confirmed";
+  if (!("mappingStatus" in body)) {
+    if (typeof patch.roomId === "number") {
+      patch.mappingStatus = "confirmed";
+    } else if (patch.roomId === null) {
+      patch.mappingStatus = "unmapped";
+    }
   }
 
   if (Object.keys(patch).length === 0) {
@@ -1234,6 +1238,12 @@ estimatesRouter.post("/line-items/:lineItemId/ai-suggest", async (c) => {
       .get();
     if (!lineItem) {
       return c.json({ error: "Line item not found" }, 404);
+    }
+    if (lineItem.mappingStatus === "confirmed") {
+      return c.json(
+        { error: "Line item already confirmed; unmap before re-suggesting" },
+        409,
+      );
     }
 
     const activeRooms = await db
