@@ -2,6 +2,7 @@ import type { RemodelTool } from "../../types";
 
 import { createBudgetItem } from "./create_budget_item";
 import { getBudgetGrid } from "./get_budget_grid";
+import { getBudgetInbox } from "./get_budget_inbox";
 import { getBudgetItem } from "./get_budget_item";
 import { linkBudgetItemToRoom } from "./link_budget_item_to_room";
 import { listBudgetItems } from "./list_budget_items";
@@ -26,6 +27,7 @@ export const budgetTools: RemodelTool[] = [
   listFundingAccounts,
   setFundingAccount,
   getBudgetGrid,
+  getBudgetInbox,
   listReconciliationQueue,
   reconcileEstimateLine,
 ];
