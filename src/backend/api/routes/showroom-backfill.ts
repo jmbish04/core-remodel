@@ -908,18 +908,23 @@ showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
 });
 
 /**
- * GET /backfill/categorize-dry-run?limit=&offset= — DRY-RUN category predictions
- * for showrooms that currently have ZERO category mappings. Writes NOTHING; runs
- * the classifier (gemini-2.5-flash) over a slice and returns the predictions so a
- * human can review before any apply. `total` is the full uncategorized count so a
- * caller can page through with offset.
+ * GET /backfill/categorize?limit=&offset=&apply= — classify showrooms that
+ * currently have ZERO category mappings (gemini-2.5-flash), over a paged slice.
  *
- * Response 200: { total, offset, limit, results: CategoryDryRunPrediction[] }
+ * DRY RUN by default (`apply` unset/false): predicts + returns, writes NOTHING.
+ * With `apply=true`: persists the SAME prediction it returns — the first id is the
+ * store's primary category — so the report matches exactly what was written. Only
+ * ever writes when the store still has zero mappings (fill-blanks; re-checked per
+ * row), so a concurrent write can't produce a duplicate/second-primary.
+ *
+ * `total` is the full uncategorized count so a caller can page with offset.
+ * Response 200: { total, offset, limit, apply, appliedCount, results }
  */
-showroomBackfillRouter.get("/backfill/categorize-dry-run", async (c) => {
+showroomBackfillRouter.get("/backfill/categorize", async (c) => {
   const db = drizzle(c.env.DB);
   const limit = Math.min(Math.max(Number(c.req.query("limit")) || 15, 1), 25);
   const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+  const apply = c.req.query("apply") === "true";
 
   // Uncategorized = active store with no category_mapping row. Compute the whole
   // set with two cheap (AI-free) queries, then classify only the requested slice.
@@ -939,5 +944,29 @@ showroomBackfillRouter.get("/backfill/categorize-dry-run", async (c) => {
     slice.map((id) => classifyStoreCategoriesDryRun(c.env, id, [])),
   );
 
-  return c.json({ total: uncategorized.length, offset, limit, results }, 200);
+  let appliedCount = 0;
+  if (apply) {
+    for (const pred of results) {
+      if (pred.hasExistingCategories || pred.predicted.length === 0) continue;
+      // Re-check fill-blanks at write time (defends against a concurrent classify).
+      const [row] = await db
+        .select({ id: showroomStoreCategoryMapping.id })
+        .from(showroomStoreCategoryMapping)
+        .where(eq(showroomStoreCategoryMapping.storeId, pred.storeId))
+        .limit(1);
+      if (row) continue;
+      for (const [i, cat] of pred.predicted.entries()) {
+        await db.insert(showroomStoreCategoryMapping).values({
+          storeId: pred.storeId,
+          categoryId: cat.id,
+          aiRationale: "Bulk categorize backfill (dry-run classifier, gemini-2.5-flash)",
+          aiRationaleConfidenceScore: pred.usedAi ? 7 : 5,
+          isPrimary: i === 0,
+        });
+      }
+      appliedCount++;
+    }
+  }
+
+  return c.json({ total: uncategorized.length, offset, limit, apply, appliedCount, results }, 200);
 });
