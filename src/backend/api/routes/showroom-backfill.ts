@@ -945,28 +945,40 @@ showroomBackfillRouter.get("/backfill/categorize", async (c) => {
   );
 
   let appliedCount = 0;
+  let failedCount = 0;
   if (apply) {
     for (const pred of results) {
       if (pred.hasExistingCategories || pred.predicted.length === 0) continue;
       // Re-check fill-blanks at write time (defends against a concurrent classify).
-      const [row] = await db
-        .select({ id: showroomStoreCategoryMapping.id })
-        .from(showroomStoreCategoryMapping)
-        .where(eq(showroomStoreCategoryMapping.storeId, pred.storeId))
-        .limit(1);
-      if (row) continue;
-      for (const [i, cat] of pred.predicted.entries()) {
-        await db.insert(showroomStoreCategoryMapping).values({
-          storeId: pred.storeId,
-          categoryId: cat.id,
-          aiRationale: "Bulk categorize backfill (dry-run classifier, gemini-2.5-flash)",
-          aiRationaleConfidenceScore: pred.usedAi ? 7 : 5,
-          isPrimary: i === 0,
-        });
+      // Wrapped per store so a lost race (unique index throws on a duplicate/second
+      // primary from a concurrent apply) skips that one store instead of 500-ing the
+      // whole batch and losing appliedCount for stores already written this pass.
+      try {
+        const [row] = await db
+          .select({ id: showroomStoreCategoryMapping.id })
+          .from(showroomStoreCategoryMapping)
+          .where(eq(showroomStoreCategoryMapping.storeId, pred.storeId))
+          .limit(1);
+        if (row) continue;
+        for (const [i, cat] of pred.predicted.entries()) {
+          await db.insert(showroomStoreCategoryMapping).values({
+            storeId: pred.storeId,
+            categoryId: cat.id,
+            aiRationale: "Bulk categorize backfill (dry-run classifier, gemini-2.5-flash)",
+            aiRationaleConfidenceScore: pred.usedAi ? 7 : 5,
+            isPrimary: i === 0,
+          });
+        }
+        appliedCount++;
+      } catch (err) {
+        failedCount++;
+        console.error(`[categorize] apply failed for store ${pred.storeId}:`, err);
       }
-      appliedCount++;
     }
   }
 
-  return c.json({ total: uncategorized.length, offset, limit, apply, appliedCount, results }, 200);
+  return c.json(
+    { total: uncategorized.length, offset, limit, apply, appliedCount, failedCount, results },
+    200,
+  );
 });
