@@ -56,6 +56,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/budget-workbench-p3",
+    title: "Budget workbench P3 — estimate-line reconciliation HITL",
+    summary:
+      "First workbench phase: map estimate line items to rooms with an AI-staged, human-confirmed loop — schema (migration 0183), AI-suggest + reconcile + queue routes, a HITL UI at /admin/budget/reconcile, and MCP tools. Built via the local-ai-orchestrator (claude) with per-diff review.",
+    date: "2026-08-12",
+    status: "staged",
+    prNumber: 406,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/406",
+  },
+  {
     branch: "claude/budget-grid-followups",
     title: "Budget grid usability — phase assignment + funding config",
     summary:
@@ -441,6 +451,25 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "budget-workbench-reconciliation-p3",
+    branch: "claude/budget-workbench-p3",
+    date: "2026-08-12",
+    tag: "0035 P3",
+    area: "Budget",
+    title: "Estimate-line reconciliation HITL (workbench Phase 3)",
+    summary:
+      "Maps individual estimate line items to rooms with an AI-staged, human-confirmed loop — the first BudgetWorkbench phase. estimate_line_items gains room_id (FK), budget_item_track_id (TEXT no-FK), mapping_status, and ai_suggested_room_id/category + mapping_confidence (migration 0183). POST /ai-suggest calls generateStructured, feeds the model the real room id:name list, validates every returned roomId against live rooms (drops hallucinations), stages the guess and NEVER writes roomId. PATCH /reconcile is the only roomId write (validates the room exists, auto-confirms). A /admin/budget/reconcile HITL page shows the queue with the AI's ranked candidates + confidence + reasoning, a RoomSelect override, and Confirm/Reject; MCP list_reconciliation_queue + reconcile_estimate_line give chat the same confirm path. Built with the local-ai-orchestrator (claude) doing edits under per-diff review + an adversarial review pass (7/7 checks clean, 1 minor summary fix). QC 9/9 preview.",
+    changes: [
+      { kind: "migration", text: "0183 (additive): estimate_line_items += room_id (FK rooms set null), budget_item_track_id (TEXT no-FK), mapping_status (default unmapped), ai_suggested_room_id/category, mapping_confidence. Applied + verified on remote." },
+      { kind: "added", text: "POST /api/estimates/line-items/:id/ai-suggest — structured-output room suggestion; validates AI roomIds against live rooms; stages ai_suggested_*, never writes roomId; no {} degrade." },
+      { kind: "added", text: "PATCH /api/estimates/line-items/:id/reconcile (the only roomId write; validates room exists; auto-confirms) + GET /api/estimates/reconcile/queue." },
+      { kind: "added", text: "/admin/budget/reconcile HITL UI — queue + AI candidates (confidence + reasoning) + RoomSelect + Confirm/Reject." },
+      { kind: "added", text: "MCP list_reconciliation_queue (READ) + reconcile_estimate_line (WRITE) — same confirm write as the UI." },
+    ],
+    migrations: ["0183"],
+    status: "staged",
+  },
   {
     id: "budget-grid-usability",
     branch: "claude/budget-grid-followups",

@@ -156,6 +156,19 @@ export const estimateLineItems = sqliteTable(
     // for business/architect/consulting estimates that bill services rather
     // than materials. Nullable — most line items are material-based.
     serviceId: integer("service_id").references(() => services.id, { onDelete: "set null" }),
+    // Room/budget mapping (HITL). roomId nullable — AI stages a guess in
+    // aiSuggestedRoomId/aiSuggestedCategory/mappingConfidence; a human must
+    // confirm before roomId is set. budgetItemTrackId is TEXT with no FK: it
+    // holds the stable trackId, never budget_tracker_items.id, which is
+    // revisioned and would break the link across revisions.
+    roomId: integer("room_id").references(() => rooms.id, { onDelete: "set null" }),
+    budgetItemTrackId: text("budget_item_track_id"),
+    mappingStatus: text("mapping_status").notNull().default("unmapped"),
+    aiSuggestedRoomId: integer("ai_suggested_room_id").references(() => rooms.id, {
+      onDelete: "set null",
+    }),
+    aiSuggestedCategory: text("ai_suggested_category"),
+    mappingConfidence: real("mapping_confidence"),
     datetimeCreated: integer("datetime_created", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),

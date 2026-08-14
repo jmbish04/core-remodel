@@ -61,6 +61,11 @@ export function budgetUrl(env: Env): string {
   return siteUrl(env, "/admin/budget/tracker");
 }
 
+/** The estimate-line HITL reconciliation queue (mirrors the reconcile MCP tools). */
+export function reconcileQueueUrl(env: Env): string {
+  return siteUrl(env, "/admin/budget/reconcile");
+}
+
 /** A single material's detail page. */
 export function materialUrl(env: Env, materialId: number | string): string {
   return siteUrl(env, `/admin/shopping/material/${materialId}`);
