@@ -1347,11 +1347,20 @@ estimatesRouter.get("/reconcile/queue", async (c) => {
         suggestedRoomName: rooms.roomName,
       })
       .from(estimateLineItems)
-      .leftJoin(estimateRevisions, eq(estimateLineItems.estimateRevisionId, estimateRevisions.id))
+      // innerJoin + isLatest scopes this to the LATEST revision only — otherwise
+      // lines from old/draft revisions of the same estimate show up in the
+      // queue too. Kept in sync with the unmapped_estimate count in
+      // services/budget/inbox.ts.
+      .innerJoin(estimateRevisions, eq(estimateLineItems.estimateRevisionId, estimateRevisions.id))
       .leftJoin(estimates, eq(estimateRevisions.estimateId, estimates.id))
       .leftJoin(estimateCompanies, eq(estimates.estimateCompanyId, estimateCompanies.id))
       .leftJoin(rooms, eq(estimateLineItems.aiSuggestedRoomId, rooms.id))
-      .where(inArray(estimateLineItems.mappingStatus, ["unmapped", "ai_suggested"]))
+      .where(
+        and(
+          inArray(estimateLineItems.mappingStatus, ["unmapped", "ai_suggested"]),
+          eq(estimateRevisions.isLatest, true),
+        ),
+      )
       .orderBy(asc(estimateLineItems.datetimeCreated))
       .limit(limit + 1)
       .offset(offset)
