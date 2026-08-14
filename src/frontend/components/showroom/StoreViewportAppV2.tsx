@@ -617,6 +617,10 @@ export function StoreViewportAppV2({
   // POCs come back on the same payload — unioned into Contacts (they're the only
   // contact source for some stores until Phase-L migrates pocs → contacts).
   const [locations, setLocations] = useState<StoreLocation[]>([]);
+  const [storeRatingSummary, setStoreRatingSummary] = useState<{
+    count: number;
+    avg: number;
+  } | null>(null);
 
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
@@ -849,8 +853,14 @@ export function StoreViewportAppV2({
           credentials: "include",
         });
         if (!res.ok) return;
-        const data = (await res.json()) as { locations?: StoreLocation[] };
-        if (!cancelled) setLocations(data.locations ?? []);
+        const data = (await res.json()) as {
+          locations?: StoreLocation[];
+          storeRatingSummary?: { count: number; avg: number } | null;
+        };
+        if (!cancelled) {
+          setLocations(data.locations ?? []);
+          setStoreRatingSummary(data.storeRatingSummary ?? null);
+        }
       } catch {
         /* leave empty — degrade to a single store-level view */
       }
@@ -1258,6 +1268,14 @@ export function StoreViewportAppV2({
   // Contacts section; the main line + extension is the right default here.
   const callPhone = store.phoneNumber;
 
+  // Reviews: the selected site's rating (backend #9) when it has its own, else
+  // the store-wide roll-up, else the flat store field. Whether the number is
+  // per-site or brand-wide is surfaced in the label below.
+  const ratingSum = activeLoc?.ratingSummary ?? storeRatingSummary;
+  const effRating = ratingSum?.avg ?? store.googleRating;
+  const effRatingCount = ratingSum?.count ?? store.userRatingCount;
+  const ratingIsPerLocation = activeLoc?.ratingSummary != null;
+
   return (
     <main className="w-full px-4 py-10 md:px-8">
       <a
@@ -1328,18 +1346,17 @@ export function StoreViewportAppV2({
               activeId={activeLoc?.id ?? null}
             />
 
-            {/* Google rating — always shown when Places supplied one, regardless
-                of whether the homeowner has visited/rated the showroom. */}
-            {store.googleRating != null ? (
+            {/* Google rating — the selected site's when it has its own reviews
+                (backend #9), else the brand-wide roll-up (labelled "all
+                locations" so a shared number isn't mistaken for this site's). */}
+            {effRating != null ? (
               <div className="mt-2 flex items-center gap-1.5 text-sm">
-                <GoogleStars rating={store.googleRating} />
-                <span className="font-medium tabular-nums">
-                  {store.googleRating.toFixed(1)}
-                </span>
-                {store.userRatingCount != null ? (
+                <GoogleStars rating={effRating} />
+                <span className="font-medium tabular-nums">{effRating.toFixed(1)}</span>
+                {effRatingCount != null ? (
                   <span className="text-muted-foreground">
-                    ({store.userRatingCount} Google review
-                    {store.userRatingCount === 1 ? "" : "s"})
+                    ({effRatingCount} Google review{effRatingCount === 1 ? "" : "s"}
+                    {locations.length > 1 && !ratingIsPerLocation ? " · all locations" : ""})
                   </span>
                 ) : null}
               </div>
@@ -1444,6 +1461,7 @@ export function StoreViewportAppV2({
           <div className="mt-5 rounded-lg bg-muted/40 p-3">
             <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
               <Sparkles className="size-3" /> AI review summary
+              {locations.length > 1 ? " · all locations" : ""}
             </p>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
               {store.reviewSummary}

@@ -52,6 +52,9 @@ export interface StoreLocation {
   // store-level values. Typed loosely to avoid a hard dep on the hours shape.
   hoursJson?: unknown | null;
   phone?: string | null;
+  // Per-location external rating roll-up (backend #9). Null when this site has no
+  // captured reviews of its own → fall back to the store-wide storeRatingSummary.
+  ratingSummary?: { count: number; avg: number } | null;
 }
 
 interface LocationPoc {
