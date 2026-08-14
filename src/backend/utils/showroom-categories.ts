@@ -295,3 +295,112 @@ export async function inferAndMapCategories(
     return 0;
   }
 }
+
+/**
+ * DRY-RUN classify — predict a store's categories WITHOUT writing any
+ * `showroom_store_category_mapping` rows. Mirrors `inferAndMapCategories`'
+ * resolution (AI-first, then regex-token fallback, first id = primary) but
+ * returns the prediction for human review instead of persisting it. Used by the
+ * uncategorized-stores review report so a human greenlights before any write.
+ */
+export interface CategoryDryRunPrediction {
+  storeId: number;
+  name: string | null;
+  /** Predicted categories, most-relevant first; `isPrimary` marks the first. */
+  predicted: Array<{ id: number; name: string; isPrimary: boolean }>;
+  /** True when the LLM produced the prediction (vs regex-token fallback only). */
+  usedAi: boolean;
+  /**
+   * True when the store had only its name to go on — no description, no review
+   * summary, no known brands — so the guess is weak and may warrant a scrape
+   * first. This is the flag Justin reviews.
+   */
+  lowContext: boolean;
+  /** Safety: true if the store already has mappings (should be excluded upstream). */
+  hasExistingCategories: boolean;
+}
+
+export async function classifyStoreCategoriesDryRun(
+  env: Env,
+  showroomId: number,
+  tokens: Array<string | null | undefined> = [],
+): Promise<CategoryDryRunPrediction> {
+  const db = drizzle(env.DB);
+
+  const [existing] = await db
+    .select({ id: showroomStoreCategoryMapping.id })
+    .from(showroomStoreCategoryMapping)
+    .where(eq(showroomStoreCategoryMapping.storeId, showroomId))
+    .limit(1);
+
+  const categories = await db
+    .select({
+      id: showroomStoreCategory.id,
+      name: showroomStoreCategory.name,
+      description: showroomStoreCategory.description,
+    })
+    .from(showroomStoreCategory)
+    .where(eq(showroomStoreCategory.isActive, true));
+
+  const [store] = await db
+    .select({
+      name: showroomStores.name,
+      description: showroomStores.description,
+      reviewSummary: showroomStores.reviewSummary,
+      reviewAiInsight: showroomStores.reviewAiInsight,
+    })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, showroomId))
+    .limit(1);
+
+  const cleanTokens = tokens.filter(
+    (t): t is string => typeof t === "string" && t.trim().length > 0,
+  );
+  const brandNames = (store?.reviewAiInsight?.brands ?? [])
+    .map((b) => (typeof b?.name === "string" ? b.name : null))
+    .filter((n): n is string => Boolean(n));
+
+  const aiIds =
+    store?.name && categories.length
+      ? await classifyCategoriesWithAI(
+          env,
+          {
+            name: store.name,
+            description: store.description,
+            reviewSummary: store.reviewSummary,
+            brands: brandNames,
+            tokens: cleanTokens,
+          },
+          categories,
+        )
+      : [];
+
+  // Same merge order as the write path: AI ids first (first = primary), then any
+  // regex-token labels the AI missed, matched EXACTLY against canonical names.
+  const byId = new Map(categories.map((c) => [c.id, c.name] as const));
+  const ids: number[] = [];
+  const pushId = (id: number) => {
+    if (!ids.includes(id)) ids.push(id);
+  };
+  for (const id of aiIds) pushId(id);
+  for (const label of inferCategoryLabelsFromTokens(tokens)) {
+    const needle = label.toLowerCase();
+    const match = categories.find((c) => c.name.toLowerCase() === needle);
+    if (match) pushId(match.id);
+  }
+
+  const predicted = ids
+    .map((id) => ({ id, name: byId.get(id) }))
+    .filter((p): p is { id: number; name: string } => Boolean(p.name))
+    .map((p, i) => ({ ...p, isPrimary: i === 0 }));
+
+  return {
+    storeId: showroomId,
+    name: store?.name ?? null,
+    predicted,
+    usedAi: aiIds.length > 0,
+    // Only the name to go on — everything else that feeds the classifier is empty.
+    lowContext: !store?.description && !store?.reviewSummary && brandNames.length === 0,
+    hasExistingCategories: Boolean(existing),
+  };
+}

@@ -30,6 +30,7 @@ import {
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { classifyStoreCategoriesDryRun } from "@backend/utils/showroom-categories";
 import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import { faviconService } from "@backend/services/favicon";
 import {
@@ -904,4 +905,80 @@ showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
 
   if (!apply) result.notes.push("DRY RUN — nothing written. Re-send with apply:true.");
   return c.json(result, 200);
+});
+
+/**
+ * GET /backfill/categorize?limit=&offset=&apply= — classify showrooms that
+ * currently have ZERO category mappings (gemini-2.5-flash), over a paged slice.
+ *
+ * DRY RUN by default (`apply` unset/false): predicts + returns, writes NOTHING.
+ * With `apply=true`: persists the SAME prediction it returns — the first id is the
+ * store's primary category — so the report matches exactly what was written. Only
+ * ever writes when the store still has zero mappings (fill-blanks; re-checked per
+ * row), so a concurrent write can't produce a duplicate/second-primary.
+ *
+ * `total` is the full uncategorized count so a caller can page with offset.
+ * Response 200: { total, offset, limit, apply, appliedCount, results }
+ */
+showroomBackfillRouter.get("/backfill/categorize", async (c) => {
+  const db = drizzle(c.env.DB);
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 15, 1), 25);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+  const apply = c.req.query("apply") === "true";
+
+  // Uncategorized = active store with no category_mapping row. Compute the whole
+  // set with two cheap (AI-free) queries, then classify only the requested slice.
+  const mapped = await db
+    .selectDistinct({ storeId: showroomStoreCategoryMapping.storeId })
+    .from(showroomStoreCategoryMapping);
+  const mappedSet = new Set(mapped.map((m) => m.storeId));
+  const active = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.isActive, true))
+    .orderBy(showroomStores.id);
+  const uncategorized = active.map((s) => s.id).filter((id) => !mappedSet.has(id));
+
+  const slice = uncategorized.slice(offset, offset + limit);
+  const results = await Promise.all(
+    slice.map((id) => classifyStoreCategoriesDryRun(c.env, id, [])),
+  );
+
+  let appliedCount = 0;
+  let failedCount = 0;
+  if (apply) {
+    for (const pred of results) {
+      if (pred.hasExistingCategories || pred.predicted.length === 0) continue;
+      // Re-check fill-blanks at write time (defends against a concurrent classify).
+      // Wrapped per store so a lost race (unique index throws on a duplicate/second
+      // primary from a concurrent apply) skips that one store instead of 500-ing the
+      // whole batch and losing appliedCount for stores already written this pass.
+      try {
+        const [row] = await db
+          .select({ id: showroomStoreCategoryMapping.id })
+          .from(showroomStoreCategoryMapping)
+          .where(eq(showroomStoreCategoryMapping.storeId, pred.storeId))
+          .limit(1);
+        if (row) continue;
+        for (const [i, cat] of pred.predicted.entries()) {
+          await db.insert(showroomStoreCategoryMapping).values({
+            storeId: pred.storeId,
+            categoryId: cat.id,
+            aiRationale: "Bulk categorize backfill (dry-run classifier, gemini-2.5-flash)",
+            aiRationaleConfidenceScore: pred.usedAi ? 7 : 5,
+            isPrimary: i === 0,
+          });
+        }
+        appliedCount++;
+      } catch (err) {
+        failedCount++;
+        console.error(`[categorize] apply failed for store ${pred.storeId}:`, err);
+      }
+    }
+  }
+
+  return c.json(
+    { total: uncategorized.length, offset, limit, apply, appliedCount, failedCount, results },
+    200,
+  );
 });
