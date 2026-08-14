@@ -1,6 +1,7 @@
 # AGENTS.md — Grounding Profile & Architectural Alignment Map
 
 ## Repository Overview
+
 This repository (`jmbish04/core-remodel`) is a complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions.
 The default branch is `main`.
 
@@ -81,12 +82,15 @@ verify and use the exact scripts defined in `package.json`:
 - `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually using this command to prevent heap out of memory errors, because the project's build process does not perform type checking.
 
 ## Cloudflare Durable Objects (MANDATORY)
+
 - **NEVER use `this.schedule()`** — The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 
 ## System Identity & Role Enforcements
+
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
 
 ## Detected Structural Components
+
 - **Routing Tier:** Hono API Framework (Serving OpenAPI v3.1.0)
 - **Frontend Layer:** Astro Web Engine + Shadcn (Default Dark Theme Architecture)
 - **Data Persistence:** Drizzle ORM + D1 Serverless SQL Storage Core
@@ -95,6 +99,7 @@ You are an elite Senior Engineer operating within the Google Antigravity IDE fra
 ## The renovation-studio MCP server — one file per tool
 
 There are **two** MCP servers in this repo; do not conflate them:
+
 1. The OAuth connector at `src/backend/mcp/` (0015 — see the "MCP Server" section
    below). Claude.ai custom connector.
 2. **The bearer-auth "renovation-studio" server at `src/backend/api/routes/mcp/`**
@@ -128,13 +133,13 @@ Installed on this machine (`~/.local/bin`, rebuilt 2026-08-12). Auth is
 **local-first**: these read the machine's existing CLI/SDK login state or the
 local `tokens` CLI. **Do not put provider API keys in `orchestrator.toml`.**
 
-| Command | What it is for |
-| --- | --- |
-| `local-ai-orchestrator` | Run one task across several local agents (codex / claude / cursor / antigravity) and compare. |
-| `local-agent-control` | Control plane: `status`, `start`, `stop`, `serve`, `open`. Monitor UI + FastMCP on `https://127.0.0.1:4318`. |
-| `local-github-control` | `create-pr`, `pr-discussion`, `review-pr`, `merge-pr`, `update-pr-branch`, `sync-pr`, `patch-pr`. |
-| `local-cloudflare-control` | Cloudflare resource creation + Workers deployment inspection. |
-| `cursor-review <abs-repo-path> <pr-number>` | Local Cursor PR review, no Cursor cloud. |
+| Command                                     | What it is for                                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `local-ai-orchestrator`                     | Run one task across several local agents (codex / claude / cursor / antigravity) and compare.                |
+| `local-agent-control`                       | Control plane: `status`, `start`, `stop`, `serve`, `open`. Monitor UI + FastMCP on `https://127.0.0.1:4318`. |
+| `local-github-control`                      | `create-pr`, `pr-discussion`, `review-pr`, `merge-pr`, `update-pr-branch`, `sync-pr`, `patch-pr`.            |
+| `local-cloudflare-control`                  | Cloudflare resource creation + Workers deployment inspection.                                                |
+| `cursor-review <abs-repo-path> <pr-number>` | Local Cursor PR review, no Cursor cloud.                                                                     |
 
 **Use it for a second opinion when the review bot is down** — that is the case it
 earns its keep in. The canonical fan-out:
@@ -163,7 +168,7 @@ Rules learned the hard way (2026-08-11/12):
 ### Known broken, as of 2026-08-12
 
 - **`cursor-review` cannot parse this repo's remote**: `Unsupported GitHub remote
-  URL: ssh://git@ssh.github.com:443/jmbish04/core-remodel.git` (the SSH-over-443
+URL: ssh://git@ssh.github.com:443/jmbish04/core-remodel.git` (the SSH-over-443
   form). Auth itself is fixed and no longer needs a Cursor login. **Do NOT
   "fix" this by rewriting `origin`** — worktrees share `.git/config`, so changing
   the remote URL changes it for every concurrent session on this machine.
@@ -265,6 +270,7 @@ The Worker hosts an OAuth-gated MCP server so Claude (claude.ai custom connector
 or Claude Code) can manage the remodel by chat. Plan: `docs/0015_mcp_server/IMPLEMENTATION_PLAN.md`.
 
 **Architecture**
+
 - **OAuth**: `@cloudflare/workers-oauth-provider` wraps the Worker's default export
   in `src/_worker.ts`. It owns `/oauth/token`, `/oauth/register`, and the
   `.well-known` metadata; it delegates `/oauth/authorize` (the consent screen,
@@ -293,6 +299,7 @@ JSON-RPC shim at `src/backend/api/routes/mcp.ts` (`/api/mcp`) is a small back-co
 surface — NOT this registry; do not confuse the two.
 
 **To ADD or CHANGE a tool (do this every time):**
+
 1. Add a new `src/backend/mcp/tools/<domain>/<tool_name>.ts` exporting
    `export const <camelName> = defineTool({...})` (name = bare snake_case verb, NO
    prefix; hand-written Zod v4 `inputShape` — never import drizzle-zod; correct
@@ -329,6 +336,7 @@ grouped by session in `mcp_sessions`. Claude also writes two backlogs during
 chats via the `ops` tools, and coding agents are expected to work them:
 
 > **Before starting Worker code work, check the MCP ops backlog:**
+>
 > - **Open bugs:** `mcp_agent_issues` where `status='open'` — read via
 >   `pnpm run mcp:issues`, the `list_agent_issues` MCP tool, or
 >   `GET /api/mcp-ops/issues?status=open` (admin-gated). Fix what you can; when a
@@ -354,9 +362,9 @@ sizes and redacts secret-ish keys.
 
 **NEVER call `db.transaction()`. It does not work on D1 and never has.**
 
-D1 rejects SQL `BEGIN` outright — error 7500, *"To execute a transaction, please
+D1 rejects SQL `BEGIN` outright — error 7500, _"To execute a transaction, please
 use the state.storage.transaction() ... APIs instead of the SQL BEGIN TRANSACTION
-or SAVEPOINT statements."* Verified against both local and production D1.
+or SAVEPOINT statements."_ Verified against both local and production D1.
 `drizzle-orm@0.33.0`'s D1 driver implements `.transaction()` by issuing raw
 `begin`/`commit` as separate statements, so the call throws on its **first**
 statement. The code inside the callback never runs at all.
@@ -389,7 +397,7 @@ do not pretend the batch covers it.
 
 **D1 rejects any single statement with more than 100 bound values:**
 `D1_ERROR: too many SQL variables at offset <n>: SQLITE_ERROR`. The offset is a
-character position in the generated SQL, so it points *into the VALUES list*, not
+character position in the generated SQL, so it points _into the VALUES list_, not
 at a named column — easy to misread as a schema problem.
 
 It bites two shapes, both where the list length is not yours to control:
@@ -450,6 +458,7 @@ D1 section), so the broken insert never executed. One shortcut hid behind
 another.
 
 **Rules:**
+
 - A child row references its parent by `parentId` INTEGER FK. Always.
 - Need the name for display? `JOIN` in the query, or resolve it in the service
   layer. It is one line. Write the line.
@@ -489,6 +498,7 @@ them and the email does not say which. The correct handling is:
 
 Guessing silently is worse than asking. A wrong mapping propagates into budget,
 takeoffs and comparisons, and nothing downstream can tell it was a guess.
+
 ## AI calls: structured output with a JSON schema (MANDATORY)
 
 **Every** AI call that produces data the code will read — workflows, extraction,
@@ -526,10 +536,10 @@ a broken field for months.
 ### The one sanctioned exception: Gemini + Google Search grounding
 
 Gemini **cannot** combine `tools: [{ googleSearch: {} }]` with `responseSchema` /
-`responseMimeType` on `gemini-2.5-*` — the API returns 400 *"controlled
-generation is not supported with google_search tool"*. Grounded calls therefore
-instruct the JSON shape in the prompt and parse defensively (strip ``` fences,
-slice first `{` to last `}`), with a non-grounded schema-constrained fallback.
+`responseMimeType` on `gemini-2.5-*` — the API returns 400 _"controlled
+generation is not supported with google_search tool"_. Grounded calls therefore
+instruct the JSON shape in the prompt and parse defensively (strip ```fences,
+slice first`{`to last`}`), with a non-grounded schema-constrained fallback.
 `services/google/maps.ts` is the reference implementation.
 
 If you hit this, do NOT quietly drop the schema on an ungrounded call — the
@@ -548,6 +558,7 @@ definition + mapping pair and a proper multi-select component (shadcn / shadcn
 registry — there is always one).
 
 **Definition table** (one per multi-select vocabulary, e.g. `colors`, `categories`):
+
 - `id` INTEGER PK autoincrement (ALWAYS)
 - `name` TEXT NOT NULL (ALWAYS)
 - `description` TEXT (ALWAYS)
@@ -555,12 +566,14 @@ registry — there is always one).
 - domain extras when useful (e.g. colors get `hex_code`)
 
 **Mapping table** (join the definition to the owning object, e.g. `photo_colors`):
+
 - `id` INTEGER PK autoincrement (ALWAYS)
 - `<def>_id` FK → the definition table (ALWAYS an FK)
 - `<object>_id` FK → the owning row (ALWAYS an FK)
 - UNIQUE index on `(<def>_id, <object>_id)` (ALWAYS — no duplicate mappings)
 
 **API (per multi-select), ALWAYS provide:**
+
 - list all active options (for the autoselect component)
 - create an "Other" option from the UI (returns the new definition row)
 - create/replace the mappings as part of a form submit AND standalone (for backfills)
@@ -568,6 +581,7 @@ registry — there is always one).
 - search/filter owning objects by mapping(s)
 
 **UX, ALWAYS:**
+
 - support "Other" (creates a new definition + selects it)
 - if the definition has `hex_code`, show a color swatch in the option (`[▧] Name`) and a color picker when creating "Other"
 - show the option **display name**, never the option id
@@ -590,6 +604,7 @@ category with no subcategory.
 ## Reusable data-entry components (USE THESE — do not hand-roll)
 
 **Currency / price** → `@/components/ui/currency-input` `<CurrencyInput>`.
+
 - Renders a `$`-prepended field; `onValueChange(text, cents)` hands back BOTH the
   verbatim text and integer cents. NEVER a bare `<Input>` for money.
 - **D1 for currency: store BOTH** a `<field>_text` TEXT column (verbatim, e.g.
@@ -601,6 +616,7 @@ category with no subcategory.
 review context, drive notes, HITL context, etc.) is captured with the **PlateJS** editor
 (`@/components/showroom/OverviewNoteEditor` `<OverviewNoteEditor>`, or an equivalent Plate host),
 which emits `{ markdown, html }` via `onChange`. NEVER a bare `<textarea>` for a note field.
+
 - **D1 for rich text: store BOTH** a `<field>_markdown` TEXT column AND a `<field>_html` TEXT
   column. The markdown is the portable/round-trippable source of truth; the html is the
   render-ready cache. Never persist only one. The API accepts both (sanitize the html on write);
@@ -672,7 +688,7 @@ After the PR is open and conflict-free:
    whichever is posting.)
 2. **Read every comment and judge it.** AI review comments are frequently right and
    sometimes wrong or inapplicable. Fix the applicable ones; for the rest, reply saying
-   *why* it does not apply. Never blanket-accept and never blanket-ignore.
+   _why_ it does not apply. Never blanket-accept and never blanket-ignore.
 3. **Patch the PR** with the fixes, push, let CI go green.
 4. **Clear any conflicts**, then **merge**.
 5. **Delete your preview worker — IMMEDIATELY, IN THE SAME TURN AS THE MERGE.**
@@ -756,11 +772,11 @@ gh run watch <run-id> --exit-status                    # non-zero if it fails
 
 Inputs, and what they mean:
 
-| Input | Use |
-| --- | --- |
-| `confirm` | Must be the literal string `deploy`. A typo aborts the run — that is the point. |
+| Input            | Use                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `confirm`        | Must be the literal string `deploy`. A typo aborts the run — that is the point.                        |
 | `run_migrations` | Leave `true`. Set `false` only when you have already applied the migrations by hand AND verified them. |
-| `allow_non_main` | Leave `false`. Deploying a non-`main` ref puts unreviewed code on production. |
+| `allow_non_main` | Leave `false`. Deploying a non-`main` ref puts unreviewed code on production.                          |
 
 **Always deploy from `main`, after merging.** If the Action fails, read the log
 before retrying — a failed deploy usually means a migration did not apply, and
@@ -863,8 +879,8 @@ Consequences you must internalise:
    `core-remodel`.
 2. **A branch build FAILING was often the only thing protecting production.**
    The common failure is `10074 — Cannot apply new-sqlite-class migration to
-   class 'RenovationAgent' that is already depended on by existing Durable
-   Objects`, which fires because the branch's DO migration tag collides with
+class 'RenovationAgent' that is already depended on by existing Durable
+Objects`, which fires because the branch's DO migration tag collides with
    production's.
 3. Do **not** "fix" that 10074 by bumping the DO migration tag to make a branch
    build pass. That does not repair anything — it removes the last guard and
@@ -902,7 +918,7 @@ Evaluated and rejected for the per-branch case, for two reasons:
 from the top-level one at deploy time and overrides only what must differ (name,
 crons, routes, workflow names). Nothing is duplicated, so nothing can drift.
 
-An environment would still be a reasonable fit for one *stable, long-lived*
+An environment would still be a reasonable fit for one _stable, long-lived_
 target — a permanent `staging` worker, say — where the duplication is written
 once and reviewed. It is the wrong tool for ephemeral per-branch previews.
 
@@ -1015,10 +1031,62 @@ never create or edit a `CHANGELOG.md`.
    output — plus, when the PR changed schema, each migration tag with whether it has been
    applied to the **remote** DB. Never fabricate or paraphrase results; paste what ran.
 
+5. **Task list + preview lifecycle** → the change list is also the WORK TRACKER for the
+   PR. See the next section; it is mandatory, not decorative.
+
 **Every changelog entry MUST surface, on the frontend:** the **git branch name**, the **PR
-number**, the **tests that were run and their results**, and (when schema changed) **remote
-migration status**. These are not optional metadata — they are how a reader answers "is this
-actually live and actually verified?" without leaving the page.
+number**, the **tests that were run and their results**, (when schema changed) **remote
+migration status**, and **the preview worker's name and whether it has been torn down**.
+These are not optional metadata — they are how a reader answers "is this actually live,
+actually verified, and did anyone clean up after it?" without leaving the page.
+
+### The change list is the task tracker — and it owns the preview worker (MANDATORY)
+
+When you create the PR change list you are also creating the **task list for this PR**.
+Track it with the `TaskCreate` / `TaskUpdate` tools, and **update the status of each task
+as you enter and leave that phase** — not in one batch at the end. A task list written
+once and never touched again is a to-do list, not a tracker, and it is how a preview
+worker survives its own PR.
+
+**Every PR's task list MUST contain these, in this order:**
+
+| #   | Task                                                              | Marked `completed` when                            |
+| --- | ----------------------------------------------------------------- | -------------------------------------------------- |
+| 1   | Worktree fresh vs `origin/main`                                   | `git log HEAD..origin/main` is 0                   |
+| 2   | Implement the change                                              | code written, `tsc --noEmit` at baseline           |
+| 3   | Changelog rows (BRANCHES + CHANGELOG + PhaseDetail) written to D1 | the `/admin/changelog/<slug>` link resolves        |
+| 4   | **Deploy preview** — record the worker name in the task           | `pnpm run deploy:preview` printed a URL            |
+| 5   | QC against preview AND production                                 | both runs pasted into the entry                    |
+| 6   | Open PR, link the changelog                                       | PR URL exists                                      |
+| 7   | Review comments addressed                                         | each judged, applied or answered                   |
+| 8   | Merge                                                             | `gh pr view` says `MERGED`                         |
+| 9   | **DELETE THE PREVIEW WORKER** — `pnpm run preview:delete`         | the worker is gone AND the changelog entry says so |
+
+**Task 9 is what closes the PR out. A PR is not finished when it merges — it is finished
+when its preview worker is gone.** If you mark task 8 complete and stop, you have left
+litter, and the user has to find it and remove it by hand.
+
+Rules for tasks 4 and 9 specifically:
+
+- **Task 4 records the worker name** (e.g. `wcrp-<branch-slug>`) in the task text and in
+  the changelog entry's verification block. A preview whose name is only in your scrollback
+  is a preview nobody else can find later.
+- **Task 9 runs from the branch's worktree, BEFORE that worktree is removed** —
+  `preview:delete` derives the name from the current branch.
+- **Never ask permission for task 9.** Creating the preview authorized deleting it.
+- **If task 9 fails, do NOT mark it complete.** Leave it in progress, say so in your final
+  message with the worker name, and state that it needs a manual
+  `npx wrangler delete --name <worker>`.
+- **If you never deployed a preview, mark tasks 4 and 9 as not applicable rather than
+  silently dropping them** — "there was no preview" and "I forgot" must be
+  distinguishable from the outside.
+
+Then sweep anything left behind by earlier work:
+
+```bash
+pnpm run preview:list                # what the ledger knows, per branch
+pnpm run preview:cleanup -- --apply  # delete every preview whose branch is gone
+```
 
 **The PR description MUST contain a direct link to the changelog entry**, every time:
 
@@ -1038,7 +1106,7 @@ curl -X POST "$BASE/api/changelog/entries" -H 'content-type: application/json' \
 This bundled data is the seed + SSR fallback. The source of truth is D1: after deploy run
 `POST /api/changelog/seed` once (idempotent), or push entries live with
 `POST /api/changelog/entries` (upsert by slug — never overwrites another branch's rows). Because
-D1 accumulates across branches, the static file's only job is to carry *your* branch's additions;
+D1 accumulates across branches, the static file's only job is to carry _your_ branch's additions;
 do not delete another branch's entries to resolve a merge conflict — append yours.
 
 ## Project Commands & Conventions

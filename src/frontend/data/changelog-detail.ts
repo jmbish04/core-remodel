@@ -72,6 +72,35 @@ export interface Verification {
   ranAt?: string;
   /** Remote state of each migration this change introduced. */
   migrations?: MigrationStatus[];
+  /**
+   * The per-branch preview worker this PR deployed, and whether it has been
+   * torn down.
+   *
+   * WHY THIS IS ON THE PAGE. One preview worker is created per branch, nothing
+   * reaps them, and the account carries ~190 Workers — so "is there a stale
+   * preview out there?" was a question only answerable by listing every Worker
+   * on the account and reasoning about branch names. Recording it beside the QC
+   * output makes the answer readable: a `deployed` badge on a merged entry is
+   * litter somebody still has to remove.
+   *
+   * `none` is a real, distinct state. A change that never needed a preview and a
+   * change whose author forgot to record one must not look identical.
+   */
+  previewWorker?: PreviewWorkerStatus;
+}
+
+/** One PR's preview worker and its teardown state. */
+export interface PreviewWorkerStatus {
+  /** Worker name as deployed, e.g. `wcrp-claude-my-branch`. */
+  name: string;
+  /**
+   * `deployed` — still live on Cloudflare, still costing clutter.
+   * `deleted`  — torn down; the PR is genuinely finished.
+   * `none`     — this change never deployed a preview (docs-only, say).
+   */
+  status: "deployed" | "deleted" | "none";
+  /** Anything a reader needs: why it is still up, or when it went away. */
+  note?: string;
 }
 
 export interface PhaseDetail {
@@ -345,6 +374,11 @@ Typecheck: npx tsc --noEmit — pre-existing baseline only, zero introduced
 (diffed before/after with git stash).
 Migrations: none.`,
       migrations: [],
+      previewWorker: {
+        name: "wcrp-worktree-bridge-cse-016rp7ejtqbfmvtpux2cuvww",
+        status: "deleted",
+        note: "Torn down. This entry is also the first user of the previewWorker field it introduces.",
+      },
     },
   },
 
