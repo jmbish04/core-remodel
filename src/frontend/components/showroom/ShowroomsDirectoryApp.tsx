@@ -127,6 +127,9 @@ interface Store {
   latitude: number | null;
   longitude: number | null;
   categories: string[];
+  /** The store's single primary category (backend #409). Falls back to
+      categories[0] (feed orders is_primary first) — the one directory group. */
+  primaryCategory?: string | null;
   /** Business-model type (joined from showroom_store_type); null = untyped. */
   typeId: number | null;
   typeName: string | null;
@@ -1254,7 +1257,7 @@ function groupStores(stores: Store[], groupBy: GroupBy, pst: PstNow): [string, S
       // the card — so Argo Tile & Stone lists once under Tile but badges Tile +
       // Flooring. (Was: pushed into every category group → duplicate rows.)
       if (s.categories.length === 0) push("Uncategorized", s);
-      else push(s.categories[0], s);
+      else push(s.primaryCategory ?? s.categories[0], s);
     }
     return Array.from(map.entries()).sort((a, b) => {
       if ((a[0] === "Uncategorized") !== (b[0] === "Uncategorized"))

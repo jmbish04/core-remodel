@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Pencil, Tag } from "lucide-react";
+import { Loader2, Pencil, Star, Tag } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +92,10 @@ export function CategoryChipsEditor({
   const [options, setOptions] = useState<CategoryOption[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // The one primary category (drives the store's single directory group). Seeded
+  // from categories[0] (the detail feed orders is_primary first) and sent as
+  // primaryCategoryId on save (backend #409). Must always be one of `selected`.
+  const [primaryId, setPrimaryId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
   const currentIds = useMemo(
@@ -105,6 +109,7 @@ export function CategoryChipsEditor({
   useEffect(() => {
     if (!open) return;
     setSelected(new Set(currentIds));
+    setPrimaryId(categories[0]?.categoryId ?? null);
     setLoadingOptions(true);
     void (async () => {
       try {
@@ -123,6 +128,16 @@ export function CategoryChipsEditor({
     })();
   }, [open, currentIds]);
 
+  // Keep the primary valid: if it gets deselected (or none is set), fall back to
+  // the first still-selected category; clear it when nothing is selected.
+  useEffect(() => {
+    if (selected.size === 0) {
+      if (primaryId !== null) setPrimaryId(null);
+      return;
+    }
+    if (primaryId == null || !selected.has(primaryId)) setPrimaryId([...selected][0]);
+  }, [selected, primaryId]);
+
   const toggle = useCallback((id: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -139,7 +154,12 @@ export function CategoryChipsEditor({
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryIds: [...selected] }),
+        body: JSON.stringify({
+          categoryIds: [...selected],
+          // Backend #409 stamps is_primary from this (ignored by the pre-#409
+          // endpoint). Guarantees the store keeps exactly one primary on save.
+          primaryCategoryId: primaryId ?? [...selected][0] ?? undefined,
+        }),
       });
       if (!res.ok) {
         const payload = (await res.json().catch(() => ({}))) as { error?: string };
@@ -154,7 +174,7 @@ export function CategoryChipsEditor({
     } finally {
       setSaving(false);
     }
-  }, [storeId, selected, onChanged]);
+  }, [storeId, selected, primaryId, onChanged]);
 
   return (
     <div className="mt-2.5">
@@ -163,13 +183,18 @@ export function CategoryChipsEditor({
           <Tag className="size-3" /> Category
         </span>
         {categories.length > 0 ? (
-          categories.map((c) => (
+          categories.map((c, i) => (
+            // categories[0] is the PRIMARY (detail feed orders is_primary first) —
+            // star + tint it so the single directory group reads at a glance.
             <Badge
               key={c.categoryId}
               variant="secondary"
-              className="px-1.5 py-0 text-[10px] font-normal"
+              className={`px-1.5 py-0 text-[10px] font-normal${
+                i === 0 ? " bg-primary/15 text-primary" : ""
+              }`}
               title={c.aiRationale ?? undefined}
             >
+              {i === 0 ? <Star className="mr-0.5 inline size-2.5 fill-current" /> : null}
               {c.categoryName}
             </Badge>
           ))
@@ -194,7 +219,8 @@ export function CategoryChipsEditor({
             <DialogTitle>Edit categories</DialogTitle>
             <DialogDescription>
               Pick what this showroom actually sells — overrides anything the AI
-              inferred.
+              inferred. Tap the ★ on a selected category to make it the primary
+              (its single group in the directory).
             </DialogDescription>
           </DialogHeader>
 
@@ -235,11 +261,34 @@ export function CategoryChipsEditor({
                             onCheckedChange={() => toggle(opt.id)}
                           />
                           <span
-                            className="min-w-0 truncate"
+                            className="min-w-0 flex-1 truncate"
                             title={opt.description ?? undefined}
                           >
                             {opt.name}
                           </span>
+                          {isOn ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setPrimaryId(opt.id);
+                              }}
+                              title={primaryId === opt.id ? "Primary category" : "Set as primary"}
+                              aria-label={
+                                primaryId === opt.id ? "Primary category" : "Set as primary category"
+                              }
+                              className="inline-flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-muted"
+                            >
+                              <Star
+                                className={
+                                  primaryId === opt.id
+                                    ? "size-4 fill-amber-400 text-amber-400"
+                                    : "size-4 text-muted-foreground/40"
+                                }
+                              />
+                            </button>
+                          ) : null}
                         </label>
                       );
                     })}
