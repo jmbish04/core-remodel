@@ -1388,7 +1388,12 @@ showroomStoresRouter.get("/", async (c) => {
       };
 
       if (includes.has("categories")) {
-        (base as any).categories = categoryMap.get(r.store.id) ?? [];
+        const cats = categoryMap.get(r.store.id) ?? [];
+        (base as any).categories = cats;
+        // The is_primary category (cats is ordered is_primary-first) — the ONE
+        // group the directory should list this store under; cats.slice(1) are the
+        // secondary badges. Null when the store has no categories.
+        (base as any).primaryCategory = cats[0] ?? null;
       }
       if (includes.has("ratings")) {
         // Homeowner's own visit rating — read from the denormalized column on
@@ -2412,19 +2417,31 @@ showroomStoresRouter.put("/:id", async (c) => {
 });
 
 /**
- * PUT /:id/categories — Replace the store's category set.
+ * PUT /:id/categories — Replace the store's category set + mark its PRIMARY.
  *
  * The showroom-viewport hero's category editor calls this when the user
  * corrects an AI-assigned (or missing) category. REPLACE-ALL semantics: all
  * existing mapping rows for the store are dropped and re-inserted from the
  * supplied `categoryIds` (deduped). User-set mappings carry no `aiRationale`,
  * distinguishing them from agent-inferred rows.
+ *
+ * `primaryCategoryId` marks the ONE category the directory groups the store
+ * under (the rest render as secondary badges). It MUST be one of `categoryIds`.
+ * When omitted, the first id becomes primary so a store is never left without
+ * one — the previous version set no primary at all, which silently un-grouped
+ * every store edited through the modal and scattered it across all its
+ * categories on the directory.
  */
 showroomStoresRouter.put("/:id/categories", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
   const body = await c.req.json();
-  const { categoryIds } = z.object({ categoryIds: z.array(z.number().int()).max(50) }).parse(body);
+  const { categoryIds, primaryCategoryId } = z
+    .object({
+      categoryIds: z.array(z.number().int()).max(50),
+      primaryCategoryId: z.number().int().optional(),
+    })
+    .parse(body);
 
   const [store] = await db
     .select({ id: showroomStores.id })
@@ -2433,13 +2450,24 @@ showroomStoresRouter.put("/:id/categories", async (c) => {
     .limit(1);
   if (!store) return c.json({ error: "Store not found" }, 404);
 
+  const uniqueIds = [...new Set(categoryIds)];
+  // Resolve the primary: the requested one if it's in the set, else the first id.
+  const primaryId =
+    primaryCategoryId != null && uniqueIds.includes(primaryCategoryId)
+      ? primaryCategoryId
+      : (uniqueIds[0] ?? null);
+  if (primaryCategoryId != null && primaryId !== primaryCategoryId) {
+    return c.json({ error: "primaryCategoryId must be one of categoryIds" }, 400);
+  }
+
   await db
     .delete(showroomStoreCategoryMapping)
     .where(eq(showroomStoreCategoryMapping.storeId, storeId));
 
-  const uniqueIds = [...new Set(categoryIds)];
   for (const categoryId of uniqueIds) {
-    await db.insert(showroomStoreCategoryMapping).values({ storeId, categoryId });
+    await db
+      .insert(showroomStoreCategoryMapping)
+      .values({ storeId, categoryId, isPrimary: categoryId === primaryId });
   }
 
   // Return the joined category rows so the client can refresh in place.
