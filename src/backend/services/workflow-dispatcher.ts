@@ -22,6 +22,7 @@ import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { computeNextRunAt } from "./cron-utils";
+import { canSpend } from "./usage/metering";
 
 const KNOWN_JOB_KEYS = ["checklist_rationale"] as const;
 type JobKey = (typeof KNOWN_JOB_KEYS)[number];
@@ -34,11 +35,7 @@ function isKnownJobKey(value: string): value is JobKey {
   return (KNOWN_JOB_KEYS as readonly string[]).includes(value);
 }
 
-async function fireWorkflow(
-  env: Env,
-  jobKey: JobKey,
-  workflowInstanceId: string,
-): Promise<void> {
+async function fireWorkflow(env: Env, jobKey: JobKey, workflowInstanceId: string): Promise<void> {
   switch (jobKey) {
     case "checklist_rationale":
       await env.CHECKLIST_RATIONALE_WORKFLOW.create({
@@ -64,10 +61,7 @@ export async function dispatchDueWorkflows(env: Env): Promise<void> {
     .where(
       and(
         eq(systemCronSchedules.enabled, true),
-        or(
-          isNull(systemCronSchedules.nextRunAt),
-          lte(systemCronSchedules.nextRunAt, now),
-        ),
+        or(isNull(systemCronSchedules.nextRunAt), lte(systemCronSchedules.nextRunAt, now)),
       ),
     )
     .all();
@@ -76,11 +70,32 @@ export async function dispatchDueWorkflows(env: Env): Promise<void> {
     return;
   }
 
+  // Enforce the Durable Object budget HERE, at the dispatch point, rather than
+  // inside `startRun`.
+  //
+  // `startRun` is contractually non-throwing — it records work, it does not
+  // authorize it, and making it throw would surface a budget stop as a random
+  // exception in 26 unrelated agent classes. This loop is the opposite: it is
+  // the one place scheduled DO/Workflow work is LAUNCHED, so declining here
+  // declines the spend before it starts and leaves the schedule untouched, so
+  // the job simply runs on the next tick once the budget resets or is raised.
+  //
+  // Deliberately checked once per dispatch pass, not per schedule: the ceiling
+  // is account-wide, and re-asking per row would issue one KV read per due job
+  // for an answer that cannot change within the loop.
+  const doBudget = await canSpend(env, "DURABLE_OBJECT");
+  if (!doBudget.allowed) {
+    console.warn(
+      `[workflow-dispatcher] Durable Object budget ${doBudget.reason}: ` +
+        `$${doBudget.spendUsd.toFixed(2)} of $${doBudget.ceilingUsd.toFixed(2)} — ` +
+        `skipping ${due.length} due job(s) this tick`,
+    );
+    return;
+  }
+
   for (const schedule of due) {
     if (!isKnownJobKey(schedule.jobKey)) {
-      console.warn(
-        `workflow-dispatcher: skipping unknown jobKey "${schedule.jobKey}"`,
-      );
+      console.warn(`workflow-dispatcher: skipping unknown jobKey "${schedule.jobKey}"`);
       continue;
     }
 
@@ -90,10 +105,7 @@ export async function dispatchDueWorkflows(env: Env): Promise<void> {
     try {
       nextRunAt = computeNextRunAt(schedule.cronExpression, now);
     } catch (error) {
-      console.error(
-        `workflow-dispatcher: invalid cron expression for "${schedule.jobKey}"`,
-        error,
-      );
+      console.error(`workflow-dispatcher: invalid cron expression for "${schedule.jobKey}"`, error);
       // Disable to prevent a tight loop; admin must re-enable after fixing.
       await db
         .update(systemCronSchedules)
@@ -129,8 +141,7 @@ export async function dispatchDueWorkflows(env: Env): Promise<void> {
     try {
       await fireWorkflow(env, schedule.jobKey, workflowInstanceId);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error firing workflow";
+      const errorMessage = error instanceof Error ? error.message : "Unknown error firing workflow";
       console.error("workflow-dispatcher: fire failed", errorMessage);
       await db
         .update(workflowRunHistory)

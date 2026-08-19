@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
+import { materialTypeDef } from "./material_type_def";
 import { rooms } from "../home/rooms";
 
 /**
@@ -26,9 +27,21 @@ export const materialScheduleItems = sqliteTable("material_schedule_items", {
   roomId: integer("room_id")
     .notNull()
     .references(() => rooms.id, { onDelete: "cascade" }),
-  brand: text("brand"),
-  model: text("model"),
+  // `brand` / `model` text columns were removed (0039 P3): brand/model now
+  // derive from the linked product via `productId` → products → brands. Never
+  // store denormalized brand/model on the material.
   notes: text("notes"),
+
+  /**
+   * The material's KIND (0043 §5c). Carries scope granularity, takeoff unit and
+   * default waste factor via `material_type_def`, so a scheduled material knows
+   * how it is counted and quoted. Nullable and added via ADD COLUMN — a nullable
+   * column add does NOT rebuild the table, so existing rows and their children
+   * are untouched. Backfilled by the service layer as materials are typed.
+   */
+  materialTypeId: integer("material_type_id").references(() => materialTypeDef.id, {
+    onDelete: "set null",
+  }),
 
   /**
    * How many identical units this material represents in its one room. Null = 1.
@@ -51,12 +64,19 @@ export const materialScheduleItems = sqliteTable("material_schedule_items", {
   sourceLineItemId: integer("source_line_item_id"),
 
   isPurchased: integer("is_purchased", { mode: "boolean" }).default(false),
+  /** Soft-delete flag (0039 P3). Every material READ must filter is_active. */
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  /** Set when a purchased material was returned (0039 P3). */
+  isReturned: integer("is_returned", { mode: "boolean" }).notNull().default(false),
   /**
-   * The showroom product this material was ultimately purchased as (if any).
-   * Plain column rather than a hard FK to avoid a circular schema import with
-   * `showroom_store_products` (which references `material_schedule_items`).
+   * The product this material was ultimately purchased as (if any). Renamed
+   * from `purchased_showroom_product_id` (0039 P3). LOGICAL FK to `products`
+   * (`showroom_store_products`) — kept a plain column, not a hard `.references()`,
+   * to avoid the circular schema import (products already references
+   * material_schedule_items). Resolve/validate against the live product set
+   * before writing; join `products`→`brands` for brand/model display.
    */
-  purchasedShowroomProductId: integer("purchased_showroom_product_id"),
+  productId: integer("product_id"),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

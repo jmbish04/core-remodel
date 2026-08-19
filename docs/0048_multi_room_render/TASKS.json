@@ -1,0 +1,44 @@
+[
+  {
+    "taskKey": "0048.1",
+    "title": "Add render campaign schema",
+    "description": "Create render_campaigns, render_campaign_angles, render_campaign_sessions tables and generate migration.",
+    "status": "pending",
+    "owner": "backend"
+  },
+  {
+    "taskKey": "0048.2",
+    "title": "Add campaign service and API routes",
+    "description": "Implement create/get/list/cancel in src/backend/services/render/campaign.ts and wire /api/render/campaigns/* routes.",
+    "status": "pending",
+    "owner": "backend"
+  },
+  {
+    "taskKey": "0048.3",
+    "title": "Add RenderCampaignWorkflow",
+    "description": "Build Workflow that processes angles sequentially, hero first, with hero canvas passed as ReferenceImage to remaining angles.",
+    "status":  "pending",
+    "owner": "backend"
+  },
+  {
+    "taskKey": "0048.4",
+    "title": "Register render MCP tools in canonical OAuth registry",
+    "description": "Add create/list/get/cancel/run_room_looks tools under src/backend/mcp/tools/render/ and register in ALL_TOOL_GROUPS.",
+    "status": "pending",
+    "owner": "mcp"
+  },
+  {
+    "taskKey": "0048.5",
+    "title": "Build admin campaign list/detail pages",
+    "description": "Add Astro pages and React apps for /admin/render/campaigns and /admin/render/campaigns/:id with realtime updates.",
+    "status": "pending",
+    "owner": "frontend"
+  },
+  {
+    "taskKey": "0048.6",
+    "title": "QC script, changelog, and preview deploy",
+    "description": "Add scripts/qc/pr_0048.mjs, update src/frontend/data/changelog.ts, run build/check/typecheck.",
+    "status": "pending",
+    "owner": "ops"
+  }
+]

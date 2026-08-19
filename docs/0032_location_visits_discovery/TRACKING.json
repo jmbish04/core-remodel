@@ -1,0 +1,125 @@
+{
+  "$comment": "Master cross-reference + work-allocation tracker for the location-source-agnostic visits & discovery effort. Slowly cross-referenced across 0022 / 0023 / 0031 / the drive-visit state-machine plan. Each impacted doc section names the pass that owns it and the preview-changelog URL it is being planned under. Flip 'status' to 'done' with a prNumber as work lands.",
+  "meta": {
+    "slug": "0032-location-visits-discovery",
+    "title": "Location-Source-Agnostic Visits & Discovery",
+    "previewChangelogUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery",
+    "bundle": "docs/0032_location_visits_discovery/",
+    "createdBy": "claude-code (session_01WCXa5aU67rigS9C2T1XYgh)",
+    "createdOn": "2026-07-26",
+    "status": "planning",
+    "thesis": "Every user-facing visit/discovery feature is decoupled from the 500ms streaming DO via a normalized LocationFix ingress. Sources: tessie-poll, phone (device_location), ai, manual, and the optional streaming DO. The stream is a fast-path source, not a dependency."
+  },
+  "ownership": {
+    "this_pass": "L0, L1, V1, V2, C1, and the D1 proximity-scan SERVICE. The source-agnostic foundation + the Visit Logs workspace (user's #1 priority).",
+    "another_agent": "D2 (discovery finder + realtime DO + finder pages + voice CRUD parity), N1 (multi-waypoint nav + NavigateTeslaButton + waypoints spike), K1 (real-time voice MCP keepalive). Scoped below; pick up on a later pass."
+  },
+  "phases": [
+    { "key": "L0", "name": "LocationFix ingress + source adapters", "owner": "this_pass", "status": "done", "prNumber": 295, "note": "ingestLocationFix + phone/ai/manual adapters + report_location MCP + POST /manual-here. Base #295 + hardening #296, both merged + deployed.", "mapsTo": ["0023:ING-03", "new"] },
+    { "key": "L1", "name": "Source-agnostic park/dwell detector + park_sessions", "owner": "this_pass", "status": "done", "prNumber": 297, "migration": "0149 (park_sessions, applied to remote 2026-07-29)", "note": "LIVE. Detector (shiftState transition OR dwell heuristic, KV state) + park_sessions durable anchor + poller rewired through ingestViaDetector. The 10 MiB deploy blocker was resolved by concurrent #299 (removed liteparse WASM); run 30436770211 (@ad521ee) deployed L1 to prod 2026-07-29 08:45.", "mapsTo": ["#178 tesla_park_sessions", "0022:P3-SVC-01"] },
+    { "key": "V1", "name": "showroom_visit_log reconcile to 0022 §5.1", "owner": "this_pass", "status": "done", "prNumber": 286, "migration": "0147 (applied to remote 2026-07-27)", "mapsTo": ["0022:P1-DB-01", "0023:P1-DB-01"], "note": "visit_type (engagement) + match_distance_m + provenance_json shipped; hitl_queue_id/XOR deferred to D1; rating enforced in API layer" },
+    { "key": "V2a", "name": "Visit-log REST CRUD (/api/showroom-visit-logs)", "owner": "this_pass", "status": "done", "prNumber": 288, "note": "list/get/create/patch-finalize/delete; DRAFT status (TS-only); deployed" },
+    { "key": "V2b", "name": "Visit-log MCP CRUD (7 tools) + shared service (REST/MCP parity)", "owner": "this_pass", "status": "done", "prNumber": 290, "note": "services/showroom/visit-log.ts shared by REST + MCP (merged e47fdc6, deployed); log_contact_interaction + contact_log FK = V2b-2; workspace UI = V2c" },
+    { "key": "V2c", "name": "Visit Logs workspace pages + shared components + store section", "owner": "this_pass", "status": "done", "prNumber": 292, "note": "list/detail/new pages + visits/ components (badges, StarRating, ShowroomAutocomplete, VisitLogEditor, GpsEvidence) + store viewport 'visits' section + sidebar nav; frontend-only, no schema/API. Merged + deployed." },
+    { "key": "C1", "name": "Tesla config completion (home/work, radii, stale, dwell)", "owner": "this_pass", "status": "done", "prNumber": 293, "note": "/admin/config/tesla (3 cards) + config-nav entry + backend config keys. Base #293 + hardening #294, both merged + deployed.", "mapsTo": ["0022:P2"] },
+    { "key": "D1a", "name": "proximityScan service + HITL queue + exclusions + decision 1.d (backend)", "owner": "shared", "status": "done", "prNumber": 301, "migration": "0153 + 0154 (hitl_queue + exclusions + column adds + FK indexes; deploy run #28)", "note": "MERGED (squash 70b31ee) + deployed via run #28. services/tesla/proximity-scan.ts (decision 1.d) + services/showroom/hitl-queue.ts + REST /api/showroom-hitl-queue + MCP list_park_finds/decide_park_find. Codra approved 2 rounds; findings applied (dedup filtering by candidate place_ids, fail-closed config read, immutable terminal decisions, FK indexes, address-not-city).", "mapsTo": ["0022:P4"] },
+    { "key": "D1b", "name": "Park-Finds HITL admin page + nav", "owner": "shared", "status": "done", "prNumber": 302, "note": "MERGED (squash 59dd457) + deployed (run #30, code-only). /admin/shopping/showrooms/hitl page + ParkFindsApp/ParkFindCard (mini-map, category chip, AI one-liner, Add-to-directory / Not-relevant / Decide-later) + sidebar Park-Finds entry with live TBD-count badge. Frontend-only. Codra approved; polish findings applied (deduped fetch, copy).", "mapsTo": ["0022:P4"] },
+    { "key": "D2", "name": "Discovery finder (search tables + find_showrooms + realtime DO + pages + voice)", "owner": "another_agent", "status": "not_started", "prNumber": null, "mapsTo": ["0022:P7"] },
+    { "key": "N1", "name": "Multi-waypoint nav + NavigateTeslaButton + waypoints spike", "owner": "another_agent", "status": "not_started", "prNumber": null, "mapsTo": ["0022:P5"] },
+    { "key": "K1", "name": "Real-time voice MCP keepalive spike + fix", "owner": "another_agent", "status": "not_started", "prNumber": null, "mapsTo": ["0022:P7-INFRA-01", "0023:P7-INFRA-01"] }
+  ],
+  "docs": [
+    {
+      "path": "docs/0032_location_visits_discovery/IMPLEMENTATION_PLAN.md",
+      "role": "primary plan (this bundle)",
+      "owner": "this_pass",
+      "status": "drafted",
+      "previewUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery"
+    },
+    {
+      "path": "docs/0032_location_visits_discovery/DESIGN_SPEC.md",
+      "role": "frontend brief (Visit Logs, config, store section, Park-Finds shell)",
+      "owner": "this_pass",
+      "status": "drafted",
+      "previewUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery"
+    },
+    {
+      "path": "docs/0032_location_visits_discovery/PROMPT.md",
+      "role": "coding-agent brief",
+      "owner": "this_pass",
+      "status": "drafted",
+      "previewUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery"
+    },
+    {
+      "path": "docs/0022_gps_showroom_drives/PRD.md",
+      "role": "grand vision — 0032 executes P1/P2/P4 decoupled from streaming; P5/P7 handed off",
+      "owner": "cross-referenced",
+      "sectionsClaimedByThisPass": ["§5.1 showroom_visit_log (reconcile)", "§5.2 hitl_queue", "§5.4/§5.5 drive-list deltas (paused, detour cols)", "§6.1 gating (shouldProcessLocation → OR-of-sources)", "§6.2 park pipeline (source-agnostic trigger)", "§6.3 proximityScan", "P1 Visit Logs", "P2 config", "§14.1 visit/contact CRUD"],
+      "sectionsForAnotherAgent": ["§5.7 discovery-search + exclusions tables", "§14.2 find_showrooms orchestration", "§14.5 realtime discovery DO", "§14.4/P7-INFRA-01 voice MCP keepalive", "P5 multi-waypoint nav"],
+      "status": "annotate_pending",
+      "previewUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery"
+    },
+    {
+      "path": "docs/0023_tesla_telemetry_webhooks/IMPLEMENTATION_PLAN.md",
+      "role": "streaming-DO-first execution — 0032 reframes ING-03 into a source-agnostic ingress; safety systems (SA-*/SB-*) and the DO itself remain valid and shipped",
+      "owner": "cross-referenced",
+      "sectionsClaimedByThisPass": ["ING-03 shouldProcessLocation seam", "P1-DB-01 visit_log", "P1-API-01 / P1-MCP-01 / P1-FE-01", "P2-CFG-01/P2-SVC-01", "P3-SVC-* park pipeline (generalized)", "P4-* HITL/proximity (service)"],
+      "sectionsForAnotherAgent": ["P7-* discovery + realtime + voice keepalive", "P5-01 nav"],
+      "notAffected": ["SA-01..05 circuit breaker (shipped)", "SB-01..04 Google quota (shipped)", "ING-02 TeslaStreamDO (shipped; now an optional source)"],
+      "status": "annotate_pending",
+      "previewUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery"
+    },
+    {
+      "path": "docs/0031_drive_list_ops/IMPLEMENTATION_PLAN.md",
+      "role": "drive-sheet UX overhaul — SEPARATE track; 0032 must not collide. Both touch drive_lists/drive_list_stops but additively.",
+      "owner": "another_track",
+      "coordinationNotes": "0031 owns drive_list_notes, drive_list_stops.kind/suggested/skipped, drive_lists.started_at/start_lat/lng, ratings→visit-log. 0032 adds drive_lists.paused + drive_list_stops.is_detour/hitl_queue_id. Both write drive_list_stops.visited — coordinate: 0031 via manual/rating, 0032 via auto park-settle. No column conflict.",
+      "status": "annotate_pending",
+      "previewUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery"
+    },
+    {
+      "path": "docs/plans/2026-07-21-drive-visit-state-machine.md",
+      "role": "tesla_park_sessions poll-based state machine — FOLDED IN as the L1 detector (generalized past Tesla to any subject/source)",
+      "owner": "this_pass",
+      "status": "annotate_pending",
+      "previewUrl": "https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery"
+    },
+    {
+      "path": "docs/0018_mcp_showroom_search/IMPLEMENTATION_PLAN.md",
+      "role": "existing Places discovery primitives — reused by D1/D2, not modified",
+      "owner": "reference_only",
+      "status": "no_change",
+      "previewUrl": null
+    }
+  ],
+  "code": [
+    { "path": "src/backend/services/location/ingest.ts", "action": "create", "phase": "L0", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/services/location/park-detector.ts", "action": "create", "phase": "L1", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/db/schema/system/park-sessions.ts", "action": "create", "phase": "L1", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/services/tesla-poller.ts", "action": "modify", "phase": "L0", "owner": "this_pass", "status": "pending", "note": "emit LocationFix{source:tessie-poll} instead of calling matchAndMarkVisited directly" },
+    { "path": "src/backend/durable-objects/tesla-stream.ts", "action": "modify", "phase": "L0", "owner": "this_pass", "status": "pending", "note": "onFrame emits LocationFix{source:tessie-stream}; keep all existing safety" },
+    { "path": "src/backend/api/routes/showroom-stores.ts", "action": "modify", "phase": "L0", "owner": "this_pass", "status": "pending", "note": "device-location POST also feeds ingestLocationFix{source:phone}" },
+    { "path": "src/backend/api/routes/tesla.ts", "action": "modify", "phase": "L0", "owner": "this_pass", "status": "pending", "note": "add POST /manual-here" },
+    { "path": "src/backend/mcp/tools/tesla/report_location.ts", "action": "create", "phase": "L0", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/services/tesla/visit-sessions.ts", "action": "modify", "phase": "L1", "owner": "this_pass", "status": "pending", "note": "consume detector park/drive-away events; decouple from DO-only path" },
+    { "path": "src/backend/db/schema/showroom/visit_log.ts", "action": "modify", "phase": "V1", "owner": "this_pass", "status": "pending", "note": "add visit_type, hitl_queue_id+XOR, match_distance_m, provenance_json, rating CHECK; widen gps_source" },
+    { "path": "src/backend/api/routes/showroom-visit-logs.ts", "action": "create", "phase": "V2", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/mcp/tools/visits/", "action": "create", "phase": "V2", "owner": "this_pass", "status": "pending", "note": "create/get/list/update/delete_visit_log, stage_showroom_visit, finalize_visit_log, log_contact_interaction" },
+    { "path": "src/frontend/pages/admin/shopping/showrooms/visitlogs.astro", "action": "create", "phase": "V2", "owner": "this_pass", "status": "pending" },
+    { "path": "src/frontend/components/visits/", "action": "create", "phase": "V2", "owner": "this_pass", "status": "pending", "note": "VisitStatusBadge, VisitTypeChip, VisitLogEditor, ShowroomAutocomplete, SourceBadge" },
+    { "path": "src/frontend/pages/admin/config/tesla.astro", "action": "create", "phase": "C1", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/services/tesla/proximity-scan.ts", "action": "create", "phase": "D1", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/db/schema/showroom/store_hitl_queue.ts", "action": "create", "phase": "D1", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/db/schema/showroom/exclusions.ts", "action": "create", "phase": "D1", "owner": "this_pass", "status": "pending" },
+    { "path": "src/backend/db/schema/showroom/search.ts", "action": "create", "phase": "D2", "owner": "another_agent", "status": "not_started", "note": "showroom_search/_revision/_result" },
+    { "path": "src/backend/services/showroom/discovery-search.ts", "action": "create", "phase": "D2", "owner": "another_agent", "status": "not_started" },
+    { "path": "src/backend/durable-objects/discovery-hub.ts", "action": "create", "phase": "D2", "owner": "another_agent", "status": "not_started" },
+    { "path": "src/backend/services/tesla/navigate-drive.ts", "action": "create", "phase": "N1", "owner": "another_agent", "status": "not_started" }
+  ],
+  "crossReferences": {
+    "0022": "grand PRD; 0032 executes its P1/P2/P4 decoupled from streaming, hands off P5/P7",
+    "0023": "streaming-DO-first execution; safety (SA/SB) + the DO shipped and stay; 0032 reframes ING-03/park pipeline as source-agnostic",
+    "0031": "separate drive-sheet UX track; additive on drive_lists/drive_list_stops; coordinate on the visited flag",
+    "#178": "tesla_park_sessions poll-based machine → generalized into the L1 detector"
+  }
+}

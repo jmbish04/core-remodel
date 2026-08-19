@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-// Direct leaf import — avoids circular reference through the showroom barrel.
+// Direct leaf imports — avoid a circular reference through the showroom barrel.
 import { showroomStores } from "./stores";
+import { showroomStoreLocations } from "./store_location";
 
 /**
  * Showroom Store Contacts — people and general contact points for a showroom.
@@ -83,6 +84,23 @@ export const showroomStoreContacts = sqliteTable(
     /** Why it's a draft / which store it probably belongs to. */
     draftNotes: text("draft_notes"),
 
+    /**
+     * Physical site this contact belongs to — a sales rep / estimator works at ONE
+     * location, and a GENERAL_CONTACT front-desk line is per-site. Nullable =
+     * brand-level or legacy. ON DELETE SET NULL so merging/closing a site loosens the
+     * contact to brand-level rather than deleting it. Backfilled to the store's
+     * primary location. FK → showroom_store_locations.
+     */
+    locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * The store's PRIMARY contact for this site (at most one per location — see the
+     * partial-unique index) — who a homeowner should reach first. Migrated main POCs
+     * carry this.
+     */
+    isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -94,6 +112,17 @@ export const showroomStoreContacts = sqliteTable(
     storeIdx: index("showroom_store_contacts_store_idx").on(t.storeId),
     typeIdx: index("showroom_store_contacts_type_idx").on(t.type),
     draftIdx: index("showroom_store_contacts_draft_idx").on(t.isDraft),
+    locationIdx: index("showroom_store_contacts_location_idx").on(t.locationId),
+    // At most one GENERAL_CONTACT front-desk line per SITE (plan §17.F). A null
+    // location_id (brand-level) row is NULL-distinct in SQLite so it is not
+    // constrained here — intentional (a brand may keep a general line + per-site ones).
+    oneGeneralPerLocation: uniqueIndex("ssc_one_general_per_location")
+      .on(t.storeId, t.locationId)
+      .where(sql`type = 'GENERAL_CONTACT' AND is_draft = 0`),
+    // At most one primary contact per site.
+    onePrimaryPerLocation: uniqueIndex("ssc_one_primary_per_location")
+      .on(t.storeId, t.locationId)
+      .where(sql`is_primary = 1 AND is_draft = 0`),
   }),
 );
 

@@ -1,0 +1,48 @@
+---
+/**
+ * @fileoverview 0035 time-phased budget grid page.
+ *
+ * Thin Astro shell mounting the `<BudgetGridApp />` island — a phase -> line
+ * budget grid with monthly columns and Estimate/Actuals/Variance views, inline
+ * plan editing, and expense logging. Data comes from `GET /api/budget/grid`.
+ */
+import { BudgetGridApp } from "@/components/BudgetGridApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Budget Grid - 126 Colby Remodel Mission Control"
+  description="Time-phased phase -> line budget grid: Estimate, Actuals, and Variance across monthly columns, with inline plan edits and expense logging."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20h4v-2h3v2h4v-4c1-.5 1.7-1 2-2h2v-4h-2c0-1-.5-1.5-1-2V5z"></path>
+          <path d="M2 9v1c0 1.1.9 2 2 2h1"></path>
+          <path d="M16 11h.01"></path>
+        </svg>
+        Budget Grid
+      </h1>
+      <p class="text-muted-foreground">
+        Time-phased budget across monthly columns — switch between Estimate,
+        Actuals, and Variance, edit the plan inline, and log expenses straight to
+        a line.
+      </p>
+    </div>
+
+    <BudgetGridApp client:only="react" />
+  </main>
+</BaseLayout>

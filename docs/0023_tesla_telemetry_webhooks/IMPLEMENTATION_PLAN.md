@@ -1,5 +1,7 @@
 # 0023 — Tesla Telemetry Webhooks: streaming ingest, IFTTT pipeline, location AI, cost-safety
 
+> 🔗 **Active planning cross-reference (2026-07-26):** the follow-on pass **`0032_location_visits_discovery`** reframes this plan's `ING-03` / park pipeline into a **source-agnostic `LocationFix` ingress** so visit-capture & discovery work with the streaming DO turned **off** (Tessie poll / phone / AI coords). **Unaffected & shipped:** SA-01..05 (circuit breaker), SB-01..04 (Google quota), ING-02 `TeslaStreamDO` (now one optional source). **Claimed by 0032:** ING-03, P1-DB/API/MCP/FE, P2, P3-SVC-* (generalized), P4 service. **Left for a later pass:** P7 (discovery + realtime + voice keepalive), P5 (nav). Preview: https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery · tracker: `docs/0032_location_visits_discovery/TRACKING.json`
+
 **Status:** Planning → preview changelog filed for review
 **Plan slug (D1 `/admin/plans`):** `0023_tesla_telemetry_webhooks`
 **Preview changelog:** https://core-remodel.hacolby.workers.dev/admin/changelog/preview/tesla-telemetry-webhooks

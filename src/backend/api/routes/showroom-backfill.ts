@@ -28,8 +28,10 @@ import {
   showroomStoreLinks,
   showroomPhotosMapping,
   showroomStoreCategoryMapping,
+  showroomStoreCategory,
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { classifyStoreCategoriesDryRun } from "@backend/utils/showroom-categories";
 import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import { faviconService } from "@backend/services/favicon";
 import {
@@ -904,4 +906,184 @@ showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
 
   if (!apply) result.notes.push("DRY RUN — nothing written. Re-send with apply:true.");
   return c.json(result, 200);
+});
+
+/**
+ * GET /backfill/categorize?limit=&offset=&apply= — classify showrooms that
+ * currently have ZERO category mappings (gemini-2.5-flash), over a paged slice.
+ *
+ * DRY RUN by default (`apply` unset/false): predicts + returns, writes NOTHING.
+ * With `apply=true`: persists the SAME prediction it returns — the first id is the
+ * store's primary category — so the report matches exactly what was written. Only
+ * ever writes when the store still has zero mappings (fill-blanks; re-checked per
+ * row), so a concurrent write can't produce a duplicate/second-primary.
+ *
+ * `total` is the full uncategorized count so a caller can page with offset.
+ * Response 200: { total, offset, limit, apply, appliedCount, results }
+ */
+showroomBackfillRouter.get("/backfill/categorize", async (c) => {
+  const db = drizzle(c.env.DB);
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 15, 1), 25);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+  const apply = c.req.query("apply") === "true";
+
+  // Uncategorized = active store with no category_mapping row. Compute the whole
+  // set with two cheap (AI-free) queries, then classify only the requested slice.
+  const mapped = await db
+    .selectDistinct({ storeId: showroomStoreCategoryMapping.storeId })
+    .from(showroomStoreCategoryMapping);
+  const mappedSet = new Set(mapped.map((m) => m.storeId));
+  const active = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.isActive, true))
+    .orderBy(showroomStores.id);
+  const uncategorized = active.map((s) => s.id).filter((id) => !mappedSet.has(id));
+
+  const slice = uncategorized.slice(offset, offset + limit);
+  const results = await Promise.all(
+    slice.map((id) => classifyStoreCategoriesDryRun(c.env, id, [])),
+  );
+
+  let appliedCount = 0;
+  let failedCount = 0;
+  if (apply) {
+    for (const pred of results) {
+      if (pred.hasExistingCategories || pred.predicted.length === 0) continue;
+      // Re-check fill-blanks at write time (defends against a concurrent classify).
+      // Wrapped per store so a lost race (unique index throws on a duplicate/second
+      // primary from a concurrent apply) skips that one store instead of 500-ing the
+      // whole batch and losing appliedCount for stores already written this pass.
+      try {
+        const [row] = await db
+          .select({ id: showroomStoreCategoryMapping.id })
+          .from(showroomStoreCategoryMapping)
+          .where(eq(showroomStoreCategoryMapping.storeId, pred.storeId))
+          .limit(1);
+        if (row) continue;
+        for (const [i, cat] of pred.predicted.entries()) {
+          await db.insert(showroomStoreCategoryMapping).values({
+            storeId: pred.storeId,
+            categoryId: cat.id,
+            aiRationale: "Bulk categorize backfill (dry-run classifier, gemini-2.5-flash)",
+            aiRationaleConfidenceScore: pred.usedAi ? 7 : 5,
+            isPrimary: i === 0,
+          });
+        }
+        appliedCount++;
+      } catch (err) {
+        failedCount++;
+        console.error(`[categorize] apply failed for store ${pred.storeId}:`, err);
+      }
+    }
+  }
+
+  return c.json(
+    { total: uncategorized.length, offset, limit, apply, appliedCount, failedCount, results },
+    200,
+  );
+});
+
+/**
+ * GET /backfill/reprimary?limit=&offset=&apply= — re-evaluate the PRIMARY category
+ * for stores that ALREADY have categories, WITHOUT changing the category set. The
+ * classifier ranks the full vocabulary; the new primary is the store's highest-
+ * ranked EXISTING category. Only ever moves the is_primary flag among categories
+ * the store already has — never adds/removes a category.
+ *
+ * DRY RUN by default: returns before→after for every store whose primary WOULD
+ * change (plus a `changed` flag), writes nothing. With apply=true: clears the old
+ * is_primary and sets the new one per changed store (per-store try/catch).
+ *
+ * Response 200: { total, offset, limit, apply, changedCount, appliedCount, results }
+ */
+showroomBackfillRouter.get("/backfill/reprimary", async (c) => {
+  const db = drizzle(c.env.DB);
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 15, 1), 25);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+  const apply = c.req.query("apply") === "true";
+
+  // Stores that HAVE at least one category mapping, active only, stable order.
+  const withCats = await db
+    .selectDistinct({ storeId: showroomStoreCategoryMapping.storeId })
+    .from(showroomStoreCategoryMapping)
+    .innerJoin(showroomStores, eq(showroomStores.id, showroomStoreCategoryMapping.storeId))
+    .where(eq(showroomStores.isActive, true))
+    .orderBy(showroomStoreCategoryMapping.storeId);
+  const storeIds = withCats.map((r) => r.storeId);
+  const slice = storeIds.slice(offset, offset + limit);
+
+  const results = await Promise.all(
+    slice.map(async (storeId) => {
+      // Existing categories for this store (id + name + current primary flag).
+      const existing = await db
+        .select({
+          categoryId: showroomStoreCategoryMapping.categoryId,
+          isPrimary: showroomStoreCategoryMapping.isPrimary,
+          name: showroomStoreCategory.name,
+        })
+        .from(showroomStoreCategoryMapping)
+        .innerJoin(
+          showroomStoreCategory,
+          eq(showroomStoreCategory.id, showroomStoreCategoryMapping.categoryId),
+        )
+        .where(eq(showroomStoreCategoryMapping.storeId, storeId));
+
+      const nameOf = new Map(existing.map((e) => [e.categoryId, e.name] as const));
+      const existingIds = new Set(existing.map((e) => e.categoryId));
+      const currentPrimary = existing.find((e) => e.isPrimary)?.categoryId ?? null;
+
+      // Classifier's global ranking → the store's highest-ranked EXISTING category.
+      const pred = await classifyStoreCategoriesDryRun(c.env, storeId);
+      const aiPick = pred.predicted.find((p) => existingIds.has(p.id))?.id ?? null;
+      // Fall back to the current primary, else the lowest-id existing category, so a
+      // store is never left without a primary.
+      const newPrimary =
+        aiPick ?? currentPrimary ?? [...existingIds].sort((a, b) => a - b)[0] ?? null;
+      const changed = newPrimary != null && newPrimary !== currentPrimary;
+
+      return {
+        storeId,
+        name: pred.name,
+        currentPrimary: currentPrimary != null ? nameOf.get(currentPrimary) ?? null : null,
+        newPrimary: newPrimary != null ? nameOf.get(newPrimary) ?? null : null,
+        newPrimaryId: newPrimary,
+        changed,
+        categories: existing.map((e) => e.name),
+      };
+    }),
+  );
+
+  let changedCount = 0;
+  let appliedCount = 0;
+  for (const r of results) {
+    if (!r.changed) continue;
+    changedCount++;
+    if (!apply || r.newPrimaryId == null) continue;
+    try {
+      // Clear the old primary first, then set the new one — two statements keep at
+      // most one is_primary=1 so sscm_one_primary_per_store can't trip.
+      await db
+        .update(showroomStoreCategoryMapping)
+        .set({ isPrimary: false })
+        .where(eq(showroomStoreCategoryMapping.storeId, r.storeId));
+      await db
+        .update(showroomStoreCategoryMapping)
+        .set({ isPrimary: true })
+        .where(
+          and(
+            eq(showroomStoreCategoryMapping.storeId, r.storeId),
+            eq(showroomStoreCategoryMapping.categoryId, r.newPrimaryId),
+          ),
+        );
+      appliedCount++;
+    } catch (err) {
+      console.error(`[reprimary] apply failed for store ${r.storeId}:`, err);
+    }
+  }
+
+  return c.json(
+    { total: storeIds.length, offset, limit, apply, changedCount, appliedCount, results },
+    200,
+  );
 });

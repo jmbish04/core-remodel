@@ -23,8 +23,11 @@ export const listMaterials = defineTool({
         .boolean()
         .optional()
         .describe("Filter by purchased status; omit to include both"),
-      brand: z.string().optional().describe("Exact brand match (case-insensitive)"),
-      q: z.string().optional().describe("Free-text filter over title / brand / model / notes"),
+      includeInactive: z
+        .boolean()
+        .optional()
+        .describe("Include soft-deleted (is_active=false) materials; default false"),
+      q: z.string().optional().describe("Free-text filter over title / notes"),
       limit: z.number().int().positive().max(200).optional(),
       offset: z.number().int().min(0).optional(),
     },
@@ -39,12 +42,11 @@ export const listMaterials = defineTool({
     ],
     handler: async ({ db }, input) => {
       const all = await db.select().from(materialScheduleItems).all();
-      const brandNeedle = input.brand?.trim().toLowerCase();
       const filtered = all.filter((m) => {
+        if (!input.includeInactive && (m.isActive ?? true) === false) return false;
         if (input.roomId != null && m.roomId !== input.roomId) return false;
         if (input.isPurchased != null && (m.isPurchased ?? false) !== input.isPurchased) return false;
-        if (brandNeedle && (m.brand ?? "").toLowerCase() !== brandNeedle) return false;
-        if (input.q && !matchesQuery([m.title, m.brand, m.model, m.notes], input.q)) return false;
+        if (input.q && !matchesQuery([m.title, m.notes], input.q)) return false;
         return true;
       });
       // Paginate the raw rows first, then join names for the page only.

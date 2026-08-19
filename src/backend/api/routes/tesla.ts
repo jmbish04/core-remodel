@@ -23,9 +23,10 @@
  * shared `WORKER_API_KEY` instead (see `verifyWebhookSecret`). Event rows land in
  * the dedicated `TESLA_DB` D1, separate from the app DB read for drive matching.
  */
-import { driveListStops, driveLists, showroomStores } from "@backend/db";
+import { driveListStops, driveLists, showroomStores, showroomVisitLog } from "@backend/db";
 import { teslaTelemetryEvents, teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
+import { ingestLocationFix } from "@backend/services/location/ingest";
 import {
   maybeEndActiveDriveOnHomeArrival,
   type HomeArrivalResult,
@@ -33,16 +34,33 @@ import {
 import {
   getLocation,
   sendNavigation,
+  sendMultiWaypointNavigation,
   tessieConfigured,
   verifyWebhookSecret,
 } from "@backend/services/tesla";
+import { extractCoord, extractTelemetryFields } from "@backend/services/tesla/frames";
+import { loadOneStoreLocations } from "@backend/services/showroom/locations";
+import {
+  getStreamControl,
+  isAutoNavigateEnabled,
+  isWithinStreamWindow,
+  setAutoNavigate,
+  setPollFallbackSeconds,
+  setStreamEnabled,
+  setStreamWindow,
+  shouldPollNow,
+  shouldStreamNow,
+} from "@backend/services/tesla/gating";
+import { getVehicleImageUrl } from "@backend/services/tesla/vehicle-image";
 import { evaluateAutomations } from "@backend/services/tesla-automations";
 import { telemetryRecordingAllowed } from "@backend/services/tesla-integration";
 import { pollVehicleForActiveDrive } from "@backend/services/tesla-poller";
 import { isRequestAuthenticated } from "@backend/utils/access";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { z } from "zod";
 
 const teslaRouter = new Hono<{ Bindings: Env }>();
 
@@ -77,6 +95,8 @@ teslaRouter.post("/navigate", async (c) => {
     destination?: string;
     lat?: number;
     lng?: number;
+    storeId?: number;
+    locationId?: number;
   };
 
   let dest: string | null = null;
@@ -85,6 +105,38 @@ teslaRouter.post("/navigate", async (c) => {
     dest = `${body.lat},${body.lng}`;
   } else if (typeof body.destination === "string" && body.destination.trim()) {
     dest = body.destination.trim();
+  } else if (typeof body.storeId === "number") {
+    // Per-location navigate: route to the SELECTED site of a multi-location brand,
+    // not always the primary. `locationId` picks the site; omitted → the derived
+    // primary; a location with no coords → the store's flat coords/address.
+    // Fixes the hero "Navigate" always sending the car to a 5-site brand's primary.
+    const db = drizzle(c.env.DB);
+    const locs = await loadOneStoreLocations(db, body.storeId);
+    const chosen =
+      typeof body.locationId === "number"
+        ? locs.find((l) => l.id === body.locationId)
+        : (locs.find((l) => l.isPrimary) ?? locs[0]);
+    if (typeof body.locationId === "number" && !chosen) {
+      return c.json({ error: "locationId does not belong to this store" }, 400);
+    }
+    if (chosen?.latitude != null && chosen?.longitude != null) {
+      dest = `${chosen.latitude},${chosen.longitude}`;
+    } else {
+      const [s] = await db
+        .select({
+          lat: showroomStores.latitude,
+          lng: showroomStores.longitude,
+          addr: showroomStores.locationAddress,
+        })
+        .from(showroomStores)
+        .where(eq(showroomStores.id, body.storeId))
+        .limit(1);
+      dest =
+        s?.lat != null && s?.lng != null
+          ? `${s.lat},${s.lng}`
+          : (chosen?.address ?? s?.addr ?? null);
+    }
+    if (!dest) return c.json({ error: "Store has no coordinates or address to navigate to." }, 404);
   } else if (body.slug && typeof body.stopId === "number") {
     const db = drizzle(c.env.DB);
     const [stop] = await db
@@ -123,6 +175,69 @@ teslaRouter.post("/navigate", async (c) => {
 });
 
 /**
+ * POST /api/tesla/navigate-drive — send a whole drive (multi-waypoint) to the car (N1).
+ *
+ * Resolves the drive's stops in order — skipping `skipped` stops and pitstop
+ * suggestions the user hasn't added yet (`suggested = true`; promoting one flips it
+ * to false, so `!suggested` keeps every real stop), plus any stop with no usable
+ * coordinates — then hands the routed trip to the car via
+ * `sendMultiWaypointNavigation` (a Google Maps directions share; see the service
+ * for the Fleet-API follow-up).
+ */
+teslaRouter.post("/navigate-drive", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { driveListId?: unknown; slug?: unknown };
+  const db = drizzle(c.env.DB);
+
+  // Validate at the boundary — only accept a numeric id / string slug (a non-string
+  // slug must never reach Drizzle).
+  let driveListId = typeof body.driveListId === "number" ? body.driveListId : null;
+  const slug = typeof body.slug === "string" ? body.slug : undefined;
+  if (driveListId == null && slug) {
+    const [dl] = await db
+      .select({ id: driveLists.id })
+      .from(driveLists)
+      .where(eq(driveLists.slug, slug))
+      .limit(1);
+    driveListId = dl?.id ?? null;
+  }
+  if (driveListId == null) return c.json({ error: "Provide { driveListId } or { slug }." }, 400);
+
+  const stops = await db
+    .select({
+      name: driveListStops.name,
+      sortOrder: driveListStops.sortOrder,
+      skipped: driveListStops.skipped,
+      suggested: driveListStops.suggested,
+      lat: driveListStops.latitude,
+      lng: driveListStops.longitude,
+      sLat: showroomStores.latitude,
+      sLng: showroomStores.longitude,
+    })
+    .from(driveListStops)
+    .leftJoin(showroomStores, eq(driveListStops.showroomStoreId, showroomStores.id))
+    .where(eq(driveListStops.driveListId, driveListId))
+    .orderBy(driveListStops.sortOrder)
+    .all();
+
+  const waypoints = stops
+    .filter((s) => !s.skipped && !s.suggested)
+    .map((s) => {
+      const lat = s.lat ?? s.sLat;
+      const lng = s.lng ?? s.sLng;
+      return lat != null && lng != null ? { latitude: lat, longitude: lng, label: s.name } : null;
+    })
+    .filter((w): w is { latitude: number; longitude: number; label: string } => w != null);
+
+  if (waypoints.length === 0) {
+    return c.json({ error: "This drive has no stops with coordinates to navigate." }, 400);
+  }
+
+  const result = await sendMultiWaypointNavigation(c.env, waypoints);
+  if (!result.ok) return c.json({ ok: false, error: result.error }, 502);
+  return c.json({ ok: true, method: result.method, count: result.count, truncated: result.truncated });
+});
+
+/**
  * POST /api/tesla/poll — run one vehicle poll now (admin).
  *
  * The same function the per-minute cron calls, exposed so a poll can be forced
@@ -132,6 +247,264 @@ teslaRouter.post("/navigate", async (c) => {
  */
 teslaRouter.post("/poll", async (c) => {
   return c.json(await pollVehicleForActiveDrive(c.env));
+});
+
+/**
+ * POST /api/tesla/manual-here — a manual "I'm here" location fix (0032 L0).
+ *
+ * The human's escape hatch when no automatic source has a fresh fix: report a
+ * coordinate and run the same park pipeline every source runs (match a drive
+ * stop, home/work check, stage a soft arrival near a showroom). Awaited so the
+ * caller sees what it did. Admin-gated by the router middleware.
+ */
+const manualHereSchema = z.object({
+  latitude: z.number().finite().gte(-90).lte(90),
+  longitude: z.number().finite().gte(-180).lte(180),
+  accuracyMeters: z.number().finite().nonnegative().optional().nullable(),
+});
+teslaRouter.post("/manual-here", async (c) => {
+  const parsed = manualHereSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: "Invalid coordinates (lat -90..90, lng -180..180)." }, 400);
+  const result = await ingestLocationFix(c.env, {
+    source: "manual",
+    latitude: parsed.data.latitude,
+    longitude: parsed.data.longitude,
+    accuracyMeters: parsed.data.accuracyMeters ?? null,
+  });
+  return c.json({ success: true, result });
+});
+
+/**
+ * GET /api/tesla/stream/control — the streaming-DO lifecycle control state.
+ *
+ * Returns the toggle, the daytime window, the poll-fallback cadence, the DO's
+ * self-reported connected flag, and the two derived decisions (`shouldStream` /
+ * `shouldPoll`) so the drive-list UI can render the toggle + which ingest path
+ * is live right now. Admin-gated by the router middleware.
+ */
+teslaRouter.get("/stream/control", async (c) => {
+  const [control, streamNow, pollNow] = await Promise.all([
+    getStreamControl(c.env),
+    shouldStreamNow(c.env),
+    shouldPollNow(c.env),
+  ]);
+  return c.json({ control, shouldStream: streamNow, shouldPoll: pollNow });
+});
+
+/**
+ * POST /api/tesla/stream/control — update the lifecycle controls.
+ *
+ * Body (all optional): `{ enabled, windowStartHour, windowEndHour, pollFallbackSeconds, autoNavigate }`.
+ * `enabled:false` stands the DO down and hands ingest to the poller while a drive
+ * is still active. `autoNavigate` opts into commanding the car to the next stop on
+ * a matched park (default OFF). The window and cadence are validated in the service layer.
+ */
+teslaRouter.post("/stream/control", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    enabled?: boolean;
+    windowStartHour?: number;
+    windowEndHour?: number;
+    pollFallbackSeconds?: number;
+    autoNavigate?: boolean;
+  };
+  try {
+    if (typeof body.enabled === "boolean") await setStreamEnabled(c.env, body.enabled);
+    if (typeof body.windowStartHour === "number" && typeof body.windowEndHour === "number") {
+      await setStreamWindow(c.env, body.windowStartHour, body.windowEndHour);
+    }
+    if (typeof body.pollFallbackSeconds === "number") {
+      await setPollFallbackSeconds(c.env, body.pollFallbackSeconds);
+    }
+    if (typeof body.autoNavigate === "boolean") await setAutoNavigate(c.env, body.autoNavigate);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+  const [control, autoNavigate] = await Promise.all([
+    getStreamControl(c.env),
+    isAutoNavigateEnabled(c.env),
+  ]);
+  return c.json({ ok: true, control: { ...control, autoNavigate } });
+});
+
+/** Resolve the singleton TeslaStreamDO stub (one instance for the one vehicle). */
+function teslaStreamStub(env: Env) {
+  return env.TESLA_STREAM.get(env.TESLA_STREAM.idFromName("singleton"));
+}
+
+/**
+ * POST /api/tesla/stream/start — arm the streaming DO's lifecycle.
+ *
+ * The DO's own alarm re-checks `shouldStreamNow` before it connects, so calling
+ * this outside the window / with no active drive is a safe no-op (it goes dormant).
+ * Normally the drive-activation route calls this for you.
+ */
+teslaRouter.post("/stream/start", async (c) => {
+  const res = await teslaStreamStub(c.env).fetch("https://do/start", { method: "POST" });
+  return c.json(await res.json(), res.status as ContentfulStatusCode);
+});
+
+/** POST /api/tesla/stream/stop — disconnect the socket and stop the DO now. */
+teslaRouter.post("/stream/stop", async (c) => {
+  const res = await teslaStreamStub(c.env).fetch("https://do/stop", { method: "POST" });
+  return c.json(await res.json(), res.status as ContentfulStatusCode);
+});
+
+/** GET /api/tesla/stream/status — the DO's live connection state + write budget + breaker. */
+teslaRouter.get("/stream/status", async (c) => {
+  const res = await teslaStreamStub(c.env).fetch("https://do/status");
+  return c.json(await res.json(), res.status as ContentfulStatusCode);
+});
+
+/** Format an hour (0–24) as a 12-hour clock label, e.g. 7 → "7:00 AM", 20 → "8:00 PM". */
+function to12h(hour: number): string {
+  const h = ((hour % 24) + 24) % 24;
+  const period = h < 12 ? "AM" : "PM";
+  const disp = h % 12 === 0 ? 12 : h % 12;
+  return `${disp}:00 ${period}`;
+}
+
+/**
+ * GET /api/tesla/stream/banner — everything the GLOBAL admin telemetry alert needs.
+ *
+ * The alert shows only when a drive list is active. It reports whether telemetry
+ * is live (the DO's heartbeat-backed connected flag), whether the daytime window
+ * is open (12-hour label), whether an Enable button should appear (active drive ∧
+ * in window ∧ toggle off), and — when telemetry IS live — the compositor image of
+ * the actual car. All D1/KV reads, no DO round-trip, so it's cheap on every page.
+ */
+teslaRouter.get("/stream/banner", async (c) => {
+  const db = drizzle(c.env.DB);
+  const [active] = await db
+    .select({ slug: driveLists.slug, title: driveLists.title })
+    .from(driveLists)
+    .where(eq(driveLists.isActive, true))
+    .limit(1);
+
+  const control = await getStreamControl(c.env);
+  const withinWindow = isWithinStreamWindow(new Date(), control);
+  const telemetryActive = control.connected;
+  const canEnable = Boolean(active) && withinWindow && !control.enabled;
+  const vehicleImageUrl = telemetryActive ? await getVehicleImageUrl(c.env).catch(() => null) : null;
+
+  return c.json({
+    activeDrive: active ? { slug: active.slug, title: active.title } : null,
+    telemetryActive,
+    telemetryEnabled: control.enabled,
+    withinWindow,
+    canEnable,
+    windowLabel: `${to12h(control.windowStartHour)}–${to12h(control.windowEndHour)}`,
+    vehicleImageUrl,
+  });
+});
+
+/** Human gear label for the ticker. */
+function gearLabel(shift: string | null): string | null {
+  switch ((shift ?? "").toUpperCase()) {
+    case "P":
+      return "Parked";
+    case "D":
+      return "Driving";
+    case "R":
+      return "Reverse";
+    case "N":
+      return "Neutral";
+    default:
+      return null;
+  }
+}
+
+/**
+ * GET /api/tesla/stream/events — recent PARSED telemetry frames for the live ticker.
+ *
+ * Feeds the rotating parsed-event line in the global admin alert while a session is
+ * open. Reads the newest `tesla_telemetry_events` rows (TESLA_DB, `received_at`
+ * indexed) and pre-parses each into a compact, display-ready item so the client
+ * only rotates strings. `?limit=` (1–20, default 8). Empty until frames flow —
+ * the ticker simply shows nothing then. Admin-gated by the router middleware.
+ */
+teslaRouter.get("/stream/events", async (c) => {
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "8", 10) || 8, 1), 20);
+  const rows = await drizzle(c.env.TESLA_DB)
+    .select({
+      id: teslaTelemetryEvents.id,
+      receivedAt: teslaTelemetryEvents.receivedAt,
+      eventTs: teslaTelemetryEvents.eventTs,
+      latitude: teslaTelemetryEvents.latitude,
+      longitude: teslaTelemetryEvents.longitude,
+      speed: teslaTelemetryEvents.speed,
+      shiftState: teslaTelemetryEvents.shiftState,
+      batteryLevel: teslaTelemetryEvents.batteryLevel,
+    })
+    .from(teslaTelemetryEvents)
+    .orderBy(desc(teslaTelemetryEvents.receivedAt))
+    .limit(limit);
+
+  const events = rows.map((r) => {
+    const gear = gearLabel(r.shiftState);
+    const parts: string[] = [];
+    if (gear) parts.push(gear);
+    if (r.speed != null && r.speed > 0) parts.push(`${Math.round(r.speed)} mph`);
+    if (r.batteryLevel != null) parts.push(`${r.batteryLevel}%`);
+    if (r.latitude != null && r.longitude != null) {
+      parts.push(`${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}`);
+    }
+    return {
+      id: r.id,
+      at: (r.eventTs ?? r.receivedAt)?.toISOString() ?? null,
+      gear,
+      speed: r.speed,
+      batteryLevel: r.batteryLevel,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      // Pre-built summary line — "Driving · 34 mph · 62% · 37.8712, -122.3011".
+      text: parts.join(" · ") || "Telemetry frame",
+    };
+  });
+
+  return c.json({ count: events.length, events });
+});
+
+/**
+ * GET /api/tesla/visits — recent visit-log rows (0023 P1), newest first.
+ *
+ * The two-row soft-arrival → staged model written by the telemetry pipeline. The
+ * store name is JOINed from `showroom_stores` (never denormalized). `?status=` and
+ * `?limit=` narrow the list. Admin-gated by the router middleware.
+ */
+const VISIT_STATUSES = ["AI_STAGED", "TESLA_SOFT_ARRIVAL", "TESLA_STAGED", "SUBMITTED"] as const;
+type VisitStatus = (typeof VISIT_STATUSES)[number];
+
+teslaRouter.get("/visits", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rawStatus = c.req.query("status");
+  // Whitelist against the enum — an unknown status is ignored, not cast/queried.
+  const status: VisitStatus | undefined = VISIT_STATUSES.includes(rawStatus as VisitStatus)
+    ? (rawStatus as VisitStatus)
+    : undefined;
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "100", 10) || 100, 1), 500);
+  const base = db
+    .select({
+      id: showroomVisitLog.id,
+      storeId: showroomVisitLog.storeId,
+      storeName: showroomStores.name,
+      driveListId: showroomVisitLog.driveListId,
+      status: showroomVisitLog.status,
+      type: showroomVisitLog.type,
+      arrivalAt: showroomVisitLog.arrivalAt,
+      departureAt: showroomVisitLog.departureAt,
+      dwellSeconds: showroomVisitLog.dwellSeconds,
+      rating: showroomVisitLog.rating,
+      softArrivalId: showroomVisitLog.softArrivalId,
+      latitude: showroomVisitLog.latitude,
+      longitude: showroomVisitLog.longitude,
+      createdAt: showroomVisitLog.createdAt,
+    })
+    .from(showroomVisitLog)
+    .leftJoin(showroomStores, eq(showroomVisitLog.storeId, showroomStores.id))
+    .orderBy(desc(showroomVisitLog.createdAt))
+    .limit(limit);
+  const rows = status ? await base.where(eq(showroomVisitLog.status, status)) : await base;
+  return c.json({ count: rows.length, visits: rows });
 });
 
 /**
@@ -324,90 +697,6 @@ function isParkedEvent(eventType: string | null, payload: Record<string, unknown
     if (typeof shift === "string" && shift.toUpperCase() === "P") return true;
   }
   return false;
-}
-
-/**
- * Pull `{latitude, longitude}` out of a loosely-typed webhook payload. Handles
- * the common Tessie shapes: top-level `latitude`/`longitude`, a nested
- * `drive_state`, or a `location` object.
- */
-function extractCoord(payload: Record<string, unknown>): { latitude: number; longitude: number } | null {
-  const candidates: unknown[] = [
-    payload,
-    payload.drive_state,
-    payload.location,
-    (payload.data as Record<string, unknown> | undefined)?.drive_state,
-  ];
-  for (const c of candidates) {
-    if (!c || typeof c !== "object") continue;
-    const obj = c as Record<string, unknown>;
-    const lat = obj.latitude ?? obj.lat;
-    const lng = obj.longitude ?? obj.lng ?? obj.long;
-    if (typeof lat === "number" && typeof lng === "number") return { latitude: lat, longitude: lng };
-  }
-  return null;
-}
-
-/** Extracted, typed telemetry fields (all nullable). */
-interface TelemetryFields {
-  vin: string | null;
-  eventTs: Date | null;
-  latitude: number | null;
-  longitude: number | null;
-  speed: number | null;
-  shiftState: string | null;
-  batteryLevel: number | null;
-  odometer: number | null;
-}
-
-/**
- * Hoist the common fields out of a Fleet Telemetry frame, forgiving of shape.
- *
- * Tessie hosted telemetry frames come either flat (`{ vin, latitude, speed, … }`)
- * or as a `data: [{ key, value }]` array (Tesla Fleet Telemetry's native form).
- * We flatten the key/value array into a lookup and read from it OR the top level.
- * Anything absent stays null — this never throws on an unexpected frame.
- */
-function extractTelemetryFields(payload: Record<string, unknown>): TelemetryFields {
-  // Flatten a `data: [{key,value}]` array into a plain object, if present.
-  const kv: Record<string, unknown> = {};
-  if (Array.isArray(payload.data)) {
-    for (const item of payload.data) {
-      if (item && typeof item === "object" && "key" in item) {
-        kv[String((item as { key: unknown }).key)] = (item as { value?: unknown }).value;
-      }
-    }
-  }
-  const num = (...vals: unknown[]): number | null => {
-    for (const v of vals) if (typeof v === "number" && Number.isFinite(v)) return v;
-    return null;
-  };
-  const str = (...vals: unknown[]): string | null => {
-    for (const v of vals) if (typeof v === "string" && v) return v;
-    return null;
-  };
-
-  const loc = (kv.Location ?? payload.location) as Record<string, unknown> | undefined;
-  const tsRaw = payload.createdAt ?? payload.timestamp ?? kv.Timestamp;
-  // Normalize: a numeric timestamp under 1e10 is Unix SECONDS (Tesla/firmware
-  // often sends seconds) — `new Date(seconds)` would land in 1970, so ×1000.
-  let eventTs: Date | null = null;
-  if (typeof tsRaw === "number") {
-    eventTs = new Date(tsRaw < 1e10 ? tsRaw * 1000 : tsRaw);
-  } else if (typeof tsRaw === "string") {
-    eventTs = new Date(tsRaw);
-  }
-
-  return {
-    vin: str(payload.vin, kv.Vin),
-    eventTs: eventTs && !Number.isNaN(eventTs.getTime()) ? eventTs : null,
-    latitude: num(payload.latitude, loc?.latitude, kv.Latitude),
-    longitude: num(payload.longitude, loc?.longitude, kv.Longitude),
-    speed: num(payload.speed, kv.VehicleSpeed),
-    shiftState: str(payload.shift_state, kv.Gear, kv.ShiftState),
-    batteryLevel: num(payload.battery_level, kv.BatteryLevel, kv.Soc),
-    odometer: num(payload.odometer, kv.Odometer),
-  };
 }
 
 export default teslaRouter;

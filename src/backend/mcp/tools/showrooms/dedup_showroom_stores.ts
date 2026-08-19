@@ -1,77 +1,49 @@
-import { showroomStores } from "@backend/db";
-import { inArray, sql } from "drizzle-orm";
+// Only the tables this tool reads directly for identity signals remain here — the ~25 FK
+// child tables moved with the remap logic into services/showroom/store-child-remap.ts.
+import {
+  showroomPocs,
+  showroomStoreLinks,
+  showroomStoreLocations,
+  showroomStores,
+} from "@backend/db";
+import {
+  countStoreChildren,
+  remapStoreChildren,
+} from "@backend/services/showroom/store-child-remap";
+import {
+  emptyIdentity,
+  groupBySignals,
+  normAddress,
+  normHost,
+  normName,
+  normPhone,
+  type SignalKind,
+  type StoreIdentity,
+} from "@backend/services/showroom/duplicate-signals";
+import { count, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { defineTool, DESTRUCTIVE } from "../../types";
 
+type StoreRow = {
+  id: number;
+  name: string;
+  locationCity: string | null;
+  locationAddress: string | null;
+  zipCode: string | null;
+  placeId: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  iconCfImagesUrl: string | null;
+  heroImageCfImagesUrl: string | null;
+  phoneNumber: string | null;
+  isActive: boolean;
+};
+
+
 /**
- * Every child table that carries a foreign key to `showroom_stores`, with the
- * column that holds it. Enumerated from the schema (grep
- * `references(() => showroomStores.id)`), NOT from memory — a missed table
- * orphans rows or, on a NO-ACTION FK, blocks the delete outright.
- *
- * `uniqueMapping` marks join tables with a UNIQUE (store, x) index where a
- * reparent could collide with a row the winner already owns. For those we
- * `UPDATE OR IGNORE` (skip the colliding loser row) and let the loser's
- * ON DELETE CASCADE remove the skipped row afterwards — every uniqueMapping
- * table here is a cascade table, so nothing is orphaned. All others are plain
- * `UPDATE` so the row definitely moves before the loser is deleted.
+ * Calculates a completeness score for a store row based on its enriched fields.
  */
-const CHILD_FKS: Array<{ table: string; col: string; uniqueMapping: boolean }> = [
-  { table: "store_notes", col: "store_id", uniqueMapping: false },
-  { table: "store_pa_mapping", col: "store_id", uniqueMapping: true },
-  { table: "product_photo_buckets", col: "showroom_id", uniqueMapping: false },
-  { table: "showroom_pocs", col: "showroom_id", uniqueMapping: false },
-  { table: "product_showroom_photos", col: "showroom_id", uniqueMapping: false },
-  { table: "showroom_store_links", col: "store_id", uniqueMapping: false },
-  { table: "showroom_store_sales", col: "store_id", uniqueMapping: false },
-  { table: "showroom_scan_log", col: "store_id", uniqueMapping: false },
-  { table: "store_research", col: "store_id", uniqueMapping: false },
-  { table: "store_similar_map", col: "parent_store_id", uniqueMapping: true },
-  { table: "store_similar_map", col: "similar_store_id", uniqueMapping: true },
-  { table: "showroom_store_hours", col: "showroom_id", uniqueMapping: false },
-  { table: "showroom_photos_mapping", col: "showroom_id", uniqueMapping: true },
-  { table: "showroom_images", col: "store_id", uniqueMapping: false },
-  { table: "browser_run_pages", col: "showroom_id", uniqueMapping: false },
-  { table: "store_rating", col: "store_id", uniqueMapping: false },
-  { table: "showroom_store_ratings", col: "store_id", uniqueMapping: false },
-  { table: "product_price_observations", col: "showroom_id", uniqueMapping: false },
-  { table: "showroom_store_category_mapping", col: "store_id", uniqueMapping: true },
-  { table: "store_tag_mapping", col: "store_id", uniqueMapping: true },
-  { table: "showroom_store_contacts", col: "store_id", uniqueMapping: false },
-  { table: "showroom_store_contact_log", col: "store_id", uniqueMapping: false },
-  { table: "showroom_store_contact_business_cards", col: "store_id", uniqueMapping: false },
-  { table: "scraping_sitemap", col: "showroom_id", uniqueMapping: false },
-  { table: "showroom_product_mappings", col: "showroom_id", uniqueMapping: true },
-  { table: "showroom_brand_mappings", col: "showroom_id", uniqueMapping: true },
-  { table: "drive_list_stops", col: "showroom_store_id", uniqueMapping: false },
-  { table: "shopping_journal_entries", col: "store_id", uniqueMapping: false },
-];
-
-/** lowercase, collapse whitespace — for grouping identical store identities. */
-const norm = (s: string | null | undefined) =>
-  (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-
-/** City for the grouping key: prefer the granular column, else the `City, ST`
- * tail of the address. Two rows only merge when name AND city match, so distinct
- * branches of a chain (different cities) never collapse together. */
-function cityKey(row: { locationCity: string | null; locationAddress: string | null }): string {
-  if (row.locationCity) return norm(row.locationCity);
-  const addr = row.locationAddress ?? "";
-  // "1100 Industrial Rd Ste 17, San Carlos, CA 94070, USA" → "san carlos"
-  const parts = addr.split(",").map((p) => p.trim());
-  // find the segment before the "CA 94070" / "CA" state segment
-  for (let i = 0; i < parts.length; i++) {
-    if (/^[A-Z]{2}(\s+\d{5})?$/.test(parts[i]) && i > 0) return norm(parts[i - 1]);
-  }
-  return norm(parts[0]);
-}
-
-type StoreRow = typeof showroomStores.$inferSelect;
-
-/** Enrichment score — higher wins. A real street address (zip present) or a
- * placeId is what distinguishes a genuine store row from a city-only re-seed
- * shell; coords/icon/hero/phone break further ties; lowest id breaks the rest. */
 function score(r: StoreRow): number {
   let s = 0;
   if (r.zipCode) s += 100;
@@ -80,34 +52,84 @@ function score(r: StoreRow): number {
   if (r.iconCfImagesUrl) s += 10;
   if (r.heroImageCfImagesUrl) s += 10;
   if (r.phoneNumber) s += 5;
-  if (r.locationAddress && /\d/.test(r.locationAddress)) s += 3; // has a street number
+  if (r.locationAddress && /\d/.test(r.locationAddress)) s += 3;
   return s;
 }
 
-/** A row is "real" (a distinct genuine location) if it has a zip or a placeId.
- * Shells (city-only re-seed clones) have neither. */
+/**
+ * Determines if a store is considered a distinct physical site (requires zip or placeId).
+ */
 const isReal = (r: StoreRow) => Boolean(r.zipCode) || Boolean(r.placeId);
 
+const D1_IN_CHUNK = 90;
+
+/**
+ * Splits an array into smaller arrays of a specified size (defaults to D1_IN_CHUNK) to stay under D1's parameter limit.
+ */
+function chunk<T>(xs: T[], size = D1_IN_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Extracts the number of changed rows from a D1 result meta object.
+ */
+const changesOf = (r: unknown) => Number((r as { meta?: { changes?: number } })?.meta?.changes ?? 0);
+
+/**
+ * dedup_showroom_stores — MERGE duplicate showroom_stores rows into one canonical
+ * row. For each normalized-NAME group it picks the most-enriched row as
+ * the KEEPER, remaps every child/support row from the duplicates onto the keeper
+ * (deduping rows the keeper already has — links, hours, category/tag/brand/
+ * product/area mappings — so a merge never creates a second website link or trips
+ * a unique index), and then SOFT-DELETES the duplicate store (is_active = 0, never
+ * a hard delete — every showroom read path filters is_active = 1, and the row
+ * stays restorable).
+ *
+ * GROUPING (0046): rows are linked by ANY shared identity signal — Google
+ * `place_id`, phone, street address, website host, or normalized name — collected
+ * across `showroom_stores`, `showroom_store_locations` AND `showroom_pocs`, and
+ * unioned transitively (see `services/showroom/duplicate-signals.ts`). Name-only
+ * grouping missed every pair named even slightly differently: two real
+ * `Jack London Kitchen & Bath` / `…and Bath -Walnut Creek` rows never grouped at
+ * all, and were only identifiable because a POC on one carried the phone and
+ * street address of a location on the other.
+ *
+ * SAFETY: a group with >=2 "real" rows (each with its own zip/placeId) is treated
+ * as distinct chain BRANCHES and SKIPPED, never merged — widening detection must
+ * not widen what auto-merges. Those groups are reported as `branchCandidates`:
+ * under the multi-location model they should collapse into ONE store with many
+ * location rows, but that is a human-confirmed operation, not this tool's job.
+ * DRY-RUN by default: it reports the keep/delete map, the signal evidence behind
+ * every group, and per-table child-row counts so the merge is reviewable.
+ */
 export const dedupShowroomStores = defineTool({
   name: "dedup_showroom_stores",
   category: "showrooms",
-  title: "Dedup showroom stores (dry-run by default)",
+  title: "Merge & dedup showroom stores (dry-run by default)",
   description:
-    "Collapse duplicate `showroom_stores` rows left by a non-idempotent seed that was run multiple times. Groups " +
-    "stores by (normalized name + city); within a group it keeps the most-enriched row (real street address / " +
-    "placeId / coords / icon; lowest id breaks ties) and treats the rest as duplicates. SAFETY: a group where TWO " +
-    "or more rows are 'real' (each has its own zip or placeId) is treated as distinct branches of a chain and " +
-    "SKIPPED — never merged — so 'All Natural Stone' in four cities is left untouched. DRY-RUN by default: it " +
-    "reports the full keep/delete map plus, per duplicate, the count of child rows in every table with a FK to the " +
-    "store (so you can see whether any real data is attached). Pass `apply:true` ONLY after a human has approved " +
-    "the dry-run map — it reparents every child FK from each duplicate to the row being kept (UPDATE OR IGNORE for " +
-    "unique-mapping join tables, whose skipped rows are then cleaned by ON DELETE CASCADE) and then deletes the " +
-    "duplicate rows, in db.batch() units (D1 has no transactions), chunked under the 100-bound-parameter cap.",
+    "MERGE duplicate `showroom_stores` rows into one canonical row. Rows are grouped by ANY shared identity signal — " +
+    "Google `place_id`, phone (digits-only), street address, website host, or normalized name — gathered from the " +
+    "store row, its LOCATIONS and its POCs, then unioned transitively (A~B by phone + B~C by place_id = one group). " +
+    "Name normalization folds '&'/'and', strips a trailing '- City' branch suffix and legal suffixes, so " +
+    "'Jack London Kitchen & Bath' and 'Jack London Kitchen and Bath -Walnut Creek' finally match. Generic hosts " +
+    "(squarespace, wix, facebook…) are ignored so they cannot fuse unrelated stores. " +
+    "It picks the most-enriched row as the KEEPER, remaps every child/support row from the duplicates onto it " +
+    "(deduping rows the keeper already has — links, hours, category/tag/brand/product/area mappings — so the merge " +
+    "never creates a second website link or trips a unique index), then SOFT-DELETES the duplicate store " +
+    "(is_active = 0, never a hard delete; restorable). " +
+    "SAFETY: a group with TWO+ 'real' rows (each with its own zip/placeId) is distinct chain BRANCHES and is SKIPPED, " +
+    "never merged — returned as `branchCandidates` instead. Under the multi-location model those should become ONE " +
+    "store with many location rows (use add_showroom_location), but that is a human-confirmed call, not an " +
+    "auto-merge. DRY-RUN by default (writes nothing): returns the keep/delete map, the signal EVIDENCE behind every " +
+    "group, and per-table child-row counts so the merge is reviewable. Pass apply:true ONLY after a human approves " +
+    "the dry-run. Use limitGroups to pace. All writes are chunked under D1's 100-bound-param cap.",
   inputShape: {
     apply: z
       .boolean()
       .optional()
-      .describe("false/omitted = dry run (writes nothing). true = perform the reparent + delete."),
+      .describe("false/omitted = dry run (writes nothing). true = perform the merge + soft-delete."),
     limitGroups: z
       .number()
       .int()
@@ -117,128 +139,255 @@ export const dedupShowroomStores = defineTool({
   },
   annotations: DESTRUCTIVE,
   examples: [
-    { title: "Dry run — show the keep/delete map + child counts", args: {} },
+    { title: "Dry run — keep/delete map + child counts", args: {} },
     { title: "Apply after approval", args: { apply: true } },
   ],
   handler: async ({ db }, input) => {
     const apply = input.apply === true;
 
-    const all = await db.select().from(showroomStores).all();
+    const all: StoreRow[] = await db
+      .select({
+        id: showroomStores.id,
+        name: showroomStores.name,
+        locationCity: showroomStores.locationCity,
+        locationAddress: showroomStores.locationAddress,
+        zipCode: showroomStores.zipCode,
+        placeId: showroomStores.placeId,
+        latitude: showroomStores.latitude,
+        longitude: showroomStores.longitude,
+        iconCfImagesUrl: showroomStores.iconCfImagesUrl,
+        heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
+        phoneNumber: showroomStores.phoneNumber,
+        isActive: showroomStores.isActive,
+      })
+      .from(showroomStores)
+      .all();
 
-    // Group by (name, city).
-    const groups = new Map<string, StoreRow[]>();
+    // ── Identity signals, gathered from the store row + its locations + its POCs ──
+    // A store's own columns are not enough: the two real Jack London rows sat on
+    // different domains and were only linked because a POC on one carried the
+    // phone + street address of a location on the other.
+    const byId = new Map<number, StoreRow>(all.map((r) => [r.id, r]));
+    const identities = new Map<number, StoreIdentity>();
+
+    /**
+     * Retrieves or initializes the identity tracker for a given store ID.
+     */
+    const identityFor = (storeId: number) => {
+      let i = identities.get(storeId);
+      if (!i) identities.set(storeId, (i = emptyIdentity(storeId)));
+      return i;
+    };
+
     for (const r of all) {
-      const key = `${norm(r.name)}||${cityKey(r)}`;
-      const arr = groups.get(key);
-      if (arr) arr.push(r);
-      else groups.set(key, [r]);
+      const i = identityFor(r.id);
+      i.name = normName(r.name);
+      if (r.placeId) i.placeIds.add(r.placeId);
+      const phone = normPhone(r.phoneNumber);
+      if (phone) i.phones.add(phone);
+      const addr = normAddress(r.locationAddress);
+      if (addr) i.addresses.add(addr);
     }
 
-    type Plan = { key: string; keepId: number; keepName: string; deleteIds: number[] };
-    const plans: Plan[] = [];
-    const ambiguous: Array<{ key: string; ids: number[]; reason: string }> = [];
+    // place_id ONLY — deliberately NOT the street parts.
+    //
+    // showroom_store_locations has no suite/unit column, so its street data is
+    // BUILDING-level: every tenant of one address normalizes identically. On live
+    // data that pulled "Leandro Quintal" (1775 Monterey Rd #64A) into the Marblus
+    // Granite group (#40C) — a different company in the same industrial park —
+    // because both location rows read plainly "1775 Monterey Rd". The MAX_WEAK_FANOUT
+    // cap did not catch it: only two rows shared the value, and the group already
+    // carried a strong `name` link between the two genuine Marblus rows, so the
+    // weak-only guard never fired either. The bad edge simply rode in on transitivity.
+    //
+    // The store's own `location_address` DOES carry the suite (Places formats it in),
+    // so unit-level address matching is preserved above; a location's place_id is the
+    // reliable per-site identity. Its suite-less street adds only false positives.
+    const locRows = await db
+      .select({
+        storeId: showroomStoreLocations.storeId,
+        placeId: showroomStoreLocations.placeId,
+      })
+      .from(showroomStoreLocations)
+      .all();
+    for (const l of locRows) {
+      if (!byId.has(l.storeId)) continue;
+      if (l.placeId) identityFor(l.storeId).placeIds.add(l.placeId);
+    }
 
-    for (const [key, rows] of groups) {
-      if (rows.length < 2) continue; // unique — nothing to do
+    const pocRows = await db
+      .select({
+        showroomId: showroomPocs.showroomId,
+        phone: showroomPocs.phone,
+        address: showroomPocs.address,
+      })
+      .from(showroomPocs)
+      .all();
+    for (const p of pocRows) {
+      if (!byId.has(p.showroomId)) continue;
+      const i = identityFor(p.showroomId);
+      const phone = normPhone(p.phone);
+      if (phone) i.phones.add(phone);
+      const addr = normAddress(p.address);
+      if (addr) i.addresses.add(addr);
+    }
+
+    // ONLY type = WEBSITE. showroom_store_links also holds social/profile links,
+    // and those are shared by definition — linkedin.com, youtube.com, houzz.com
+    // and x.com alone fused 36 unrelated stores into a single component on the
+    // live directory. A store's own domain identifies the business; its Houzz
+    // profile identifies Houzz.
+    const linkRows = await db
+      .select({ storeId: showroomStoreLinks.storeId, url: showroomStoreLinks.url })
+      .from(showroomStoreLinks)
+      .where(eq(showroomStoreLinks.type, "WEBSITE"))
+      .all();
+    for (const l of linkRows) {
+      if (!byId.has(l.storeId)) continue;
+      const host = normHost(l.url);
+      if (host) identityFor(l.storeId).hosts.add(host);
+    }
+
+    const signalGroups = groupBySignals(Array.from(identities.values()));
+
+    type Plan = {
+      keepId: number;
+      keepName: string;
+      deleteIds: number[];
+      linkedBy: SignalKind[];
+    };
+    const plans: Plan[] = [];
+    /** Chain branches — real, distinct sites. Never auto-merged; a 0046 backlog. */
+    const branchCandidates: Array<{
+      key: string;
+      ids: number[];
+      names: string[];
+      linkedBy: SignalKind[];
+      evidence: Array<{ signal: SignalKind; value: string; storeIds: number[] }>;
+      reason: string;
+    }> = [];
+
+    for (const g of signalGroups) {
+      const rows = g.storeIds.map((id) => byId.get(id)).filter((r): r is StoreRow => Boolean(r));
+      if (rows.length < 2) continue;
+
       const reals = rows.filter(isReal);
-      if (reals.length >= 2) {
-        // Two distinct genuine locations sharing (name, city). Do NOT merge —
-        // that would destroy a real store. Leave the whole group for a human.
-        ambiguous.push({
-          key,
+
+      // Two guards, both routing to human review rather than auto-merge:
+      //  1. >=2 "real" rows are distinct SITES — chain branches, not duplicates.
+      //  2. a group held together only by a shared address/phone is co-located
+      //     businesses (Walker Zanger and New Century Kitchen & Bath share a
+      //     street; DEGREE HVAC and CB Showers share one too). Never merge on
+      //     that alone, however few rows it involves.
+      const weakOnly = !g.hasStrongSignal;
+      if (reals.length >= 2 || weakOnly) {
+        branchCandidates.push({
+          key: normName(rows[0].name),
           ids: rows.map((r) => r.id).sort((a, b) => a - b),
-          reason: `${reals.length} rows have their own zip/placeId — distinct locations, not duplicates`,
+          names: rows.map((r) => r.name),
+          linkedBy: g.signals,
+          // Trim the evidence to what a reviewer needs; place ids/addresses are long.
+          evidence: g.evidence.slice(0, 8),
+          reason: weakOnly
+            ? `Linked only by ${g.signals.join(", ")} — a shared address or phone means a shared BUILDING ` +
+              `or switchboard, not one business. Review by hand; never auto-merged.`
+            : `${reals.length} rows have their own zip/placeId — distinct SITES of what looks like one ` +
+              `business (linked by ${g.signals.join(", ")}). Under the multi-location model these should ` +
+              `become ONE store with ${reals.length} location rows. Not auto-merged — confirm, then use ` +
+              `add_showroom_location.`,
         });
         continue;
       }
-      // 0 or 1 real row: the rest are city-only shells → safe to collapse.
-      const sorted = [...rows].sort((a, b) => score(b) - score(a) || a.id - b.id);
-      const keep = sorted[0];
-      const deleteIds = sorted.slice(1).map((r) => r.id);
-      plans.push({ key, keepId: keep.id, keepName: keep.name, deleteIds });
+
+      // Merge ONLY among the active rows. Two rules ride on this:
+      //   - The keeper is the highest-scoring ACTIVE row, never an inactive one.
+      //     Scoring alone could put a soft-deleted row first, and keeping a dead
+      //     row while retiring live duplicates behind it hides real data.
+      //   - Already-soft-deleted losers are done — their children were remapped by
+      //     the run that retired them. Excluding them lets the dry run report
+      //     "clean" after an apply instead of re-listing every retired group.
+      // With fewer than two active rows there is nothing to merge. (`is_active` is
+      // NOT NULL in the schema; the explicit `=== true` states the intent anyway.)
+      const active = [...rows]
+        .filter((r) => r.isActive === true)
+        .sort((a, b) => score(b) - score(a) || a.id - b.id);
+      if (active.length < 2) continue;
+
+      const [keeper, ...losers] = active;
+      plans.push({
+        keepId: keeper.id,
+        keepName: keeper.name,
+        deleteIds: losers.map((r) => r.id),
+        linkedBy: g.signals,
+      });
     }
 
     plans.sort((a, b) => a.keepId - b.keepId);
     const scoped = input.limitGroups ? plans.slice(0, input.limitGroups) : plans;
     const allDeleteIds = scoped.flatMap((p) => p.deleteIds);
 
-    // Count child rows attached to the delete-ids, per table. This is the
-    // "is any real data attached?" signal the human reviews before approving.
-    const D1_IN_CHUNK = 90;
-    const childCounts: Record<string, number> = {};
-    if (allDeleteIds.length > 0) {
-      for (const fk of CHILD_FKS) {
-        let total = 0;
-        for (let i = 0; i < allDeleteIds.length; i += D1_IN_CHUNK) {
-          const chunk = allDeleteIds.slice(i, i + D1_IN_CHUNK);
-          const rows = await db.all<{ n: number }>(
-            sql`SELECT COUNT(*) AS n FROM ${sql.raw(fk.table)} WHERE ${sql.raw(fk.col)} IN (${sql.join(
-              chunk.map((id) => sql`${id}`),
-              sql`, `,
-            )})`,
-          );
-          total += Number(rows?.[0]?.n ?? 0);
-        }
-        if (total > 0) childCounts[`${fk.table}.${fk.col}`] = total;
-      }
-    }
+    // Per-table child-row counts on the delete set (the review signal).
+    const childCounts = await countStoreChildren(db, allDeleteIds);
 
     if (!apply) {
       return {
         mode: "dry-run",
         totalStores: all.length,
         duplicateGroups: scoped.length,
-        rowsToDelete: allDeleteIds.length,
+        rowsToMerge: allDeleteIds.length,
         rowsAfter: all.length - allDeleteIds.length,
-        ambiguousGroupsSkipped: ambiguous,
-        childRowsToReparent: childCounts,
-        plan: scoped.map((p) => ({ keepId: p.keepId, keepName: p.keepName, deleteIds: p.deleteIds })),
+        branchCandidates,
+        childRowCounts: childCounts,
+        plan: scoped,
         note:
-          "Nothing was written. Review the plan + childRowsToReparent, then re-run with apply:true to execute. " +
-          "ambiguousGroupsSkipped are left untouched on purpose.",
+          "Nothing was written. Review the plan + childRowCounts, then re-run with apply:true. Each plan entry " +
+          "carries `linkedBy` — the signals that grouped it (place_id/phone/address/website/name) — so you can see " +
+          "WHY rows were matched. Child rows are remapped to the keeper (deduped where the keeper already has " +
+          "them); each duplicate store is then soft-deleted (is_active = 0), not hard-deleted. " +
+          "`branchCandidates` are NEVER touched by apply:true: they are two or more REAL sites of what looks like " +
+          "one business, and under the multi-location model they should become one store with several location " +
+          "rows. Confirm each, then fold them in with add_showroom_location.",
       };
     }
 
-    // ── APPLY ────────────────────────────────────────────────────────────────
-    // Reparent every child FK from the losers to the keeper, then delete losers.
-    // Sequential per group so a keepId is never itself a deleteId elsewhere.
-    let reparented = 0;
+    // ── APPLY: merge children into the keeper, then soft-delete the duplicates.
+    let childRowsMoved = 0;
+    let storesMerged = 0;
     for (const p of scoped) {
       if (p.deleteIds.length === 0) continue;
-      for (const fk of CHILD_FKS) {
-        for (let i = 0; i < p.deleteIds.length; i += D1_IN_CHUNK) {
-          const chunk = p.deleteIds.slice(i, i + D1_IN_CHUNK);
-          const verb = fk.uniqueMapping ? sql.raw("UPDATE OR IGNORE") : sql.raw("UPDATE");
-          const res = await db.run(
-            sql`${verb} ${sql.raw(fk.table)} SET ${sql.raw(fk.col)} = ${p.keepId} WHERE ${sql.raw(
-              fk.col,
-            )} IN (${sql.join(
-              chunk.map((id) => sql`${id}`),
-              sql`, `,
-            )})`,
-          );
-          reparented += Number((res as { meta?: { changes?: number } })?.meta?.changes ?? 0);
-        }
+
+      // Move every child/support row onto the keeper (shared with the 0047 collapse path).
+      childRowsMoved += await remapStoreChildren(db, p.keepId, p.deleteIds);
+
+      // SOFT-DELETE the now-emptied duplicate store rows.
+      for (const ids of chunk(p.deleteIds)) {
+        const res = await db
+          .update(showroomStores)
+          .set({ isActive: false, keeperStoreId: p.keepId, updatedAt: new Date() })
+          .where(inArray(showroomStores.id, ids))
+          .run();
+        storesMerged += changesOf(res);
       }
     }
 
-    // Delete the losers. Cascade removes any OR-IGNORE-skipped rows in the
-    // unique-mapping (cascade) tables.
-    let deleted = 0;
-    for (let i = 0; i < allDeleteIds.length; i += D1_IN_CHUNK) {
-      const chunk = allDeleteIds.slice(i, i + D1_IN_CHUNK);
-      const res = await db.delete(showroomStores).where(inArray(showroomStores.id, chunk)).run();
-      deleted += Number((res as { meta?: { changes?: number } })?.meta?.changes ?? 0);
-    }
+    // Authoritative active count from the live table — never derive it by
+    // arithmetic (a prior version conflated store deletes with dropped child
+    // rows and mis-reported the total). storesSoftDeleted counts only the
+    // is_active=0 updates; childRowsMoved counts only child remaps — kept
+    // separate so neither inflates the other.
+    const [{ n: totalActiveAfter } = { n: 0 }] = await db
+      .select({ n: count() })
+      .from(showroomStores)
+      .where(eq(showroomStores.isActive, true));
 
     return {
       mode: "apply",
       totalStoresBefore: all.length,
       duplicateGroups: scoped.length,
-      childRowsReparented: reparented,
-      rowsDeleted: deleted,
-      totalStoresAfter: all.length - deleted,
-      ambiguousGroupsSkipped: ambiguous,
+      childRowsMoved,
+      storesSoftDeleted: storesMerged,
+      totalActiveAfter,
+      branchCandidates,
     };
   },
 });

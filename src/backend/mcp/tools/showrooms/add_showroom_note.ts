@@ -1,4 +1,5 @@
 import { showroomStores, storeNotes } from "@backend/db";
+import { renderNoteHtml } from "@backend/services/notes/markdown";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -12,7 +13,7 @@ export const addShowroomNote = defineTool({
   category: "showrooms",
   title: "Record a showroom note",
   description:
-    "Append a freeform note to a showroom (the 'record a visit note' tool). Body is Markdown and is stored in both `contentMarkdown` and the legacy `note` column. Pass an optional `title` and `tags` (string[]). Validates the showroom exists first.",
+    "Append a freeform note to a showroom (the 'record a visit note' tool). `body` is Markdown — that is the source of truth; the render-ready HTML is derived server-side and stored in `contentHtml`, so DO NOT send HTML. Use plain Markdown (headings `#`, `-`/`1.` lists, `**bold**`, `*italic*`, `[text](https://url)`). Pass an optional `title` and `tags` (string[]). Validates the showroom exists first.",
   inputShape: {
     storeId: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
     title: z.string().optional().describe("Short display title for the note"),
@@ -53,6 +54,7 @@ export const addShowroomNote = defineTool({
         storeId: input.storeId,
         title: input.title,
         contentMarkdown: body,
+        contentHtml: renderNoteHtml(body),
         note: body,
         tagsJson: input.tags ? JSON.stringify(input.tags) : undefined,
       })

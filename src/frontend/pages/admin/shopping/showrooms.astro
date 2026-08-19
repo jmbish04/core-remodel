@@ -2,13 +2,13 @@
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { ShowroomsDirectoryApp } from "@/components/showroom/ShowroomsDirectoryApp";
 
-// Bare /admin/shopping/showrooms defaults to the map tab. The island rewrites
-// the URL to /admin/shopping/showrooms/map on first tab interaction.
+// Bare /admin/shopping/showrooms defaults to the grouped tab. The island
+// rewrites the URL to /admin/shopping/showrooms/grouped on first tab interaction.
 ---
 
 <BaseLayout
   title="Showrooms — The Monolith"
-  description="Bay Area showroom directory with a hub map, filters, and grouped list/directory views."
+  description="Bay Area showroom directory: region tabs, live grouped tables, and a hub map."
 >
-  <ShowroomsDirectoryApp client:only="react" initialTab="map" />
+  <ShowroomsDirectoryApp client:only="react" initialTab="grouped" />
 </BaseLayout>

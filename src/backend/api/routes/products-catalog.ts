@@ -137,13 +137,13 @@ productsCatalogRouter.get("/catalog", async (c) => {
   const [purchasedRows, wishlistedRows, priceRows, imageRows, photoRows] = await Promise.all([
     perChunk((chunk) =>
       db
-        .select({ purchasedShowroomProductId: materialScheduleItems.purchasedShowroomProductId })
+        .select({ productId: materialScheduleItems.productId })
         .from(materialScheduleItems)
         .where(
           and(
             eq(materialScheduleItems.isPurchased, true),
-            isNotNull(materialScheduleItems.purchasedShowroomProductId),
-            inArray(materialScheduleItems.purchasedShowroomProductId, chunk),
+            isNotNull(materialScheduleItems.productId),
+            inArray(materialScheduleItems.productId, chunk),
           ),
         ),
     ),
@@ -184,7 +184,7 @@ productsCatalogRouter.get("/catalog", async (c) => {
   // guaranteed within a chunk; fine here since each product's rows stay together
   // (filtered by that product's id) — cross-chunk mixing can't reorder a product.
 
-  const purchasedSet = new Set(purchasedRows.map((r) => r.purchasedShowroomProductId).filter((v): v is number => v != null));
+  const purchasedSet = new Set(purchasedRows.map((r) => r.productId).filter((v): v is number => v != null));
   const wishlistedSet = new Set(wishlistedRows.map((r) => r.showroomStoreProductId).filter((v): v is number => v != null));
 
   const minPriceMap = new Map<number, number>();

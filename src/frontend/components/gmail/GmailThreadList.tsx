@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Building2, Search } from "lucide-react";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -137,6 +137,15 @@ export function GmailThreadList({
                     }`}
                   >
                     <Avatar className="size-9 shrink-0 bg-primary/10 text-primary">
+                      {t.logoUrl && /^https:\/\/imagedelivery\.net\//.test(t.logoUrl) ? (
+                        <AvatarImage
+                          src={t.logoUrl}
+                          alt=""
+                          className="object-contain"
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                        />
+                      ) : null}
                       <AvatarFallback className="bg-primary/10 text-primary">
                         {from ? initialsFromAddress(from) : "?"}
                       </AvatarFallback>

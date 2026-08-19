@@ -15,10 +15,21 @@ import { AlertCircle, ChevronRight, Loader2, MapPinned, Route, Zap } from "lucid
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { DriveMapThumb, type LatLng } from "./DriveMapThumb";
+import { TeslaStreamControl } from "./TeslaStreamControl";
 
 type DriveListSummary = {
   id: number;
@@ -58,9 +69,17 @@ function ProgressBar({ pct }: { pct: number }) {
   );
 }
 
+/**
+ * Showroom Drives landing island: the stream-ingest control, then drive sheets
+ * bucketed into Pending / In progress / Finished with a per-card active toggle.
+ * @returns The drives dashboard (no props).
+ */
 export function DriveListsApp() {
   const [drives, setDrives] = useState<DriveListSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Slug the user is trying to activate while another drive is already active —
+  // set while the "switch the active drive?" confirmation is open.
+  const [confirmSlug, setConfirmSlug] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -174,13 +193,27 @@ export function DriveListsApp() {
     }
   };
 
+  // The one currently-active drive (if any), used to name what a switch replaces.
+  const currentActive = drives.find((d) => d.isActive) ?? null;
+
+  // Turning a drive ON while another is active asks first; everything else
+  // (turning the active one OFF, or activating when none is active) goes direct.
+  const requestSetActive = (slug: string, next: boolean) => {
+    if (next && currentActive && currentActive.slug !== slug) {
+      setConfirmSlug(slug);
+      return;
+    }
+    void setActive(slug, next);
+  };
+  const confirmTarget = confirmSlug ? drives.find((d) => d.slug === confirmSlug) ?? null : null;
+
   const grid = (list: DriveListSummary[], emptyLabel: string) =>
     list.length === 0 ? (
       <p className="py-12 text-center text-sm text-muted-foreground">{emptyLabel}</p>
     ) : (
       <div className="grid gap-4 sm:grid-cols-2">
         {list.map((d) => (
-          <DriveCard key={d.id} drive={d} onSetActive={setActive} />
+          <DriveCard key={d.id} drive={d} onSetActive={requestSetActive} />
         ))}
       </div>
     );
@@ -192,6 +225,7 @@ export function DriveListsApp() {
   return (
     <div>
       {header}
+      <TeslaStreamControl />
       <Tabs defaultValue={partial.length ? "partial" : "pending"}>
         <TabsList className="mb-6">
           <TabsTrigger value="pending">Pending ({pending.length})</TabsTrigger>
@@ -208,6 +242,38 @@ export function DriveListsApp() {
           {grid(finished, "No finished drives yet — a drive finishes when every stop is visited.")}
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={confirmSlug !== null} onOpenChange={(o) => !o && setConfirmSlug(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch the active drive?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmTarget && currentActive ? (
+                <>
+                  Making <span className="font-semibold text-foreground">{confirmTarget.title}</span>{" "}
+                  active will mark{" "}
+                  <span className="font-semibold text-foreground">{currentActive.title}</span> as
+                  inactive. Only one drive can be active at a time.
+                </>
+              ) : (
+                "Only one drive can be active at a time."
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const slug = confirmSlug;
+                setConfirmSlug(null);
+                if (slug) void setActive(slug, true);
+              }}
+            >
+              Yes, make this active
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

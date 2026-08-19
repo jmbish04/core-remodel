@@ -1,0 +1,42 @@
+---
+/** @fileoverview Canonical Pascal Layout Studio route (0043 Phase 4). */
+import { PascalLayoutStudioApp } from "@/components/pascal/PascalLayoutStudioApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+const projectId = Astro.url.searchParams.get("project") ?? undefined;
+const { env } = Astro.locals.runtime;
+const editorUrl = env.PASCAL_EDITOR_URL;
+---
+
+<BaseLayout
+  title="Layout Studio - Remodel Mission Control"
+  description="Create and compare measured floorplan variants that open in the Pascal editor."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8 flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-6 text-muted-foreground" aria-hidden="true">
+            <path d="M3 3h18v18H3z"></path><path d="M9 3v18"></path><path d="M9 9h12"></path><path d="M3 15h6"></path>
+          </svg>
+          Layout Studio
+        </h1>
+        <p class="text-muted-foreground">
+          Create and compare measured layouts in Pascal.
+        </p>
+      </div>
+      <a
+        href={editorUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-muted"
+      >
+        Open blank editor
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+        </svg>
+      </a>
+    </div>
+    <PascalLayoutStudioApp projectId={projectId} client:only="react" />
+  </main>
+</BaseLayout>

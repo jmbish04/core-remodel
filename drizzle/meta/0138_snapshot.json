@@ -2,7 +2,7 @@
   "version": "6",
   "dialect": "sqlite",
   "id": "83140bee-c401-481c-966d-f60eb6feb210",
-  "prevId": "80222eba-8203-4a96-91a3-fadcb40df514",
+  "prevId": "ec3fed93-f9e1-4b4f-87ad-acb3aaabe71e",
   "tables": {
     "users": {
       "name": "users",
@@ -4838,6 +4838,41 @@
           "notNull": true,
           "autoincrement": false,
           "default": "(unixepoch())"
+        },
+        "floorplan_bbox_x_pct": {
+          "name": "floorplan_bbox_x_pct",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "floorplan_bbox_y_pct": {
+          "name": "floorplan_bbox_y_pct",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "floorplan_bbox_w_pct": {
+          "name": "floorplan_bbox_w_pct",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "floorplan_bbox_h_pct": {
+          "name": "floorplan_bbox_h_pct",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "floorplan_crop_cf_image_id": {
+          "name": "floorplan_crop_cf_image_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

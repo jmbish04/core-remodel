@@ -39,8 +39,60 @@ export const PLAN_FURNISH_LOCK = [
   "- Remove any text labels/annotations; do NOT add new text.",
 ].join("\n");
 
+/** Post-production: nothing in the scene changes, only light/color is corrected. */
+export const POST_PRODUCTION_LOCK = [
+  "- PRESERVE EXACTLY (do not change in any way): every object, material, surface, fixture, furniture piece, the layout, the composition, the framing, and the camera angle.",
+  "- Change ONLY the requested lighting or color property. Do NOT add, remove, move, restyle, or re-render anything in the scene.",
+].join("\n");
+
+/** plan → isometric: program & walls preserved, projection intentionally changes. */
+export const ISO_LOCK = [
+  "- PRESERVE EXACTLY: the room layout, the number and arrangement of rooms, every wall and opening position, and the overall proportions of the plan.",
+  "- CHANGE the projection: render the plan as a clean 3D isometric 'dollhouse' view with low walls, as the goal.",
+  "- Do NOT add, remove, merge, or move any room, wall, door, or window.",
+].join("\n");
+
+/** evolution-grid: a 2×2 storyboard of one space at four design stages. */
+export const GRID_LOCK = [
+  "- Output a SINGLE image composed of a 2×2 grid of four panels.",
+  "- Every panel shows the SAME space from the SAME viewpoint — only the design completeness changes across the four panels (e.g. empty → rough layout → materials → fully finished).",
+  "- Do NOT change the room's architecture, dimensions, or camera between panels.",
+].join("\n");
+
+/** sketch → photoreal: keep the drawn composition, render it real. */
+export const SKETCH_LOCK = [
+  "- PRESERVE the drawn composition, layout, proportions, and viewpoint of the sketch.",
+  "- Render it as a photorealistic interior, materializing the sketched design intent with believable materials, lighting, and depth.",
+  "- Do NOT add rooms, walls, or major elements the sketch does not imply.",
+].join("\n");
+
+/** 2D elevation → photoreal: keep the elevation, add materials + depth. */
+export const ELEVATION_LOCK = [
+  "- PRESERVE EXACTLY: the elevation's proportions, every opening/door/window/cabinet position, and the head-on framing.",
+  "- Render it as a photorealistic front-on view with realistic materials, finishes, hardware, and subtle depth/shadow.",
+  "- Do NOT move, add, or remove any element from the drawing.",
+].join("\n");
+
+/** closed cabinet/wardrobe → interior reveal: open it, keep the shell. */
+export const REVEAL_LOCK = [
+  "- PRESERVE the cabinet/wardrobe's exterior position, size, style, and the surrounding scene.",
+  "- OPEN the doors/drawers and reveal a plausible, tidily organized interior — that is the goal.",
+  "- Do NOT change the room, the camera, or the unit's outer dimensions.",
+].join("\n");
+
 /** Recipe ids wired end-to-end. */
-export type RecipeId = "material-swap" | "mix" | "clay-to-photoreal" | "floor-plan-furnish";
+export type RecipeId =
+  | "material-swap"
+  | "mix"
+  | "clay-to-photoreal"
+  | "floor-plan-furnish"
+  | "tone-unify"
+  | "lighting-enhance"
+  | "plan-to-isometric"
+  | "evolution-grid"
+  | "sketch-to-render"
+  | "elevation-render"
+  | "cabinet-reveal";
 
 /**
  * How a recipe hands images to `runStage`:
@@ -124,6 +176,96 @@ export const RECIPES: Record<RecipeId, RecipeDef> = {
     defaultUserRequest:
       "Furnish every room appropriately for its function, keeping the plan's structure intact.",
     guardrail: PLAN_FURNISH_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
+  },
+  "tone-unify": {
+    id: "tone-unify",
+    label: "Clean up the color",
+    category: "post",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural photo colorist. Correct the white balance and unify the color temperature of the provided image based on the user's request.",
+    defaultUserRequest:
+      "Neutralize color casts and unify the white balance to a natural, consistent temperature.",
+    guardrail: POST_PRODUCTION_LOCK,
+    referencesHeader: "Reference images (target palette only):",
+  },
+  "lighting-enhance": {
+    id: "lighting-enhance",
+    label: "Even out the lighting",
+    category: "post",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural lighting artist. Enhance the lighting of the provided image based on the user's request — recover shadow detail, balance exposure, and make the light falloff realistic.",
+    defaultUserRequest:
+      "Even out the exposure, recover shadow detail, and make the lighting look natural.",
+    guardrail: POST_PRODUCTION_LOCK,
+    referencesHeader: "Reference images (lighting mood only):",
+  },
+  "plan-to-isometric": {
+    id: "plan-to-isometric",
+    label: "Turn plan into a dollhouse",
+    category: "plan",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural illustrator. Convert the provided 2D floor plan into a 3D isometric 'dollhouse' view based on the user's request.",
+    defaultUserRequest:
+      "Render this floor plan as a clean, furnished 3D isometric dollhouse with low walls.",
+    guardrail: ISO_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
+  },
+  "sketch-to-render": {
+    id: "sketch-to-render",
+    label: "Make my sketch real",
+    category: "concept",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural visualizer. Turn the provided hand-drawn sketch into a photorealistic interior based on the user's request.",
+    defaultUserRequest: "Render this sketch photorealistically, keeping its composition and intent.",
+    guardrail: SKETCH_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
+  },
+  "elevation-render": {
+    id: "elevation-render",
+    label: "Render this elevation",
+    category: "technical",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural renderer. Turn the provided 2D elevation drawing into a photorealistic head-on view based on the user's request.",
+    defaultUserRequest:
+      "Render this elevation photorealistically with real materials and finishes, head-on.",
+    guardrail: ELEVATION_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
+  },
+  "cabinet-reveal": {
+    id: "cabinet-reveal",
+    label: "Open it up",
+    category: "detail",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural photo editor. Open the closed cabinet / wardrobe in the provided image and reveal a tidy, organized interior, per the user's request.",
+    defaultUserRequest:
+      "Open the doors and drawers and show a plausible, well-organized interior.",
+    guardrail: REVEAL_LOCK,
+    referencesHeader: "Reference images (interior style only):",
+  },
+  "evolution-grid": {
+    id: "evolution-grid",
+    label: "Show it evolving",
+    category: "explore",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an architectural design storyteller. Produce a single 2×2 grid image showing the provided space evolving across four design stages, based on the user's request.",
+    defaultUserRequest:
+      "Show a 2×2 grid of the same space: empty, rough layout, materials added, then fully finished.",
+    guardrail: GRID_LOCK,
     referencesHeader: "Style reference images (material/palette only):",
   },
 };

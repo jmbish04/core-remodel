@@ -1,3 +1,5 @@
+import type { BatchItem } from "drizzle-orm/batch";
+
 import {
   budgetExpenseEntries,
   budgetFundingAccounts,
@@ -8,7 +10,6 @@ import {
   rooms,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
-import type { BatchItem } from "drizzle-orm/batch";
 import { desc, eq, inArray, max, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -29,6 +30,7 @@ type BudgetTrackerPatch = {
   estimatedLowCents?: number | string | null;
   estimatedHighCents?: number | string | null;
   scenarioId?: string | null;
+  phaseId?: number | null;
   owner?: string | null;
   aiRationale?: string | null;
   isDraft?: boolean | null;
@@ -41,6 +43,8 @@ type BudgetExpensePatch = {
   item?: string | null;
   category?: string | null;
   amountCents?: number | string | null;
+  /** Links this expense to a budget line (budget_tracker_items.trackId) so it rolls into that line's Actuals. */
+  budgetItemTrackId?: string | null;
   vendorName?: string | null;
   scenarioId?: string | null;
   optionGroup?: string | null;
@@ -84,7 +88,11 @@ function parseTimestamp(input: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-async function emitBudgetRealtime(env: Env, payload: Record<string, unknown>): Promise<void> {
+// Exported so sibling budget routers (e.g. budget-grid.ts) don't retype this.
+export async function emitBudgetRealtime(
+  env: Env,
+  payload: Record<string, unknown>,
+): Promise<void> {
   try {
     await publishRealtimeEvent(env, "home", {
       ...payload,
@@ -188,6 +196,14 @@ async function replaceBudgetTrackerItemRevision(
           : (parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents),
       scenarioId:
         patch.scenarioId === null ? null : normalizeString(patch.scenarioId) || current.scenarioId,
+      // Carry the grid phase forward across revisions: undefined = keep current,
+      // explicit null = unassign. Without this line, any edit silently wipes the
+      // phase (and the item drops back into the grid's "Unphased" group).
+      phaseId: patch.phaseId === undefined ? current.phaseId : patch.phaseId,
+      // Variance note has no PATCH field yet — carry it forward so an unrelated
+      // edit can't drop the authored note (0035 write-contract).
+      varianceNoteMarkdown: current.varianceNoteMarkdown,
+      varianceNoteHtml: current.varianceNoteHtml,
       owner: patch.owner === null ? null : normalizeString(patch.owner) || current.owner,
       aiRationale:
         patch.aiRationale === null
@@ -837,6 +853,9 @@ budgetTrackerRouter.post("/expenses", async (c) => {
         item,
         category,
         amountCents,
+        // Optional link to a budget line so the amount rolls into that line's
+        // Actuals in the time-phased grid (0035). Null = unattributed expense.
+        budgetItemTrackId: normalizeString(body.budgetItemTrackId),
         vendorName: normalizeString(body.vendorName),
         scenarioId: normalizeString(body.scenarioId),
         optionGroup: normalizeString(body.optionGroup),

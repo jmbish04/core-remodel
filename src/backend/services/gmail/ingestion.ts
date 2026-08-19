@@ -28,11 +28,31 @@ import {
 } from "@backend/db";
 
 import { getGmailAccessToken } from "./auth";
-import { extractMessage, getMessage, searchMessages } from "./client";
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
+
+import { classifyMessage } from "./classify-message";
+import {
+  extractMessage,
+  getMessage,
+  getRawMessage,
+  searchMessages,
+  type GmailMessagePart,
+  type GmailMessagePayload,
+} from "./client";
+import { GATE_DECISION } from "./ingest-gate";
 import { PUBLIC_EMAIL_DOMAINS, buildParticipantRows, insertParticipants } from "./participants";
 
 /** D1's hard limit on bound parameters per statement (see documents/db-helpers.ts). */
 const D1_MAX_BOUND_PARAMS = 100;
+
+/** True if the payload tree contains any part with a filename (an attachment). */
+function payloadHasAttachment(
+  part: GmailMessagePart | GmailMessagePayload | undefined,
+): boolean {
+  if (!part) return false;
+  if ("filename" in part && part.filename && part.filename.trim() !== "") return true;
+  return (part.parts ?? []).some((child) => payloadHasAttachment(child));
+}
 
 /** Cap on new messages ingested per company per run — keeps cron ticks bounded. */
 const MAX_NEW_MESSAGES_PER_COMPANY = 25;
@@ -300,6 +320,12 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
       from: string;
       toRecipients: string[];
     }[] = [];
+    // Messages to bridge into the worker-email processEmail pipeline (0041): a
+    // purchase document (receipt/invoice/quote) OR anything with an attachment
+    // (contracts/receipts arrive as PDFs). We DON'T bridge every message here —
+    // that would run the AI pipeline on general mail; Path B already bridges all
+    // domain-matched mail. This catches purchase docs on the company-sync path.
+    const toBridge: { gmailMessageId: string; messageIdHeader: string | null; from: string; to: string }[] = [];
 
     for (const { messageId, full } of fetched) {
       const extracted = extractMessage(full);
@@ -357,6 +383,13 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
       }
 
       const ragUuid = crypto.randomUUID();
+      // Deterministic gating (0041) — spam flag + purchase-doc classification, no AI.
+      const gate = classifyMessage({
+        from: extracted.from ?? "",
+        subject: extracted.subject ?? "",
+        body: extracted.body,
+        hasAttachments: payloadHasAttachment(full.payload),
+      });
       messageStatements.push(
         db
           .insert(gmailMessages)
@@ -368,6 +401,11 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
             toRecipientsJson: JSON.stringify([...extracted.to, ...extracted.cc]),
             subject: extracted.subject || null,
             body: extracted.body,
+            bodyPlainTxt: extracted.body,
+            bodyHtml: extracted.html ? sanitizeNoteHtml(extracted.html) : null,
+            classification: gate.classification,
+            isSpam: gate.isSpam,
+            spamRationale: gate.spamRationale,
             ragUuid,
           })
           .onConflictDoNothing(),
@@ -380,6 +418,19 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
         from: extracted.from,
         toRecipients: [...extracted.to, ...extracted.cc],
       });
+
+      const isPurchaseDoc =
+        gate.classification === "receipt" ||
+        gate.classification === "invoice" ||
+        gate.classification === "quote";
+      if (isPurchaseDoc || payloadHasAttachment(full.payload)) {
+        toBridge.push({
+          gmailMessageId: messageId,
+          messageIdHeader: extracted.messageIdHeader,
+          from: extracted.from,
+          to: extracted.to[0] ?? "justin@126colby.com",
+        });
+      }
     }
 
     try {
@@ -391,6 +442,30 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
 
     for (const item of toEmbed) {
       await embedMessage(env, item.ragUuid, item.messageId, item.nativeThreadId, item.body);
+    }
+
+    // Bridge purchase-doc / attachment-bearing messages into the shared
+    // worker-email pipeline (0041) so Gmail receipts/invoices/contracts get the
+    // same extraction (worker_emails + invoices/contracts + attachment OCR) as
+    // inbound worker email. Idempotent — processEmail dedupes on message_id, so
+    // a message also seen by Path B is not double-processed.
+    if (toBridge.length > 0) {
+      const { processEmail } = await import("@backend/services/email/pipeline");
+      for (const b of toBridge) {
+        try {
+          const rawEmail = await getRawMessage(token, b.gmailMessageId);
+          await processEmail({
+            messageId: b.messageIdHeader ?? b.gmailMessageId,
+            rawEmail,
+            from: b.from,
+            to: b.to,
+            decision: GATE_DECISION,
+            env,
+          });
+        } catch (err) {
+          console.error(`[gmail/ingestion] pipeline bridge failed for ${b.gmailMessageId}:`, err);
+        }
+      }
     }
 
     // Populate gmail_message_participants for every message just written

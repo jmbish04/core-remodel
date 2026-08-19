@@ -3,7 +3,7 @@
  * creating, listing, and summarizing master measurements.
  *
  * Both the HTTP API (`/api/measurements`, see routes/measurements.ts) and the
- * measurement MCP bridge (routes/mcp.ts — so Claude can record dimensions during a
+ * measurement MCP bridge (routes/mcp/tools/*.ts — so Claude can record dimensions during a
  * live measuring session) go through these functions.  Centralizing them here means
  * room/floor validation and the insert shape can never DRIFT between the two surfaces
  * (a real risk once two callers write to the same table).
@@ -23,6 +23,7 @@ import {
   rooms,
 } from "@backend/db";
 import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { computeRoomAreaSqFt } from "@backend/services/room-geometry";
 
 /** A Drizzle D1 handle — identical to `drizzle(env.DB)` in the routes. */
 type Db = ReturnType<typeof import("drizzle-orm/d1").drizzle>;
@@ -216,18 +217,29 @@ export interface ActiveRoom {
 
 /** List active rooms (alphabetical by display name) for `roomId` resolution. */
 export async function listActiveRooms(db: Db): Promise<ActiveRoom[]> {
-  return db
+  const rows = await db
     .select({
       id: rooms.id,
       roomCode: rooms.roomCode,
       roomName: rooms.roomName,
       floorId: rooms.floorId,
-      areaSqFt: rooms.areaSqFt,
+      lengthFeet: rooms.lengthFeet,
+      lengthInches: rooms.lengthInches,
+      widthFeet: rooms.widthFeet,
+      widthInches: rooms.widthInches,
     })
     .from(rooms)
     .where(eq(rooms.isActive, true))
     .orderBy(asc(rooms.roomName))
     .all();
+  // Area is computed on the fly (0043 dropped the stored column).
+  return rows.map((r) => ({
+    id: r.id,
+    roomCode: r.roomCode,
+    roomName: r.roomName,
+    floorId: r.floorId,
+    areaSqFt: computeRoomAreaSqFt(r),
+  }));
 }
 
 // ---------------------------------------------------------------------------

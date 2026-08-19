@@ -12,6 +12,8 @@ import { generateProductDraftPrompt } from "@backend/ai/agents/ShowroomResearchA
 import { brandImages, brands, showroomBrandMappings } from "@backend/db/schema/brands/index";
 import {
   showroomStores,
+  showroomStoreLocations,
+  showroomStoreType,
   showroomStoreProducts,
   showroomStoreCategory,
   showroomStoreCategoryMapping,
@@ -32,19 +34,24 @@ import {
   productImages,
   productSpecs,
   showroomImages,
+  showroomImageGroups,
   sourcingSweepSessions,
   showroomPocs,
   showroomProductMappings,
   browserRunPages,
   showroomPhotosMapping,
   showroomStoreHours,
+  showroomStoreContacts,
   showroomStoreLinks,
   productPriceObservations,
   productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
+import { workerEmailInvoices } from "@backend/db/schema/emails/worker_email_invoices";
+import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_email_invoice_line_items";
 import { deviceLocation } from "@backend/db/schema/system/device-location";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
+import { ingestLocationFix } from "@backend/services/location/ingest";
 import { businessCardService } from "@backend/services/business-card";
 import { faviconService } from "@backend/services/favicon";
 import { GoogleMapsService } from "@backend/services/google/maps";
@@ -53,6 +60,14 @@ import {
   resolveStoreGeoPatch,
   scheduleShowroomEnrichment,
 } from "@backend/services/showroom/onboarding";
+import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
+import {
+  loadPlaceIdOwners,
+  loadStoreLocationCities,
+  loadStoreLocationCounts,
+  loadStoreLocations,
+  resolveBayAreaCityId,
+} from "@backend/services/showroom/locations";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
   deriveIsOpenWeekends,
@@ -71,6 +86,7 @@ import {
 import { assessIntakeQuality } from "@backend/utils/showroom-quality";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getAgentByName } from "agents";
+import { renderNoteHtml, sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { eq, desc, asc, and, like, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -190,6 +206,9 @@ const createStoreSchema = z.object({
   description: z.string().optional().nullable(),
   pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional().nullable(),
   bayAreaCityId: z.number().optional().nullable(),
+  // Business-model type — single FK to showroom_store_type. Spread straight into
+  // the store insert/update like any scalar column (see PUT/POST handlers).
+  typeId: z.number().int().optional().nullable(),
   locationAddress: z.string().optional().nullable(),
   // Granular address parts — usually filled by the place-import / address
   // backfill from Google Places, but accepted directly here too.
@@ -1086,6 +1105,9 @@ showroomStoresRouter.get("/", async (c) => {
   const priceFilter = c.req.query("pricePoint");
   const search = c.req.query("search");
   const hubFilter = c.req.query("hub");
+  // Inactive (soft-deleted) stores are hidden by default; pass
+  // ?includeInactive=true to include them (admin/cleanup views only).
+  const includeInactive = c.req.query("includeInactive") === "true";
   const includeParam = c.req.query("include") ?? "";
   const includes = new Set(
     includeParam
@@ -1100,15 +1122,20 @@ showroomStoresRouter.get("/", async (c) => {
       cityName: storeBayareaCities.bayAreaCityName,
       hubRoute: storeBayareaCities.hubRoute,
       hubName: storeBayareaCities.hubName,
+      typeKey: showroomStoreType.key,
+      typeName: showroomStoreType.displayName,
+      typeColor: showroomStoreType.htmlColor,
     })
     .from(showroomStores)
     .leftJoin(storeBayareaCities, eq(showroomStores.bayAreaCityId, storeBayareaCities.id))
+    .leftJoin(showroomStoreType, eq(showroomStores.typeId, showroomStoreType.id))
     .orderBy(desc(showroomStores.createdAt))
     .$dynamic();
 
-  // Soft-deleted stores never appear in the directory / map / list. Pushed in
-  // first so `conditions` is never empty and the and(...) below always applies.
-  const conditions = [eq(showroomStores.isActive, true)];
+  // Soft-deleted stores are hidden by default (directory / map / list). Only an
+  // explicit ?includeInactive=true surfaces them. Pushed in first so
+  // `conditions` is never empty and the and(...) below always applies.
+  const conditions = includeInactive ? [] : [eq(showroomStores.isActive, true)];
   if (priceFilter) {
     conditions.push(eq(showroomStores.pricePoint, priceFilter as "$" | "$$" | "$$$" | "$$$$"));
   }
@@ -1120,6 +1147,12 @@ showroomStoresRouter.get("/", async (c) => {
   }
   if (hubFilter) {
     conditions.push(eq(storeBayareaCities.hubRoute, hubFilter));
+  }
+  // Business-model type filter — accepts a numeric type_id. The island filters
+  // client-side today, but a server filter keeps the API/MCP surface honest.
+  const typeFilter = c.req.query("typeId");
+  if (typeFilter && Number.isFinite(Number(typeFilter))) {
+    conditions.push(eq(showroomStores.typeId, Number(typeFilter)));
   }
 
   if (conditions.length > 0) {
@@ -1157,9 +1190,13 @@ showroomStoresRouter.get("/", async (c) => {
               eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id),
             )
             .where(inArray(showroomStoreCategoryMapping.storeId, chunk))
-            // Registration order: the first category is the store's primary type
-            // (drives the map marker colour), so keep it deterministic.
-            .orderBy(showroomStoreCategoryMapping.id),
+            // The store's is_primary category FIRST (its single directory group +
+            // map-marker colour), then registration order. Backed by the real
+            // is_primary flag now, not just insertion order.
+            .orderBy(
+              desc(showroomStoreCategoryMapping.isPrimary),
+              showroomStoreCategoryMapping.id,
+            ),
         )
           .then((catRows) => {
             const map = new Map<number, string[]>();
@@ -1269,6 +1306,14 @@ showroomStoresRouter.get("/", async (c) => {
   // plus the derived legacy flat URL fields for back-compat with card UIs.
   const linksMap = await getStoreLinksMap(db, storeIds);
 
+  // Multi-location summary for the directory card (0045/0047 locations). Always computed —
+  // one grouped read each, cheap — so every card can show the count + sorted city chips.
+  const [locationCounts, locationCities, locationsById] = await Promise.all([
+    loadStoreLocationCounts(db, storeIds),
+    loadStoreLocationCities(db, storeIds),
+    loadStoreLocations(db, storeIds),
+  ]);
+
   return c.json({
     stores: rows.map((r) => {
       const links = linksMap.get(r.store.id) ?? [];
@@ -1301,10 +1346,54 @@ showroomStoresRouter.get("/", async (c) => {
         // Links table is the URL source of truth; derive legacy flat fields too.
         links,
         ...linksToLegacyUrls(links),
+        // Business-model type (joined from showroom_store_type) — powers the
+        // color-coded badge + directory filter. typeId is already in ...r.store.
+        typeKey: r.typeKey ?? null,
+        typeName: r.typeName ?? null,
+        typeColor: r.typeColor ?? null,
+        // Multi-location summary — count + unique cities sorted asc (for the card chips).
+        locationCount: locationCounts.get(r.store.id) ?? 0,
+        locationCities: locationCities.get(r.store.id) ?? [],
+        // Compact per-location array for the directory MAP (one pin per site) +
+        // card group-by-primary. isPrimary is DERIVED (place_id-matches-parent-else-
+        // lowest-id). The full DTO (address parts, notes) stays on /:id/locations —
+        // do NOT fatten this list payload. Contract: docs/plans/showroom-location-contract.md.
+        locations: (locationsById.get(r.store.id) ?? []).map((l) => ({
+          id: l.id,
+          city: l.city,
+          latitude: l.latitude,
+          longitude: l.longitude,
+          isPrimary: l.isPrimary,
+        })),
+        // Distinct region hubs across ALL the brand's sites, so a multi-region
+        // brand shows in EVERY region tab it has a location in — not just its
+        // primary hub. Route derived per location from coords/zip. Always includes
+        // the store's own effective hub. Contract: showroom-location-contract.md §5.
+        hubRoutes: Array.from(
+          new Set(
+            [
+              effectiveHubRoute,
+              ...(locationsById.get(r.store.id) ?? []).map(
+                (l) =>
+                  classifyBayAreaRegion({
+                    latitude: l.latitude,
+                    longitude: l.longitude,
+                    zipCode: l.zipCode,
+                    address: l.city,
+                  })?.route ?? null,
+              ),
+            ].filter((x): x is string => Boolean(x)),
+          ),
+        ),
       };
 
       if (includes.has("categories")) {
-        (base as any).categories = categoryMap.get(r.store.id) ?? [];
+        const cats = categoryMap.get(r.store.id) ?? [];
+        (base as any).categories = cats;
+        // The is_primary category (cats is ordered is_primary-first) — the ONE
+        // group the directory should list this store under; cats.slice(1) are the
+        // secondary badges. Null when the store has no categories.
+        (base as any).primaryCategory = cats[0] ?? null;
       }
       if (includes.has("ratings")) {
         // Homeowner's own visit rating — read from the denormalized column on
@@ -1338,9 +1427,13 @@ showroomStoresRouter.get("/:id", async (c) => {
       cityName: storeBayareaCities.bayAreaCityName,
       hubRoute: storeBayareaCities.hubRoute,
       hubName: storeBayareaCities.hubName,
+      typeKey: showroomStoreType.key,
+      typeName: showroomStoreType.displayName,
+      typeColor: showroomStoreType.htmlColor,
     })
     .from(showroomStores)
     .leftJoin(storeBayareaCities, eq(showroomStores.bayAreaCityId, storeBayareaCities.id))
+    .leftJoin(showroomStoreType, eq(showroomStores.typeId, showroomStoreType.id))
     .where(eq(showroomStores.id, storeId))
     .limit(1);
 
@@ -1504,6 +1597,12 @@ showroomStoresRouter.get("/:id", async (c) => {
   // External links (URL source of truth) + derived legacy flat URL fields.
   const links = await getStoreLinks(db, storeId);
 
+  // Multi-location summary so the viewport's "Locations" spot renders without a second call.
+  const [detailLocCount, detailLocCities] = await Promise.all([
+    loadStoreLocationCounts(db, [storeId]),
+    loadStoreLocationCities(db, [storeId]),
+  ]);
+
   const detailDerived =
     store.store.hubRoute == null
       ? classifyBayAreaRegion({
@@ -1519,6 +1618,9 @@ showroomStoresRouter.get("/:id", async (c) => {
     cityName: store.cityName,
     hubRoute: store.store.hubRoute ?? detailDerived?.route ?? store.hubRoute,
     hubName: store.store.hubName ?? detailDerived?.name ?? store.hubName,
+    typeKey: store.typeKey ?? null,
+    typeName: store.typeName ?? null,
+    typeColor: store.typeColor ?? null,
     hours,
     hoursJson: rowsToHoursJson(hours),
     links,
@@ -1539,7 +1641,363 @@ showroomStoresRouter.get("/:id", async (c) => {
       tagColor: r.tag.color,
     })),
     brands: brandsWithImages,
+    locationCount: detailLocCount.get(storeId) ?? 0,
+    locationCities: detailLocCities.get(storeId) ?? [],
   });
+});
+
+/**
+ * GET /:id/locations — every physical site of a showroom business, for the viewport's
+ * Locations modal (0045/0047). Reuses `loadStoreLocations` (derived address, city, coords,
+ * placeId, googleMapsLink, hub, isPrimary), sorted by city ascending, and returns the
+ * business-level phone + website + active POCs so each city tab can show contacts. Fetched
+ * lazily by the modal on first open — never on page load.
+ */
+showroomStoresRouter.get("/:id/locations", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json({ error: "Invalid store id" }, 400);
+  }
+
+  const [store] = await db
+    .select({ id: showroomStores.id, phoneNumber: showroomStores.phoneNumber })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) return c.json({ error: "Store not found" }, 404);
+
+  const locations = (await loadStoreLocations(db, [storeId]))
+    .get(storeId)
+    ?.slice()
+    .sort((a, b) => (a.city ?? "").localeCompare(b.city ?? "")) ?? [];
+
+  const links = await getStoreLinks(db, storeId);
+  const { websiteUrl } = linksToLegacyUrls(links);
+
+  // Per-location hours + phone (ASK #8, Phase L). Additive/nullable so a location-scoped
+  // page degrades to store-level when a site has none of its own:
+  //  - hours: the site's own showroom_store_hours rows, else the brand-wide (location_id
+  //    IS NULL) rows.
+  //  - phone: the site's GENERAL_CONTACT office line; null until a per-site general
+  //    contact lands for that location.
+  const hourRows = await db
+    .select({
+      locationId: showroomStoreHours.locationId,
+      day: showroomStoreHours.day,
+      openHour: showroomStoreHours.openHour,
+      openMinute: showroomStoreHours.openMinute,
+      closeHour: showroomStoreHours.closeHour,
+      closeMinute: showroomStoreHours.closeMinute,
+    })
+    .from(showroomStoreHours)
+    .where(eq(showroomStoreHours.showroomId, storeId))
+    .all();
+  const brandHours = hourRows.filter((h) => h.locationId == null);
+  const hoursByLoc = new Map<number, typeof hourRows>();
+  for (const h of hourRows) {
+    if (h.locationId == null) continue;
+    const list = hoursByLoc.get(h.locationId) ?? [];
+    list.push(h);
+    hoursByLoc.set(h.locationId, list);
+  }
+
+  const generalContacts = await db
+    .select({
+      locationId: showroomStoreContacts.locationId,
+      phone: showroomStoreContacts.officePhoneNumber,
+    })
+    .from(showroomStoreContacts)
+    .where(
+      and(
+        eq(showroomStoreContacts.storeId, storeId),
+        eq(showroomStoreContacts.type, "GENERAL_CONTACT"),
+        eq(showroomStoreContacts.isDraft, false),
+      ),
+    )
+    .all();
+  const phoneByLoc = new Map<number, string>();
+  for (const g of generalContacts) {
+    if (g.locationId != null && g.phone) phoneByLoc.set(g.locationId, g.phone);
+  }
+
+  // Per-location external-rating summary (Phase L, #9). Aggregate showroom_store_ratings
+  // by location_id — a store carries a handful of scraped reviews, so summing in JS is
+  // cheaper than a GROUP BY round-trip. `storeRatingSummary` is the brand-wide roll-up the
+  // frontend shows as the "all locations" fallback when a site has none of its own.
+  const ratingRows = await db
+    .select({ locationId: showroomStoreRatings.locationId, rating: showroomStoreRatings.rating })
+    .from(showroomStoreRatings)
+    .where(eq(showroomStoreRatings.storeId, storeId))
+    .all();
+  const ratingAgg = new Map<number, { count: number; sum: number }>();
+  let storeCount = 0;
+  let storeSum = 0;
+  for (const r of ratingRows) {
+    if (r.rating == null) continue;
+    storeCount++;
+    storeSum += r.rating;
+    if (r.locationId == null) continue;
+    const a = ratingAgg.get(r.locationId) ?? { count: 0, sum: 0 };
+    a.count++;
+    a.sum += r.rating;
+    ratingAgg.set(r.locationId, a);
+  }
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const summaryFor = (locId: number) => {
+    const a = ratingAgg.get(locId);
+    return a && a.count ? { count: a.count, avg: round1(a.sum / a.count) } : null;
+  };
+  const storeRatingSummary = storeCount
+    ? { count: storeCount, avg: round1(storeSum / storeCount) }
+    : null;
+
+  const enrichedLocations = locations.map((l) => {
+    const rows = hoursByLoc.get(l.id) ?? brandHours;
+    return {
+      ...l,
+      hours: rows,
+      hoursJson: rows.length ? rowsToHoursJson(rows) : null,
+      phone: phoneByLoc.get(l.id) ?? null,
+      ratingSummary: summaryFor(l.id),
+    };
+  });
+
+  const pocs = await db
+    .select()
+    .from(showroomPocs)
+    .where(and(eq(showroomPocs.showroomId, storeId), eq(showroomPocs.isActive, true)))
+    .all();
+
+  return c.json({
+    locations: enrichedLocations,
+    storePhone: store.phoneNumber,
+    storeWebsite: websiteUrl,
+    storeRatingSummary,
+    pocs: pocs.map((p) => ({
+      id: p.id,
+      fullName: p.fullName,
+      title: p.title,
+      company: p.company,
+      phone: p.phone,
+      email: p.email,
+      website: p.website,
+      address: p.address,
+    })),
+  });
+});
+
+/**
+ * POST /:id/locations — manually add a physical site to an existing showroom (0045/0047).
+ * The REST twin of the `add_showroom_location` MCP tool: structured address parts (no free-text
+ * address string), optional `placeId` with a cross-table clash guard (stores + locations), and
+ * returns the new location with its DERIVED `isPrimary`. Use this instead of `update_showroom`
+ * (which OVERWRITES the primary) or a new store (which mints a duplicate business). Lets intake's
+ * dup-warning offer "add as a location of {store}". Contract: showroom-location-contract.md §14.2.
+ */
+showroomStoresRouter.post("/:id/locations", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json({ error: "Invalid store id" }, 400);
+  }
+  const [store] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) return c.json({ error: "Store not found" }, 404);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    streetNumber?: string;
+    streetName?: string;
+    unit?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+    latitude?: number;
+    longitude?: number;
+    placeId?: string;
+    googleMapsLink?: string;
+    notes?: string;
+    notesMarkdown?: string;
+    notesHtml?: string;
+  };
+
+  // Reject an empty location — need at least a place, coords, or an address part.
+  const hasCoords = typeof body.latitude === "number" && typeof body.longitude === "number";
+  if (!body.placeId && !body.city && !body.streetName && !hasCoords) {
+    return c.json(
+      { error: "Provide at least a placeId, coordinates, or a city/street for the new location." },
+      400,
+    );
+  }
+
+  // place_id guard. The unique index `showroom_store_locations_place_id_uniq` is
+  // SINGLE-COLUMN — a Google place can exist exactly ONCE across the whole table —
+  // so ANY existing owner (even this same store) is a conflict, not an allowed
+  // re-add: inserting a dup would trip SQLITE_CONSTRAINT → 500. loadPlaceIdOwners
+  // already scans BOTH showroom_stores and showroom_store_locations, so it's the
+  // whole cross-table guard on its own. Reject with the owning store id.
+  if (body.placeId) {
+    const owner = (await loadPlaceIdOwners(db, [body.placeId])).get(body.placeId);
+    if (owner != null) {
+      return c.json(
+        { error: `placeId is already registered to showroom ${owner}.`, ownerStoreId: owner },
+        409,
+      );
+    }
+  }
+
+  const bayAreaCityId = await resolveBayAreaCityId(db, body.city ?? null);
+  const [inserted] = await db
+    .insert(showroomStoreLocations)
+    .values({
+      storeId,
+      bayAreaCityId,
+      streetNumber: body.streetNumber ?? null,
+      streetName: body.streetName ?? null,
+      unit: body.unit ?? null,
+      city: body.city ?? null,
+      state: body.state ?? null,
+      zipCode: body.zipCode ?? null,
+      latitude: hasCoords ? body.latitude! : null,
+      longitude: hasCoords ? body.longitude! : null,
+      placeId: body.placeId ?? null,
+      googleMapsLink: body.googleMapsLink ?? null,
+      notes: body.notes ?? null,
+      notesMarkdown: body.notesMarkdown ?? null,
+      notesHtml: body.notesHtml ?? null,
+    })
+    .returning();
+
+  // Return the fresh DTO for the row we just created, with its DERIVED isPrimary
+  // (adding the first site can make it primary; adding a branch usually does not).
+  const dto =
+    (await loadStoreLocations(db, [storeId])).get(storeId)?.find((l) => l.id === inserted.id) ?? null;
+  return c.json({ location: dto }, 201);
+});
+
+/**
+ * GET /:id/keeper — resolve the surviving KEEPER for a merged-away store by following the
+ * `keeper_store_id` chain to its end (a keeper can itself have been merged later). Returns
+ * `{ keeperStoreId: number | null }`: null when this store was never merged (it IS live, or is
+ * the keeper). The store-detail PAGE uses this to 302 a deep-link on a loser id onto the live
+ * keeper, so ~stale links heal instead of 404-ing. Contract: showroom-location-contract.md.
+ */
+showroomStoresRouter.get("/:id/keeper", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json({ error: "Invalid store id" }, 400);
+  }
+  // Walk the chain with a visited-set guard so a (bad-data) cycle can't hang the request.
+  const seen = new Set<number>();
+  let current = storeId;
+  let keeper: number | null = null;
+  let first = true;
+  while (!seen.has(current)) {
+    seen.add(current);
+    const [row] = await db
+      .select({ keeperStoreId: showroomStores.keeperStoreId })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, current))
+      .limit(1);
+    if (!row) {
+      // A missing ORIGINAL id (deleted/typo'd deep-link) 404s like GET /:id, so the
+      // page shows not-found rather than a silent no-redirect. A missing keeper mid
+      // chain just stops (return what we have).
+      if (first) return c.json({ error: "Store not found" }, 404);
+      break;
+    }
+    first = false;
+    if (row.keeperStoreId == null) break;
+    keeper = row.keeperStoreId;
+    current = row.keeperStoreId;
+  }
+  return c.json({ keeperStoreId: keeper });
+});
+
+/**
+ * POST /:id/streetview-render — quota gate + usage log for a billable Street
+ * View render.
+ *
+ * The browser detects a panorama for free via `StreetViewService.getPanorama()`
+ * (NOT billed), then calls this endpoint immediately BEFORE instantiating a
+ * `StreetViewPanorama` object — the one action that fires a Dynamic Street View
+ * (Pro SKU) billing event. We check the `street_view` monthly cap and, when
+ * under it, log the render into `google_maps_usage_log` so it counts against the
+ * shared free-tier budget alongside Places/Routes.
+ *
+ * Returns `{ allowed:false }` (403) when over cap so the client renders nothing.
+ * This is a best-effort counter: it only sees renders the client announces, but
+ * our client always calls it first, so under normal flow the count is complete.
+ *
+ * The route sits under `/api/showroom-stores/*`, which `requireAccessAuth` gates
+ * in api/index.ts — every response shape is `{ allowed, reason?, message? }`.
+ */
+const streetviewRenderBodySchema = z.object({
+  // Bounded so a hostile client can't log-inject or bloat the usage row.
+  panoId: z.string().max(256).optional(),
+});
+
+showroomStoresRouter.post("/:id/streetview-render", async (c) => {
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json(
+      { allowed: false, reason: "INVALID_ID", message: "Invalid store id." },
+      400,
+    );
+  }
+
+  // Validate the (optional) body through Zod rather than casting untrusted JSON.
+  const parsed = streetviewRenderBodySchema.safeParse(
+    (await c.req.json().catch(() => ({}))) ?? {},
+  );
+  if (!parsed.success) {
+    return c.json(
+      { allowed: false, reason: "BAD_BODY", message: "Invalid request body." },
+      400,
+    );
+  }
+  const { panoId } = parsed.data;
+
+  const db = drizzle(c.env.DB);
+  // Don't spend shared Street View budget on a store that doesn't exist — a bad
+  // id would otherwise write a meaningless render row against the monthly cap.
+  const [store] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) {
+    return c.json(
+      { allowed: false, reason: "NOT_FOUND", message: "Store not found." },
+      404,
+    );
+  }
+
+  const maps = new GoogleMapsService(c.env);
+  // ponytail: check-then-log is not atomic and D1 has no transactions, so two
+  // concurrent renders can both pass the check. Acceptable here — the cap
+  // (4,500) sits 500 events below Google's free-tier ceiling (5,000), which
+  // absorbs any realistic race for a single-operator app. Revisit with a
+  // conditional insert only if concurrency ever gets high enough to matter.
+  if (!(await maps.isUnderApiQuota("street_view"))) {
+    return c.json(
+      { allowed: false, reason: "QUOTA_LIMIT", message: "Street View monthly cap reached." },
+      403,
+    );
+  }
+
+  await maps.logUsage(
+    "street_view",
+    { storeId, panoId },
+    { ok: true },
+    { endpoint: "streetview:render", statusCode: 200 },
+  );
+
+  return c.json({ allowed: true });
 });
 
 /**
@@ -1613,30 +2071,29 @@ showroomStoresRouter.post("/", async (c) => {
     }),
   );
 
-  // ── Duplicate prevention by Google Places place_id ──────────────────────
-  // Pre-check before inserting: if a showroom already exists for this
-  // place_id, short-circuit with 409 rather than let the unique constraint
-  // fail (or worse, silently create a duplicate on a schema that lacked the
-  // index). The insert below is ALSO try/catch-guarded to close the race
-  // between this check and the insert.
-  if (typeof data.placeId === "string" && data.placeId.length > 0) {
-    const [existingByPlaceId] = await db
-      .select({ id: showroomStores.id, name: showroomStores.name })
-      .from(showroomStores)
-      .where(eq(showroomStores.placeId, data.placeId))
-      .limit(1);
-
-    if (existingByPlaceId) {
-      return c.json(
-        {
-          success: false,
-          error: "This showroom has already been added.",
-          existingId: existingByPlaceId.id,
-          existingName: existingByPlaceId.name,
-        },
-        409,
-      );
-    }
+  // ── Duplicate prevention ────────────────────────────────────────────────
+  // Pre-check before inserting: reject if an ACTIVE showroom already matches by
+  // place_id, phone, website host, or normalized address — not just place_id, so
+  // a manual (no-placeId) entry can't clone an existing store either. Returns 409
+  // with the existing row. The insert below is ALSO try/catch-guarded to close
+  // the race between this check and the insert (the place_id unique index).
+  const duplicate = await findDuplicateStore(db, {
+    placeId: data.placeId,
+    phoneNumber: storeValues.phoneNumber,
+    websiteUrl,
+    locationAddress: storeValues.locationAddress,
+  });
+  if (duplicate) {
+    return c.json(
+      {
+        success: false,
+        error: `This showroom already exists (matched by ${duplicate.reason}).`,
+        matchedOn: duplicate.reason,
+        existingId: duplicate.id,
+        existingName: duplicate.name,
+      },
+      409,
+    );
   }
 
   let inserted: typeof showroomStores.$inferSelect;
@@ -1960,19 +2417,31 @@ showroomStoresRouter.put("/:id", async (c) => {
 });
 
 /**
- * PUT /:id/categories — Replace the store's category set.
+ * PUT /:id/categories — Replace the store's category set + mark its PRIMARY.
  *
  * The showroom-viewport hero's category editor calls this when the user
  * corrects an AI-assigned (or missing) category. REPLACE-ALL semantics: all
  * existing mapping rows for the store are dropped and re-inserted from the
  * supplied `categoryIds` (deduped). User-set mappings carry no `aiRationale`,
  * distinguishing them from agent-inferred rows.
+ *
+ * `primaryCategoryId` marks the ONE category the directory groups the store
+ * under (the rest render as secondary badges). It MUST be one of `categoryIds`.
+ * When omitted, the first id becomes primary so a store is never left without
+ * one — the previous version set no primary at all, which silently un-grouped
+ * every store edited through the modal and scattered it across all its
+ * categories on the directory.
  */
 showroomStoresRouter.put("/:id/categories", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
   const body = await c.req.json();
-  const { categoryIds } = z.object({ categoryIds: z.array(z.number().int()).max(50) }).parse(body);
+  const { categoryIds, primaryCategoryId } = z
+    .object({
+      categoryIds: z.array(z.number().int()).max(50),
+      primaryCategoryId: z.number().int().optional(),
+    })
+    .parse(body);
 
   const [store] = await db
     .select({ id: showroomStores.id })
@@ -1981,13 +2450,24 @@ showroomStoresRouter.put("/:id/categories", async (c) => {
     .limit(1);
   if (!store) return c.json({ error: "Store not found" }, 404);
 
+  const uniqueIds = [...new Set(categoryIds)];
+  // Resolve the primary: the requested one if it's in the set, else the first id.
+  const primaryId =
+    primaryCategoryId != null && uniqueIds.includes(primaryCategoryId)
+      ? primaryCategoryId
+      : (uniqueIds[0] ?? null);
+  if (primaryCategoryId != null && primaryId !== primaryCategoryId) {
+    return c.json({ error: "primaryCategoryId must be one of categoryIds" }, 400);
+  }
+
   await db
     .delete(showroomStoreCategoryMapping)
     .where(eq(showroomStoreCategoryMapping.storeId, storeId));
 
-  const uniqueIds = [...new Set(categoryIds)];
   for (const categoryId of uniqueIds) {
-    await db.insert(showroomStoreCategoryMapping).values({ storeId, categoryId });
+    await db
+      .insert(showroomStoreCategoryMapping)
+      .values({ storeId, categoryId, isPrimary: categoryId === primaryId });
   }
 
   // Return the joined category rows so the client can refresh in place.
@@ -2228,6 +2708,23 @@ showroomStoresRouter.post("/device-location", async (c) => {
     source: "device",
     stopped: true,
   });
+
+  // 0032 L0: a phone fix is now a first-class location source — also run the park
+  // pipeline (match a drive stop + stage a soft arrival near a showroom). Additive:
+  // record:false (row inserted above) and skipHomeArrival:true (ran above). Handed
+  // to waitUntil so it never blocks or drops after the response.
+  c.executionCtx.waitUntil(
+    ingestLocationFix(
+      c.env,
+      {
+        source: "phone",
+        latitude: d.latitude,
+        longitude: d.longitude,
+        accuracyMeters: d.accuracyMeters ?? null,
+      },
+      { record: false, skipHomeArrival: true },
+    ).catch((err) => console.error("[device-location] ingest failed:", err)),
+  );
 
   return c.json({ success: true, id: row.id, homeArrival });
 });
@@ -2517,6 +3014,23 @@ showroomStoresRouter.get("/meta/categories", async (c) => {
     .where(eq(showroomStoreCategory.isActive, true));
 
   return c.json({ categories });
+});
+
+/**
+ * GET /meta/types — active business-model types (showroom_store_type).
+ * Feeds the directory type filter and the store type-edit modal. Active only:
+ * a retired type stays valid on stores that already point at it but never
+ * appears as a selectable option.
+ */
+showroomStoresRouter.get("/meta/types", async (c) => {
+  const db = drizzle(c.env.DB);
+  const types = await db
+    .select()
+    .from(showroomStoreType)
+    .where(eq(showroomStoreType.isActive, true))
+    .orderBy(showroomStoreType.displayName);
+
+  return c.json({ types });
 });
 
 const placeExistsQuerySchema = z.object({
@@ -3562,6 +4076,109 @@ showroomStoresRouter.get("/:id/notes", async (c) => {
 });
 
 /**
+ * GET /:id/pending-quotes — Quotes/invoices/receipts extracted from email that
+ * were resolved to THIS showroom and still await review (0042 P4).
+ *
+ * The email pipeline stamps `worker_email_invoices.showroom_store_id` when the
+ * sender's domain/name matches a store, so a Pietra Fina quote surfaces right
+ * in Pietra Fina's viewport as a pending item to confirm/map. Each row carries
+ * its line items; each line carries the product it was matched to or created as
+ * (0042 P5) — `productId` + `productName` (JOINed from products) + `matchStatus`.
+ *
+ * Response 200:
+ *   { "quotes": [ { id, kind, vendorName, invoiceNumber, invoiceDate, dueDate,
+ *                   subtotal, tax, total, currency, confidence, status, emailId,
+ *                   createdAt, lineItems: [ { id, description, quantity,
+ *                   unitPrice, lineTotal, matchStatus, productId, brandId,
+ *                   productName } ] } ] }
+ */
+showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  // Cap at 50: a store realistically carries a handful of open drafts, and the
+  // cap bounds the line-items `inArray` below to <=50 bound params — safely
+  // under D1's 100-param limit without needing to chunk.
+  const invoices = await db
+    .select()
+    .from(workerEmailInvoices)
+    .where(
+      and(
+        eq(workerEmailInvoices.showroomStoreId, storeId),
+        eq(workerEmailInvoices.status, "draft"),
+      ),
+    )
+    .orderBy(desc(workerEmailInvoices.createdAt))
+    .limit(50);
+
+  if (invoices.length === 0) return c.json({ quotes: [] });
+
+  // One IN() over the (<=50) invoice ids — stays under D1's 100 bound-param cap.
+  const invoiceIds = invoices.map((inv) => inv.id);
+  const lines = await db
+    .select({
+      id: workerEmailInvoiceLineItems.id,
+      invoiceId: workerEmailInvoiceLineItems.invoiceId,
+      description: workerEmailInvoiceLineItems.description,
+      quantity: workerEmailInvoiceLineItems.quantity,
+      unitPrice: workerEmailInvoiceLineItems.unitPrice,
+      lineTotal: workerEmailInvoiceLineItems.lineTotal,
+      matchStatus: workerEmailInvoiceLineItems.matchStatus,
+      productId: workerEmailInvoiceLineItems.productId,
+      // Product display name + brand JOINed — never denormalized onto the line.
+      productName: showroomStoreProducts.itemName,
+      brandId: showroomStoreProducts.brandId,
+    })
+    .from(workerEmailInvoiceLineItems)
+    .leftJoin(
+      showroomStoreProducts,
+      eq(showroomStoreProducts.id, workerEmailInvoiceLineItems.productId),
+    )
+    .where(inArray(workerEmailInvoiceLineItems.invoiceId, invoiceIds))
+    .orderBy(asc(workerEmailInvoiceLineItems.id));
+
+  const linesByInvoice = new Map<number, typeof lines>();
+  for (const li of lines) {
+    const arr = linesByInvoice.get(li.invoiceId) ?? [];
+    arr.push(li);
+    linesByInvoice.set(li.invoiceId, arr);
+  }
+
+  const quotes = invoices.map((inv) => ({
+    id: inv.id,
+    kind: inv.kind,
+    vendorName: inv.vendorName,
+    invoiceNumber: inv.invoiceNumber,
+    invoiceDate: inv.invoiceDate,
+    dueDate: inv.dueDate,
+    subtotal: inv.subtotal,
+    tax: inv.tax,
+    total: inv.total,
+    currency: inv.currency,
+    confidence: inv.confidence,
+    status: inv.status,
+    emailId: inv.emailId,
+    createdAt: inv.createdAt instanceof Date ? inv.createdAt.getTime() : inv.createdAt,
+    lineItems: (linesByInvoice.get(inv.id) ?? []).map((li) => ({
+      id: li.id,
+      description: li.description,
+      quantity: li.quantity,
+      unitPrice: li.unitPrice,
+      lineTotal: li.lineTotal,
+      matchStatus: li.matchStatus,
+      productId: li.productId,
+      brandId: li.brandId,
+      productName: li.productName,
+    })),
+  }));
+
+  return c.json({ quotes });
+});
+
+/**
  * POST /:id/notes — Create a new titled rich note for a showroom.
  *
  * Request body:
@@ -3756,10 +4373,18 @@ showroomStoresRouter.get("/:id/photos", async (c) => {
     return c.json({ success: false, error: "Invalid store id" }, 400);
   }
 
+  // Only homeowner-uploaded visit photos belong in the "Your visit photos" card.
+  // The sourcing sweep writes storefront/showroom/logo/map/unknown rows into the
+  // same table, so an unfiltered read leaks scraped website imagery here.
   const photos = await db
     .select()
     .from(showroomImages)
-    .where(eq(showroomImages.storeId, storeId))
+    .where(
+      and(
+        eq(showroomImages.storeId, storeId),
+        eq(showroomImages.imageKind, "visit"),
+      ),
+    )
     .orderBy(desc(showroomImages.createdAt));
 
   return c.json({ photos });
@@ -3866,7 +4491,7 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
 
   const [inserted] = await db
     .insert(showroomImages)
-    .values(imageInsertValues as unknown as typeof showroomImages.$inferInsert)
+    .values(imageInsertValues)
     .returning();
 
   return c.json({ photo: inserted }, 201);
@@ -3908,11 +4533,20 @@ showroomStoresRouter.put("/photos/:imageId/note", async (c) => {
     return c.json({ success: false, error: parsed.error.message }, 400);
   }
 
+  // Markdown is the source of truth: derive the HTML cache from it. When only a
+  // legacy HTML value is supplied, sanitize it rather than storing verbatim.
+  const noteMarkdown = parsed.data.noteMarkdown?.trim() ? parsed.data.noteMarkdown : null;
+  const noteHtml = noteMarkdown
+    ? renderNoteHtml(noteMarkdown)
+    : parsed.data.noteHtml?.trim()
+      ? sanitizeNoteHtml(parsed.data.noteHtml)
+      : null;
+
   const [updated] = await db
     .update(showroomImages)
     .set({
-      noteHtml: parsed.data.noteHtml ?? null,
-      noteMarkdown: parsed.data.noteMarkdown ?? null,
+      noteHtml,
+      noteMarkdown,
       updatedAt: new Date(),
     } as Partial<typeof showroomImages.$inferInsert>)
     .where(eq(showroomImages.id, imageId))
@@ -4090,6 +4724,9 @@ showroomStoresRouter.get("/:id/photos-gallery", async (c) => {
       authorAttributes: showroomPhotosMapping.authorAttributes,
       flagContentUri: showroomPhotosMapping.flagContentUri,
       googleMapsUri: showroomPhotosMapping.googleMapsUri,
+      // Phase L — the physical site this Places photo belongs to (null until backfilled),
+      // so the frontend can badge it with its location.
+      locationId: showroomPhotosMapping.locationId,
     })
     .from(showroomPhotosMapping)
     .where(eq(showroomPhotosMapping.showroomId, storeId))
@@ -4211,6 +4848,426 @@ showroomStoresRouter.delete("/:id/photos/:imageId", async (c) => {
       console.error("[showroom-stores] visit photo CF Images delete error:", err);
     }
   }
+
+  return c.json({ success: true });
+});
+
+/**
+ * PATCH /:id/photos/:imageId — Edit an image's altText and/or re-tag its kind.
+ *
+ * Works for ANY image kind on the store (visit or a sweep-discovered
+ * storefront/showroom/logo/map/unknown row). Ownership is enforced: the image
+ * must belong to `:id`, so a caller can't touch another store's image (IDOR).
+ *
+ * Request body (both optional):
+ *   { "altText": "Entry display", "imageKind": "storefront" }
+ *
+ * Response 200: { "photo": { ...updatedRow } }
+ */
+showroomStoresRouter.patch("/:id/photos/:imageId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const imageId = Number(c.req.param("imageId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(imageId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const patchSchema = z.object({
+    altText: z.string().optional().nullable(),
+    imageKind: z.enum(["visit", "storefront", "showroom", "logo", "map", "unknown"]).optional(),
+  });
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  // Ownership guard — the image must belong to this store.
+  const [image] = await db
+    .select({ id: showroomImages.id })
+    .from(showroomImages)
+    .where(and(eq(showroomImages.id, imageId), eq(showroomImages.storeId, storeId)))
+    .limit(1);
+  if (!image) return c.json({ success: false, error: "Image not found" }, 404);
+
+  const patch: Partial<typeof showroomImages.$inferInsert> = { updatedAt: new Date() };
+  if ("altText" in parsed.data) patch.altText = parsed.data.altText ?? null;
+  if (parsed.data.imageKind !== undefined) patch.imageKind = parsed.data.imageKind;
+
+  const [updated] = await db
+    .update(showroomImages)
+    .set(patch)
+    .where(eq(showroomImages.id, imageId))
+    .returning();
+
+  return c.json({ photo: updated });
+});
+
+/**
+ * POST /:id/photos/bulk-delete — Delete several images at once (multi-select).
+ *
+ * Every id must belong to `:id` — the delete is scoped by storeId so a stray or
+ * hostile id in the list can't remove another store's image (IDOR). Cloudflare
+ * Images cleanup is best-effort per row.
+ *
+ * Request body: { "imageIds": [12, 15, 19] }
+ * Response 200: { "success": true, "deleted": 3 }
+ */
+showroomStoresRouter.post("/:id/photos/bulk-delete", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const parsed = z.object({ imageIds: z.array(z.number().int().positive()).min(1) }).safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+  const ids = [...new Set(parsed.data.imageIds)];
+
+  // Select only the rows that actually belong to this store (ownership filter).
+  // Chunk the IN list at 20 to stay under D1's 100 bound-parameter cap.
+  const owned: { id: number; cfImageId: string | null }[] = [];
+  for (let i = 0; i < ids.length; i += 20) {
+    const part = ids.slice(i, i + 20);
+    const rows = await db
+      .select({ id: showroomImages.id, cfImageId: showroomImages.cfImageId })
+      .from(showroomImages)
+      .where(and(eq(showroomImages.storeId, storeId), inArray(showroomImages.id, part)));
+    owned.push(...rows);
+  }
+  if (owned.length === 0) return c.json({ success: true, deleted: 0 });
+
+  const ownedIds = owned.map((r) => r.id);
+  for (let i = 0; i < ownedIds.length; i += 20) {
+    const part = ownedIds.slice(i, i + 20);
+    await db.delete(showroomImages).where(inArray(showroomImages.id, part));
+  }
+
+  // Best-effort Cloudflare Images cleanup for the deleted rows.
+  const cfIds = owned.map((r) => r.cfImageId).filter((v): v is string => Boolean(v));
+  if (cfIds.length > 0) {
+    try {
+      const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
+      if (accountId && apiTokens.length > 0) {
+        const [primaryToken, ...fallbackApiTokens] = apiTokens;
+        const processor = new ImageProcessorService(c.env, accountId, primaryToken, { fallbackApiTokens });
+        for (const cfId of cfIds) await processor.deleteFromCloudflareImages(cfId);
+      }
+    } catch (err) {
+      console.error("[showroom-stores] bulk photo CF Images delete error:", err);
+    }
+  }
+
+  return c.json({ success: true, deleted: ownedIds.length });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── IMAGE GROUPS (photo folders / stacks) — 0040 P3 ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Verify a set of image ids belong to a store; returns the owned subset. */
+async function ownedImageIds(
+  db: ReturnType<typeof drizzle>,
+  storeId: number,
+  ids: number[],
+): Promise<number[]> {
+  const unique = [...new Set(ids)];
+  const owned: number[] = [];
+  for (let i = 0; i < unique.length; i += 20) {
+    const part = unique.slice(i, i + 20);
+    const rows = await db
+      .select({ id: showroomImages.id })
+      .from(showroomImages)
+      .where(and(eq(showroomImages.storeId, storeId), inArray(showroomImages.id, part)));
+    owned.push(...rows.map((r) => r.id));
+  }
+  return owned;
+}
+
+/**
+ * GET /:id/image-groups — list active folders for a store, each with its member
+ * count and a cover delivery URL (the group's coverImageId, else its newest
+ * member). Loose photos are the `/photos` rows with a null group_id.
+ */
+showroomStoresRouter.get("/:id/image-groups", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const groups = await db
+    .select()
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.storeId, storeId), eq(showroomImageGroups.isActive, true)))
+    .orderBy(asc(showroomImageGroups.sortOrder), desc(showroomImageGroups.createdAt));
+
+  // Members for this store's grouped photos (one query, then bucket in JS).
+  const members = await db
+    .select({
+      id: showroomImages.id,
+      groupId: showroomImages.groupId,
+      deliveryUrl: showroomImages.deliveryUrl,
+    })
+    .from(showroomImages)
+    .where(eq(showroomImages.storeId, storeId));
+
+  const byGroup = new Map<number, { id: number; deliveryUrl: string }[]>();
+  for (const m of members) {
+    if (m.groupId == null) continue;
+    const list = byGroup.get(m.groupId) ?? [];
+    list.push({ id: m.id, deliveryUrl: m.deliveryUrl });
+    byGroup.set(m.groupId, list);
+  }
+
+  const result = groups.map((g) => {
+    const mem = byGroup.get(g.id) ?? [];
+    const cover =
+      (g.coverImageId != null ? mem.find((m) => m.id === g.coverImageId)?.deliveryUrl : null) ??
+      mem[0]?.deliveryUrl ??
+      null;
+    return { ...g, memberCount: mem.length, coverDeliveryUrl: cover };
+  });
+
+  return c.json({ groups: result });
+});
+
+/**
+ * POST /:id/image-groups — create a folder and (optionally) move photos into it.
+ *
+ * Body: { name, descriptionMarkdown?, priceText?, priceCents?, coverImageId?,
+ *         imageIds?: number[] }. descriptionHtml is derived server-side; imageIds
+ * are ownership-filtered before their group_id is set.
+ */
+showroomStoresRouter.post("/:id/image-groups", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const schema = z.object({
+    name: z.string().trim().min(1),
+    descriptionMarkdown: z.string().optional().nullable(),
+    priceText: z.string().optional().nullable(),
+    priceCents: z.number().int().optional().nullable(),
+    coverImageId: z.number().int().positive().optional().nullable(),
+    imageIds: z.array(z.number().int().positive()).optional(),
+  });
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const [store] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) return c.json({ success: false, error: "Showroom not found" }, 404);
+
+  const md = parsed.data.descriptionMarkdown?.trim() ? parsed.data.descriptionMarkdown : null;
+  const [group] = await db
+    .insert(showroomImageGroups)
+    .values({
+      storeId,
+      name: parsed.data.name.trim(),
+      descriptionMarkdown: md,
+      descriptionHtml: md ? renderNoteHtml(md) : null,
+      priceText: parsed.data.priceText?.trim() ? parsed.data.priceText : null,
+      priceCents: parsed.data.priceCents ?? null,
+      coverImageId: parsed.data.coverImageId ?? null,
+    })
+    .returning();
+
+  // Move the given photos into the new group (ownership-filtered, chunked).
+  if (parsed.data.imageIds?.length && group) {
+    const owned = await ownedImageIds(db, storeId, parsed.data.imageIds);
+    for (let i = 0; i < owned.length; i += 20) {
+      const part = owned.slice(i, i + 20);
+      await db
+        .update(showroomImages)
+        .set({ groupId: group.id, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+        .where(inArray(showroomImages.id, part));
+    }
+  }
+
+  return c.json({ group }, 201);
+});
+
+/**
+ * PATCH /:id/image-groups/:groupId — rename / re-describe / re-price / re-cover /
+ * reorder a folder. descriptionHtml is re-derived when descriptionMarkdown is set.
+ */
+showroomStoresRouter.patch("/:id/image-groups/:groupId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const groupId = Number(c.req.param("groupId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(groupId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const schema = z.object({
+    name: z.string().trim().min(1).optional(),
+    descriptionMarkdown: z.string().optional().nullable(),
+    priceText: z.string().optional().nullable(),
+    priceCents: z.number().int().optional().nullable(),
+    coverImageId: z.number().int().positive().optional().nullable(),
+    sortOrder: z.number().int().optional(),
+  });
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  // Ownership: the group must belong to this store.
+  const [group] = await db
+    .select({ id: showroomImageGroups.id })
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.id, groupId), eq(showroomImageGroups.storeId, storeId)))
+    .limit(1);
+  if (!group) return c.json({ success: false, error: "Group not found" }, 404);
+
+  const patch: Partial<typeof showroomImageGroups.$inferInsert> = { updatedAt: new Date() };
+  if (parsed.data.name !== undefined) patch.name = parsed.data.name.trim();
+  if ("descriptionMarkdown" in parsed.data) {
+    const md = parsed.data.descriptionMarkdown?.trim() ? parsed.data.descriptionMarkdown : null;
+    patch.descriptionMarkdown = md;
+    patch.descriptionHtml = md ? renderNoteHtml(md) : null;
+  }
+  if ("priceText" in parsed.data) patch.priceText = parsed.data.priceText?.trim() ? parsed.data.priceText : null;
+  if ("priceCents" in parsed.data) patch.priceCents = parsed.data.priceCents ?? null;
+  if ("coverImageId" in parsed.data) patch.coverImageId = parsed.data.coverImageId ?? null;
+  if (parsed.data.sortOrder !== undefined) patch.sortOrder = parsed.data.sortOrder;
+
+  const [updated] = await db
+    .update(showroomImageGroups)
+    .set(patch)
+    .where(eq(showroomImageGroups.id, groupId))
+    .returning();
+
+  return c.json({ group: updated });
+});
+
+/**
+ * POST /:id/image-groups/:groupId/members — add/remove photos.
+ * Body: { add?: number[], remove?: number[] }. `add` sets group_id (ownership
+ * filtered); `remove` clears group_id back to loose (only for rows in THIS group).
+ */
+showroomStoresRouter.post("/:id/image-groups/:groupId/members", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const groupId = Number(c.req.param("groupId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(groupId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const parsed = z
+    .object({
+      add: z.array(z.number().int().positive()).optional(),
+      remove: z.array(z.number().int().positive()).optional(),
+    })
+    .safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const [group] = await db
+    .select({ id: showroomImageGroups.id })
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.id, groupId), eq(showroomImageGroups.storeId, storeId)))
+    .limit(1);
+  if (!group) return c.json({ success: false, error: "Group not found" }, 404);
+
+  if (parsed.data.add?.length) {
+    const owned = await ownedImageIds(db, storeId, parsed.data.add);
+    for (let i = 0; i < owned.length; i += 20) {
+      const part = owned.slice(i, i + 20);
+      await db
+        .update(showroomImages)
+        .set({ groupId, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+        .where(inArray(showroomImages.id, part));
+    }
+  }
+  if (parsed.data.remove?.length) {
+    const owned = await ownedImageIds(db, storeId, parsed.data.remove);
+    for (let i = 0; i < owned.length; i += 20) {
+      const part = owned.slice(i, i + 20);
+      await db
+        .update(showroomImages)
+        .set({ groupId: null, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+        .where(and(eq(showroomImages.groupId, groupId), inArray(showroomImages.id, part)));
+    }
+  }
+
+  return c.json({ success: true });
+});
+
+/**
+ * DELETE /:id/image-groups/:groupId — soft-delete a folder and loosen its photos
+ * (their group_id → null). The photos themselves are never deleted here.
+ */
+showroomStoresRouter.delete("/:id/image-groups/:groupId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const groupId = Number(c.req.param("groupId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(groupId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  const [group] = await db
+    .select({ id: showroomImageGroups.id })
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.id, groupId), eq(showroomImageGroups.storeId, storeId)))
+    .limit(1);
+  if (!group) return c.json({ success: false, error: "Group not found" }, 404);
+
+  // Loosen members first so no row is left pointing at an inactive group, then
+  // soft-delete the group. (Two statements — D1 has no transactions.)
+  await db
+    .update(showroomImages)
+    .set({ groupId: null, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+    .where(eq(showroomImages.groupId, groupId));
+  await db
+    .update(showroomImageGroups)
+    .set({ isActive: false, updatedAt: new Date() } as Partial<typeof showroomImageGroups.$inferInsert>)
+    .where(eq(showroomImageGroups.id, groupId));
 
   return c.json({ success: true });
 });

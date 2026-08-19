@@ -44,6 +44,8 @@ export interface UseBoardResult {
   floorPlanPhotos: BoardPhoto[];
   /** Source node ids with a recipe HTTP request currently in flight. */
   processingNodeIds: Set<string>;
+  /** node id -> honest narration line for its in-flight recipe. */
+  processingNarration: Record<string, string>;
   /** Child node ids added this session (drives the staggered reveal). */
   justAddedNodeIds: Set<string>;
   reload: () => Promise<void>;
@@ -73,7 +75,7 @@ export interface UseBoardResult {
   ) => Promise<void>;
   // Recipe execution (sync-201)
   /** Flag/unflag a source node as having a recipe in flight. */
-  setNodeProcessing: (nodeId: string, processing: boolean) => void;
+  setNodeProcessing: (nodeId: string, processing: boolean, narration?: string) => void;
   /** Insert a finished child node (from the 201 body) with a reveal flag. */
   insertChildNode: (node: BoardNode) => void;
 
@@ -121,6 +123,7 @@ export function useBoard(roomId: string): UseBoardResult {
   const [processingNodeIds, setProcessingNodeIds] = useState<Set<string>>(
     new Set(),
   );
+  const [processingNarration, setProcessingNarration] = useState<Record<string, string>>({});
   const [justAddedNodeIds, setJustAddedNodeIds] = useState<Set<string>>(
     new Set(),
   );
@@ -370,11 +373,17 @@ export function useBoard(roomId: string): UseBoardResult {
   );
 
   const setNodeProcessing = useCallback(
-    (nodeId: string, processing: boolean) => {
+    (nodeId: string, processing: boolean, narration?: string) => {
       setProcessingNodeIds((prev) => {
         const next = new Set(prev);
         if (processing) next.add(nodeId);
         else next.delete(nodeId);
+        return next;
+      });
+      setProcessingNarration((prev) => {
+        const next = { ...prev };
+        if (processing && narration) next[nodeId] = narration;
+        else delete next[nodeId];
         return next;
       });
     },
@@ -547,6 +556,7 @@ export function useBoard(roomId: string): UseBoardResult {
       renderPhotos,
       floorPlanPhotos,
       processingNodeIds,
+      processingNarration,
       justAddedNodeIds,
       reload,
       addNode,
@@ -580,6 +590,7 @@ export function useBoard(roomId: string): UseBoardResult {
       renderPhotos,
       floorPlanPhotos,
       processingNodeIds,
+      processingNarration,
       justAddedNodeIds,
       reload,
       addNode,

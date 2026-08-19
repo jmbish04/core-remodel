@@ -1,8 +1,3 @@
-import { showroomStores } from "@backend/db";
-import { GoogleMapsService } from "@backend/services/google/maps";
-import { mapPlaceDetailsToStoreInput } from "@backend/services/showroom/onboarding";
-import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { toolError } from "../../format";
@@ -10,7 +5,7 @@ import { looseObject, urlField } from "../../schemas";
 import { showroomUrl } from "../../urls";
 import { defineTool, WRITE_IDEMPOTENT } from "../../types";
 
-import { persistPlaceShowroom, rethrowMapsError } from "./_shared";
+import { intakeOnePlace } from "./_shared";
 
 export const importShowroomFromPlace = defineTool({
   name: "import_showroom_from_place",
@@ -46,51 +41,14 @@ export const importShowroomFromPlace = defineTool({
   },
   examples: [{ title: "Import a candidate", args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" } }],
   handler: async ({ env, db }, input) => {
-    const placeId = input.placeId?.trim();
-    if (!placeId) toolError("`placeId` is required and cannot be empty.");
-
-    // Idempotency: a store with this placeId already exists → return it.
-    const [existing] = await db
-      .select()
-      .from(showroomStores)
-      .where(eq(showroomStores.placeId, placeId))
-      .limit(1);
-    if (existing) {
-      return {
-        created: false,
-        status: "exists",
-        showroomId: existing.id,
-        url: showroomUrl(env, existing.id),
-        region: existing.hubName ?? null,
-        store: existing,
-      };
-    }
-
-    // Fetch Google fields + the Gemini review analysis (aiInference) inline so
-    // MCP onboarding matches the intake form. Non-fatal if Gemini is skipped.
-    let details: Record<string, unknown>;
-    try {
-      details = await new GoogleMapsService(env).placeDetails(placeId);
-    } catch (err) {
-      rethrowMapsError(err);
-    }
-
-    const mapped = mapPlaceDetailsToStoreInput(details as GooglePlaceDetails);
-    if (!mapped) {
-      toolError(`Google returned no usable place for placeId "${placeId}".`);
-    }
-    // Ensure the placeId is stored even if the payload omitted `id`.
-    mapped.values.placeId = mapped.values.placeId ?? placeId;
-
-    const created = await persistPlaceShowroom(env, db, mapped);
-
+    const r = await intakeOnePlace(env, db, input.placeId);
     return {
-      created: true,
-      status: "processing",
-      showroomId: created.id,
-      url: showroomUrl(env, created.id),
-      region: created.hubName ?? null,
-      store: created,
+      created: r.created,
+      status: r.status,
+      showroomId: r.showroomId,
+      url: showroomUrl(env, r.showroomId),
+      region: r.store.hubName ?? null,
+      store: r.store,
     };
   },
 });

@@ -61,6 +61,10 @@ const migrationStatus =
   verification?.migrations ??
   (entry?.migrations ?? []).map((tag) => ({ tag, appliedRemote: false, note: "Not recorded" }));
 const migrationStatusKnown = Boolean(verification?.migrations?.length);
+// Preview-worker teardown state. Read off `verification` but rendered on its own,
+// because it answers a question about the PR (was the litter cleared?) rather
+// than about the QC run.
+const previewWorker = verification?.previewWorker;
 
 // Long-form fields are MARKDOWN and render through the shared MarkdownProse —
 // the same renderer the proposal bundle and the research pages use. It is
@@ -172,6 +176,9 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
               no PR
             </span>
           )}
+          <span class="rounded-md bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-border/40">
+            {slug}
+          </span>
           <span class="text-[11px] text-muted-foreground">{entry!.date}</span>
         </div>
 
@@ -324,10 +331,11 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
       ) : null}
 
       {/*
-        Verification. Deliberately shows an explicit "not recorded" state rather
-        than rendering nothing: an absent section is indistinguishable from a
-        change nobody tested, and the reader cannot tell which they are looking at.
+        Verification — SHIPPED entries only. A proposal has not been built or QC'd
+        yet, so the "not recorded" state is pure noise on the preview; hide the whole
+        section when staged. For shipped entries it stays explicit (absent ≠ untested).
       */}
+      {staged ? null : (
       <section id="verification" class="mt-12 scroll-mt-24 border-t border-border/40 pt-8">
         <h2 class="text-sm font-semibold tracking-tight">Verification</h2>
 
@@ -403,9 +411,58 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
             </ul>
           </div>
         ) : null}
-      </section>
 
-      <section class="mt-12 border-t border-border/40 pt-8">
+        {/*
+          Preview worker teardown. Shown even when `verification` is absent,
+          because "was this cleaned up?" is a question about the PR, not about
+          the QC run — and an entry with no QC block is exactly the kind that
+          also forgot to tear its preview down.
+
+          A `deployed` badge on a merged entry means a live Worker nobody is
+          using. That is the whole point of surfacing it: the alternative was
+          listing ~190 Workers on the account and guessing from branch names.
+        */}
+        {previewWorker ? (
+          <div class="mt-5">
+            <h3 class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Preview worker
+            </h3>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span
+                class={`rounded-md px-2 py-0.5 text-[10px] font-medium ${
+                  previewWorker.status === "deleted"
+                    ? "bg-emerald-500/12 text-emerald-300"
+                    : previewWorker.status === "deployed"
+                      ? "bg-rose-500/12 text-rose-300"
+                      : "bg-muted/40 text-muted-foreground"
+                }`}
+              >
+                {previewWorker.status === "deleted"
+                  ? "torn down"
+                  : previewWorker.status === "deployed"
+                    ? "STILL LIVE — needs teardown"
+                    : "no preview deployed"}
+              </span>
+              {previewWorker.status === "none" ? null : (
+                <code class="font-mono text-[11px] text-muted-foreground">{previewWorker.name}</code>
+              )}
+              {previewWorker.note ? (
+                <span class="text-[11px] text-muted-foreground">— {previewWorker.note}</span>
+              ) : null}
+            </div>
+            {previewWorker.status === "deployed" ? (
+              <p class="mt-2 text-[11px] leading-relaxed text-rose-200/80">
+                Tear down with <code class="font-mono">pnpm run preview:delete</code> from that
+                branch's worktree, or <code class="font-mono">pnpm run preview:cleanup -- --apply</code>{" "}
+                once the branch is gone from origin.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+      )}
+
+      <section class="mt-8 border-t border-border/40 pt-6">
         <Changelog21 {...recap} />
       </section>
     </main>

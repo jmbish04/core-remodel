@@ -1,11 +1,12 @@
 import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 
-import { showroomStoreLinks, showroomStores } from "@backend/db";
+import { showroomStoreLinks, showroomStores, showroomStoreType } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   resolveStoreGeoPatch,
   mapPlaceDetailsToStoreInput,
 } from "@backend/services/showroom/onboarding";
+import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -13,7 +14,7 @@ import { toolError } from "../../format";
 import { looseObject, urlField } from "../../schemas";
 import { defineTool, WRITE } from "../../types";
 import { showroomUrl } from "../../urls";
-import { persistPlaceShowroom, rethrowMapsError } from "./_shared";
+import { adoptPlaceLocation, persistPlaceShowroom, rethrowMapsError } from "./_shared";
 
 export const createShowroom = defineTool({
   name: "create_showroom",
@@ -50,6 +51,14 @@ export const createShowroom = defineTool({
     websiteUrl: z.string().optional(),
     zipCode: z.string().optional(),
     pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional(),
+    typeId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Business-model type FK (showroom_store_type.id — see list_store_types). A store is exactly one type.",
+      ),
     isAppointmentOnly: z.boolean().optional().describe("True if the store is appointment-only"),
   },
   annotations: WRITE,
@@ -77,6 +86,50 @@ export const createShowroom = defineTool({
     url: urlField,
   },
   handler: async ({ env, db }, input) => {
+    // A non-null typeId must reference a real type — validate before any insert.
+    if (input.typeId != null) {
+      const [type] = await db
+        .select({ id: showroomStoreType.id })
+        .from(showroomStoreType)
+        .where(eq(showroomStoreType.id, input.typeId))
+        .limit(1);
+      if (!type) {
+        toolError(`typeId ${input.typeId} is not a valid showroom type. Call list_store_types.`);
+      }
+    }
+
+    // ── Duplicate guard (MANUAL path only) ────────────────────────────────
+    // Reject if an ACTIVE store already matches by place_id / phone / website /
+    // address, using whatever the caller provided. Returns the existing row
+    // rather than creating a second copy. Skipped on the placeId path: that path
+    // fetches Google details and re-checks below, where a bare stub (a match
+    // with no placeId) is ADOPTED rather than rejected — the early input-only
+    // check has no Google location to adopt, so it must not hard-block here.
+    const dupByInput = input.placeId?.trim()
+      ? null
+      : await findDuplicateStore(db, {
+          placeId: input.placeId,
+          phoneNumber: input.phoneNumber,
+          websiteUrl: input.websiteUrl,
+          locationAddress: input.locationAddress,
+        });
+    if (dupByInput) {
+      const [existing] = await db
+        .select()
+        .from(showroomStores)
+        .where(eq(showroomStores.id, dupByInput.id))
+        .limit(1);
+      if (existing) {
+        return {
+          created: false,
+          status: `exists (matched by ${dupByInput.reason})`,
+          store: existing,
+          region: existing.hubName ?? null,
+          url: showroomUrl(env, existing.id),
+        };
+      }
+    }
+
     // ── placeId path: full onboarding, idempotent by placeId ──────────────
     const placeId = input.placeId?.trim();
     if (placeId) {
@@ -109,11 +162,49 @@ export const createShowroom = defineTool({
       if (input.name?.trim()) mapped.values.name = input.name.trim();
       if (input.description) mapped.values.description = input.description;
       if (input.pricePoint) mapped.values.pricePoint = input.pricePoint;
+      if (input.typeId != null) mapped.values.typeId = input.typeId;
       if (input.phoneNumber) mapped.values.phoneNumber = input.phoneNumber;
       if (input.emailAddress) mapped.values.emailAddress = input.emailAddress;
       if (input.websiteUrl) mapped.websiteUrl = input.websiteUrl;
       if (input.isAppointmentOnly != null) {
         mapped.values.isAppointmentOnly = input.isAppointmentOnly;
+      }
+
+      // Re-check against the Google-derived fields. A match that ALREADY has a
+      // placeId is a true duplicate (already located) — return it. A match with
+      // NO placeId is a bare stub (same showroom, no location yet): adopt this
+      // Google location onto it instead of rejecting.
+      const dupByPlace = await findDuplicateStore(db, {
+        placeId: mapped.values.placeId,
+        phoneNumber: mapped.values.phoneNumber,
+        websiteUrl: mapped.websiteUrl,
+        locationAddress: mapped.values.locationAddress,
+      });
+      if (dupByPlace?.placeId) {
+        const [existing] = await db
+          .select()
+          .from(showroomStores)
+          .where(eq(showroomStores.id, dupByPlace.id))
+          .limit(1);
+        if (existing) {
+          return {
+            created: false,
+            status: `exists (matched by ${dupByPlace.reason})`,
+            store: existing,
+            region: existing.hubName ?? null,
+            url: showroomUrl(env, existing.id),
+          };
+        }
+      }
+      if (dupByPlace) {
+        const adopted = await adoptPlaceLocation(env, db, dupByPlace.id, mapped);
+        return {
+          created: false,
+          status: `located (adopted onto existing store, matched by ${dupByPlace.reason})`,
+          store: adopted,
+          region: adopted.hubName ?? null,
+          url: showroomUrl(env, adopted.id),
+        };
       }
 
       const created = await persistPlaceShowroom(env, db, mapped);
@@ -147,6 +238,7 @@ export const createShowroom = defineTool({
         emailAddress: input.emailAddress,
         zipCode: input.zipCode,
         pricePoint: input.pricePoint,
+        typeId: input.typeId,
         isAppointmentOnly: input.isAppointmentOnly,
         scrapeStatus: "pending",
         ...geo,

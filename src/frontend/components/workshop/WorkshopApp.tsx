@@ -21,6 +21,8 @@ import { WorkshopCanvas } from "./canvas/WorkshopCanvas";
 import { PilesRail, DRAG_MIME } from "./piles/PilesRail";
 import { SampleDrawer } from "./drawer/SampleDrawer";
 import { ExtractClippingDialog } from "./drawer/ExtractClippingDialog";
+import { FurnishingsDialog } from "./drawer/FurnishingsDialog";
+import { FreeformEditDialog } from "./recipes/FreeformEditDialog";
 import {
   RecipeDialog,
   type RecipeReference,
@@ -28,7 +30,7 @@ import {
 } from "./recipes/RecipeDialog";
 import { RoomPicker } from "./RoomPicker";
 import { runRecipe } from "./api";
-import { isAsyncRecipeResult } from "./types";
+import { isAsyncRecipeResult, RECIPE_NARRATION } from "./types";
 import { useBoard } from "./hooks/useBoard";
 import type {
   BoardNode,
@@ -61,6 +63,8 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
 
   // Dialog targets.
   const [extractNode, setExtractNode] = useState<BoardNode | null>(null);
+  const [furnishingsNode, setFurnishingsNode] = useState<BoardNode | null>(null);
+  const [freeformEditNode, setFreeformEditNode] = useState<BoardNode | null>(null);
   const [recipeState, setRecipeState] = useState<{
     recipe: "material-swap" | "mix";
     node: BoardNode;
@@ -231,10 +235,21 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
   const handleRunRecipe = useCallback(
     (
       node: BoardNode,
-      recipe: "material-swap" | "mix" | "clay-to-photoreal" | "floor-plan-furnish",
+      recipe:
+        | "material-swap"
+        | "mix"
+        | "clay-to-photoreal"
+        | "floor-plan-furnish"
+        | "tone-unify"
+        | "lighting-enhance"
+        | "plan-to-isometric"
+        | "evolution-grid"
+        | "sketch-to-render"
+        | "elevation-render"
+        | "cabinet-reveal",
       params: RecipeRunParams,
     ) => {
-      board.setNodeProcessing(node.id, true);
+      board.setNodeProcessing(node.id, true, RECIPE_NARRATION[recipe]);
       void (async () => {
         try {
           const result = await runRecipe(node.id, recipe as RecipeKind, {
@@ -354,6 +369,29 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
             onFloorPlanFurnish={(node) =>
               handleRunRecipe(node, "floor-plan-furnish", { referenceCfImageUrls: [] })
             }
+            onPlanToIsometric={(node) =>
+              handleRunRecipe(node, "plan-to-isometric", { referenceCfImageUrls: [] })
+            }
+            onToneUnify={(node) =>
+              handleRunRecipe(node, "tone-unify", { referenceCfImageUrls: [] })
+            }
+            onLightingEnhance={(node) =>
+              handleRunRecipe(node, "lighting-enhance", { referenceCfImageUrls: [] })
+            }
+            onEvolutionGrid={(node) =>
+              handleRunRecipe(node, "evolution-grid", { referenceCfImageUrls: [] })
+            }
+            onSketchToRender={(node) =>
+              handleRunRecipe(node, "sketch-to-render", { referenceCfImageUrls: [] })
+            }
+            onElevationRender={(node) =>
+              handleRunRecipe(node, "elevation-render", { referenceCfImageUrls: [] })
+            }
+            onCabinetReveal={(node) =>
+              handleRunRecipe(node, "cabinet-reveal", { referenceCfImageUrls: [] })
+            }
+            onFreeformEdit={(node) => setFreeformEditNode(node)}
+            onExtractFurnishings={(node) => setFurnishingsNode(node)}
             onPlaceImage={() => setDrawerOpen(true)}
           />
         </div>
@@ -375,6 +413,15 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
           onSetClippingGlobal={setClippingGlobal}
         />
       </div>
+
+      <FreeformEditDialog
+        node={freeformEditNode}
+        references={materialSwapRefs}
+        onResult={(child) => board.insertChildNode(child)}
+        onClose={() => setFreeformEditNode(null)}
+      />
+
+      <FurnishingsDialog node={furnishingsNode} roomId={roomId} onClose={() => setFurnishingsNode(null)} />
 
       <ExtractClippingDialog
         node={extractNode}

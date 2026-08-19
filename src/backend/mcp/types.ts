@@ -1,3 +1,5 @@
+import type { z, ZodRawShape } from "zod";
+
 /**
  * @fileoverview MCP tool registry — shared types.
  *
@@ -16,7 +18,6 @@
  * automatically via the `tools/index.ts` barrel.
  */
 import { drizzle } from "drizzle-orm/d1";
-import type { z, ZodRawShape } from "zod";
 
 /** Drizzle D1 client type used by every tool handler. */
 export type RemodelDb = ReturnType<typeof drizzle>;
@@ -42,7 +43,8 @@ export type ToolCategory =
   | "ops"
   | "artifacts"
   | "changelog"
-  | "memory";
+  | "memory"
+  | "email";
 
 /**
  * Identity + authorization context resolved by whichever transport invoked the

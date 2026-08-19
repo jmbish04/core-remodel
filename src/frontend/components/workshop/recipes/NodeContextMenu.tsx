@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef } from "react";
-import { Armchair, Blend, Scissors, SwatchBook, Wand2 } from "lucide-react";
+import { Armchair, Blend, Box, Building2, DoorOpen, LayoutGrid, PackageSearch, Palette, PenTool, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -24,6 +24,7 @@ export interface ContextMenuState {
 interface NodeContextMenuProps {
   state: ContextMenuState | null;
   onClose: () => void;
+  onFreeformEdit: (node: BoardNode) => void;
   onExtractClipping: (node: BoardNode) => void;
   onMaterialSwap: (node: BoardNode) => void;
   onMix: (node: BoardNode) => void;
@@ -31,6 +32,14 @@ interface NodeContextMenuProps {
   onClayToPhotoreal: (node: BoardNode) => void;
   /** Only offered on floor_plan nodes. */
   onFloorPlanFurnish: (node: BoardNode) => void;
+  onToneUnify: (node: BoardNode) => void;
+  onLightingEnhance: (node: BoardNode) => void;
+  onPlanToIsometric: (node: BoardNode) => void;
+  onEvolutionGrid: (node: BoardNode) => void;
+  onSketchToRender: (node: BoardNode) => void;
+  onElevationRender: (node: BoardNode) => void;
+  onCabinetReveal: (node: BoardNode) => void;
+  onExtractFurnishings: (node: BoardNode) => void;
 }
 
 const ITEM_CLASS =
@@ -39,11 +48,20 @@ const ITEM_CLASS =
 export function NodeContextMenu({
   state,
   onClose,
+  onFreeformEdit,
   onExtractClipping,
   onMaterialSwap,
   onMix,
   onClayToPhotoreal,
   onFloorPlanFurnish,
+  onToneUnify,
+  onLightingEnhance,
+  onPlanToIsometric,
+  onEvolutionGrid,
+  onSketchToRender,
+  onElevationRender,
+  onCabinetReveal,
+  onExtractFurnishings,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -91,6 +109,20 @@ export function NodeContextMenu({
         type="button"
         role="menuitem"
         className={ITEM_CLASS}
+        onClick={() => run(onFreeformEdit)}
+      >
+        <Wand2 className="size-4 text-muted-foreground" />
+        <span>
+          Edit with words…
+          <span className="block text-[11px] text-muted-foreground">
+            Describe any change — add, remove, restyle
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
         onClick={() => run(onExtractClipping)}
       >
         <Scissors className="size-4 text-muted-foreground" />
@@ -129,6 +161,104 @@ export function NodeContextMenu({
           </span>
         </span>
       </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onLightingEnhance)}
+      >
+        <Sun className="size-4 text-muted-foreground" />
+        <span>
+          Even out the lighting…
+          <span className="block text-[11px] text-muted-foreground">
+            Balance exposure + recover shadow detail
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onToneUnify)}
+      >
+        <Palette className="size-4 text-muted-foreground" />
+        <span>
+          Clean up the color…
+          <span className="block text-[11px] text-muted-foreground">
+            Fix white balance + unify color temperature
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onEvolutionGrid)}
+      >
+        <LayoutGrid className="size-4 text-muted-foreground" />
+        <span>
+          Show it evolving…
+          <span className="block text-[11px] text-muted-foreground">
+            A 2×2 grid from empty to finished
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onSketchToRender)}
+      >
+        <PenTool className="size-4 text-muted-foreground" />
+        <span>
+          Make my sketch real…
+          <span className="block text-[11px] text-muted-foreground">
+            Turn a hand drawing into a photo
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onElevationRender)}
+      >
+        <Building2 className="size-4 text-muted-foreground" />
+        <span>
+          Render this elevation…
+          <span className="block text-[11px] text-muted-foreground">
+            A 2D elevation → photorealistic
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onCabinetReveal)}
+      >
+        <DoorOpen className="size-4 text-muted-foreground" />
+        <span>
+          Open it up…
+          <span className="block text-[11px] text-muted-foreground">
+            Reveal a cabinet / closet interior
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onExtractFurnishings)}
+      >
+        <PackageSearch className="size-4 text-muted-foreground" />
+        <span>
+          List the furnishings…
+          <span className="block text-[11px] text-muted-foreground">
+            Pull a shopping list out of this image
+          </span>
+        </span>
+      </button>
       {state.node.sourceType === "render" ? (
         <button
           type="button"
@@ -157,6 +287,22 @@ export function NodeContextMenu({
             Furnish this plan…
             <span className="block text-[11px] text-muted-foreground">
               Add furniture, keeping the walls intact
+            </span>
+          </span>
+        </button>
+      ) : null}
+      {state.node.sourceType === "floor_plan" ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={ITEM_CLASS}
+          onClick={() => run(onPlanToIsometric)}
+        >
+          <Box className="size-4 text-muted-foreground" />
+          <span>
+            Turn into a dollhouse…
+            <span className="block text-[11px] text-muted-foreground">
+              Render the plan as a 3D isometric view
             </span>
           </span>
         </button>

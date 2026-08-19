@@ -18,10 +18,7 @@
  * empty, so the page always returns something usable.
  */
 
-import { Hono } from "hono";
 import type { Context } from "hono";
-import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq } from "drizzle-orm";
 
 import {
   showroomStoreSales,
@@ -29,7 +26,13 @@ import {
   type ClearanceDetails,
   type ClearanceItem,
 } from "@backend/db/schema/showroom/index";
+import { startClearanceSweep } from "@backend/services/jules/clearance-sweep";
+import { discoverClearanceLinks } from "@backend/services/showroom/clearance-discovery";
 import { sweepShowroomSales } from "@backend/services/showroom/sales";
+import { backfillSaleItems } from "@backend/services/showroom/sales-backfill";
+import { and, desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
 
 export const showroomSalesRouter = new Hono<{ Bindings: Env }>();
 
@@ -93,12 +96,7 @@ async function loadCurrentSales(db: ReturnType<typeof drizzle>): Promise<SaleRow
     })
     .from(showroomStoreSales)
     .innerJoin(showroomStores, eq(showroomStoreSales.storeId, showroomStores.id))
-    .where(
-      and(
-        eq(showroomStoreSales.isCurrent, true),
-        eq(showroomStores.isActive, true),
-      ),
-    )
+    .where(and(eq(showroomStoreSales.isCurrent, true), eq(showroomStores.isActive, true)))
     .orderBy(desc(showroomStoreSales.timestamp));
 
   return rows as SaleRow[];
@@ -121,7 +119,7 @@ function flattenItems(rows: SaleRow[], scoreByRagUuid?: Map<string, number>): Sa
         saleHeadline: details.saleHeadline ?? null,
         saleEndsText: details.saleEndsText ?? null,
         capturedAt: row.timestamp ? new Date(row.timestamp).toISOString() : null,
-        score: row.ragUuid ? scoreByRagUuid?.get(row.ragUuid) ?? null : null,
+        score: row.ragUuid ? (scoreByRagUuid?.get(row.ragUuid) ?? null) : null,
       });
     }
   }
@@ -346,12 +344,7 @@ showroomSalesRouter.get("/store/:id", async (c) => {
       clearanceDetailsJson: showroomStoreSales.clearanceDetailsJson,
     })
     .from(showroomStoreSales)
-    .where(
-      and(
-        eq(showroomStoreSales.storeId, storeId),
-        eq(showroomStoreSales.isCurrent, true),
-      ),
-    )
+    .where(and(eq(showroomStoreSales.storeId, storeId), eq(showroomStoreSales.isCurrent, true)))
     .orderBy(desc(showroomStoreSales.timestamp));
 
   // Only surface snapshots that actually found something — a page that changed
@@ -380,9 +373,57 @@ showroomSalesRouter.get("/store/:id", async (c) => {
  */
 showroomSalesRouter.post("/sweep", async (c) => {
   const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
-  const limit = Number((body as { limit?: unknown }).limit ?? 20);
-  const summary = await sweepShowroomSales(c.env, {
-    limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 20,
+  const rawLimit = Number((body as { limit?: unknown }).limit ?? 20);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20;
+  // `?inline=1` forces the synchronous Workers-AI sweep (used by QC to get a
+  // summary in one request); default routes through the Jules DO. `?discover=1`
+  // also runs link discovery first (the weekly cron always does — a manual sweep
+  // stays fast by default).
+  if (c.req.query("inline") === "1") {
+    const summary = await sweepShowroomSales(c.env, { limit });
+    return c.json({ ok: true, mode: "fallback", ...summary });
+  }
+  const kickoff = await startClearanceSweep(c.env, {
+    limit,
+    discover: c.req.query("discover") === "1",
   });
+  return c.json({ ok: true, ...kickoff });
+});
+
+/**
+ * POST /discover — plain-fetch scan of every active store's sitemap (or homepage
+ * when it has none) to register new clearance/sale/outlet/last-chance links.
+ * Runs automatically before the weekly sweep; this is the manual trigger.
+ */
+showroomSalesRouter.post("/discover", async (c) => {
+  const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
+  const rawLimit = Number((body as { limit?: unknown }).limit ?? 500);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 500;
+  const summary = await discoverClearanceLinks(c.env, { limit });
   return c.json({ ok: true, ...summary });
+});
+
+/**
+ * GET /sweep/status?jobId= — read a Jules sweep job's progress from the DO. Omit
+ * jobId to read the singleton sweep instance's current job.
+ */
+showroomSalesRouter.get("/sweep/status", async (c) => {
+  const stub = c.env.JULES_CLEARANCE_AGENT.get(
+    c.env.JULES_CLEARANCE_AGENT.idFromName("clearance-sweep"),
+  );
+  const jobId = c.req.query("jobId");
+  const res = await stub.fetch(
+    `https://do/status${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ""}`,
+  );
+  return c.json((await res.json()) as Record<string, unknown>);
+});
+
+/**
+ * POST /backfill — one-shot migration of legacy `clearanceDetailsJson.items[]`
+ * blobs into `sale_items` rows (0038 Phase A). Idempotent: snapshots that
+ * already have rows are skipped, so it is safe to re-run.
+ */
+showroomSalesRouter.post("/backfill", async (c) => {
+  const result = await backfillSaleItems(c.env);
+  return c.json({ ok: true, ...result });
 });

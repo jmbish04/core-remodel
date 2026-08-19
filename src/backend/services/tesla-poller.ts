@@ -29,8 +29,10 @@
 import { teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
+import { type DetectorIngestResult, ingestViaDetector } from "@backend/services/location/ingest";
 import { getActiveDriveSlug } from "@backend/services/drive-lists";
 import { getVehicleState, sendNavigation, tessieConfigured } from "@backend/services/tesla";
+import { getStreamControl, isAutoNavigateEnabled, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { drizzle } from "drizzle-orm/d1";
 
 /** KV key holding the last poll timestamp, used as the throttle. */
@@ -42,7 +44,7 @@ export const POLL_INTERVAL_SECONDS = 120;
 export interface PollResult {
   polled: boolean;
   /** Why a poll was skipped, when it was. */
-  reason?: "no-active-drive" | "unconfigured" | "throttled" | "no-state";
+  reason?: "no-active-drive" | "unconfigured" | "throttled" | "no-state" | "stream-active";
   shiftState?: string | null;
   latitude?: number | null;
   longitude?: number | null;
@@ -67,10 +69,31 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
 
   if (!(await tessieConfigured(env))) return { polled: false, reason: "unconfigured" };
 
+  // Gate 1b: the poller is the FALLBACK ingest path. When the streaming DO is
+  // carrying the load (toggle on, socket connected, inside the daytime window)
+  // it stands down so the two paths never double-process the same drive. The
+  // configured cadence also becomes the throttle interval below.
+  //
+  // A failure reading stream-control must NOT take the fallback down — default to
+  // "stream not carrying" and the built-in cadence so ingest keeps flowing.
+  let streamCarrying = false;
+  let throttleTtl = POLL_INTERVAL_SECONDS;
+  try {
+    const control = await getStreamControl(env);
+    streamCarrying =
+      control.enabled && control.connected && isWithinStreamWindow(new Date(), control);
+    throttleTtl = control.pollFallbackSeconds;
+  } catch (err) {
+    console.error("[tesla-poller] stream-control read failed; using default cadence:", err);
+  }
+  if (streamCarrying) return { polled: false, reason: "stream-active" };
+
   // Gate 2: throttle. KV TTL is the clock — a present key means "polled
   // recently", so no timestamp arithmetic and no clock skew to reason about.
+  // Cloudflare KV rejects a TTL below 60s, so floor it (the config setter already
+  // enforces this, but a hand-edited row must not throw here).
   if (await env.CACHE.get(THROTTLE_KEY)) return { polled: false, reason: "throttled" };
-  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: POLL_INTERVAL_SECONDS });
+  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: Math.max(throttleTtl, 60) });
 
   const state = await getVehicleState(env);
   if (!state || state.latitude == null || state.longitude == null) {
@@ -95,7 +118,10 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
         name: match.matched.name,
         distanceM: match.matched.distanceM,
       };
-      if (match.next) {
+      // Auto-navigation is OPT-IN — commanding the car to a next stop without the
+      // driver asking (and, before the is_active scoping fix, off a STALE list) is
+      // exactly what pushed a bogus destination to the vehicle.
+      if (match.next && (await isAutoNavigateEnabled(env))) {
         const nav = await sendNavigation(env, `${match.next.lat},${match.next.lng}`);
         if (nav.ok) navigatedTo = match.next.name;
       }
@@ -108,6 +134,25 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
     source: "tesla-webhook",
     stopped: parked,
   });
+
+  // 0032 L1: feed every poll fix to the source-agnostic park/dwell detector, which
+  // stages a soft arrival on a confirmed PARK and finalizes on DRIVE-AWAY. This is
+  // what gives a poll-only drive (streaming DO off) the full visit lifecycle the
+  // 500ms stream used to own — no per-frame billing. Best-effort: a detector error
+  // must never fail the poll itself.
+  let detector: DetectorIngestResult | null = null;
+  try {
+    detector = await ingestViaDetector(env, {
+      source: "tesla-poll",
+      latitude: coord.lat,
+      longitude: coord.lng,
+      capturedAt: Date.now(),
+      shiftState: state.shiftState,
+      speed: state.speed,
+    });
+  } catch (err) {
+    console.error("[tesla-poller] detector ingest failed:", err);
+  }
 
   // Record the poll like any other vehicle event, so the drive history and the
   // health screen see the same evidence a webhook would have produced.
@@ -125,6 +170,7 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
         homeArrival,
         shiftState: state.shiftState,
         parked,
+        detector,
       }),
       data: JSON.stringify({ source: "poll", drive: activeSlug, state }),
     })

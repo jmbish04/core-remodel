@@ -122,7 +122,7 @@ export function CompareApp() {
       await api(`/api/materials/${p.materialId}/purchased`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isPurchased: true, purchasedShowroomProductId: p.id }),
+        body: JSON.stringify({ isPurchased: true, productId: p.id }),
       });
       toast.success(`Marked "${p.itemName}" as the choice for its material`);
     } catch (e) {
@@ -142,7 +142,7 @@ export function CompareApp() {
   const colCount = useMemo(() => data.products.length, [data.products]);
 
   return (
-    <main className="container mx-auto max-w-5xl px-4 py-10">
+    <main className="w-full px-4 py-10 md:px-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Compare</h1>

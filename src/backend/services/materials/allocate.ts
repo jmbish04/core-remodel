@@ -41,6 +41,7 @@ import {
 import { subcategories } from "@backend/db/schema/config/subcategories";
 import { rooms } from "@backend/db/schema/home/rooms";
 import { floors } from "@backend/db/schema/home/floors";
+import { computeRoomAreaSqFt } from "@backend/services/room-geometry";
 import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_email_invoice_line_items";
 import { workerEmailInvoices } from "@backend/db/schema/emails/worker_email_invoices";
 import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
@@ -83,9 +84,10 @@ export async function buildRoomContext(db: Db): Promise<RoomContext> {
       id: rooms.id,
       roomName: rooms.roomName,
       floorName: floors.name,
-      areaSqFt: rooms.areaSqFt,
       lengthFeet: rooms.lengthFeet,
+      lengthInches: rooms.lengthInches,
       widthFeet: rooms.widthFeet,
+      widthInches: rooms.widthInches,
     })
     .from(rooms)
     .leftJoin(floors, eq(rooms.floorId, floors.id))
@@ -98,7 +100,7 @@ export async function buildRoomContext(db: Db): Promise<RoomContext> {
       id: r.id,
       roomName: r.roomName,
       floorName: r.floorName ?? null,
-      areaSqFt: r.areaSqFt ?? null,
+      areaSqFt: computeRoomAreaSqFt(r),
       lengthFeet: r.lengthFeet ?? null,
       widthFeet: r.widthFeet ?? null,
       materializedSubcategoryIds: new Set<number>(),
@@ -448,10 +450,10 @@ Return your allocation as JSON.`;
  * Loads the room context once, computes deterministic line facts + per-line
  * eligibility, asks the model for a disposition + ranked rooms, then in CODE:
  * validates every room id against that line's eligible set, expands a "split"
- * into one assignment per unit, and enforces distinctness — greedily claiming the
- * highest-confidence unit's room first and removing it from the pool for the
- * remaining units of the same match group while distinct eligible rooms remain,
- * leaving a unit unassigned rather than doubling up.
+ * into one assignment per unit, and enforces distinctness — no two units of the
+ * same SUBCATEGORY (two toilets, whatever the brand) may claim the same room, so
+ * each takes the next unclaimed room from its ranked pool, leaving a unit
+ * unassigned rather than doubling up when the distinct rooms run out.
  */
 export async function allocateReceipt(
   db: Db,
@@ -496,11 +498,16 @@ export async function allocateReceipt(
 
   const modelByLine = new Map(modelLines.map((m) => [m.lineItemId, m]));
 
-  // Assign in a stable order so the greedy distinctness sweep is deterministic:
-  // group by matchGroup, and within a group take the highest model confidence first.
   const assignments: Assignment[] = [];
-  // Track claimed rooms per (matchGroup) so identical items don't collide.
-  const claimedByGroup = new Map<string, Set<number>>();
+  // Track claimed rooms per DISTINCTNESS KEY so no two units that cannot share a
+  // room land in the same one. The key is the SUBCATEGORY, not the match group:
+  // two toilets cannot share a bathroom regardless of brand, so a TOTO and a
+  // different-brand toilet on one receipt must still take distinct rooms. Only
+  // when a line has no subcategory do we fall back to its match group (identical
+  // unclassified items) so at least the truly-identical ones don't collide.
+  const claimedByKey = new Map<string, Set<number>>();
+  const distinctnessKey = (f: LineFact) =>
+    f.subcategoryId != null ? `sub:${f.subcategoryId}` : `grp:${f.matchGroupId}`;
 
   for (const f of facts) {
     const eligible = eligibleByLine.get(f.lineItemId) ?? [];
@@ -519,8 +526,9 @@ export async function allocateReceipt(
     const reasoning = m?.reasoning?.trim() || "Placed by eligible-room order (model gave no ranking).";
     const confidence = Math.max(0, Math.min(100, Math.round(m?.confidence ?? 40)));
 
-    if (!claimedByGroup.has(f.matchGroupId)) claimedByGroup.set(f.matchGroupId, new Set());
-    const claimed = claimedByGroup.get(f.matchGroupId)!;
+    const key = distinctnessKey(f);
+    if (!claimedByKey.has(key)) claimedByKey.set(key, new Set());
+    const claimed = claimedByKey.get(key)!;
 
     if (grouped) {
       // The whole quantity in one room — one material carrying qty.

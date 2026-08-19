@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { storeBayareaCities } from "./bay_area_cities";
+import { showroomStoreType } from "./store_types";
 
 /**
  * Showroom Stores — 1 row per physical location.
@@ -25,6 +26,20 @@ export const showroomStores = sqliteTable("showroom_stores", {
   description: text("description"),
   pricePoint: text("price_point", {
     enum: ["$", "$$", "$$$", "$$$$"],
+  }),
+
+  /**
+   * Business-model classification — single-select FK to `showroom_store_type`
+   * (corporate, authorized_dealer, local_boutique, specialty_no_showroom, …).
+   *
+   * ORTHOGONAL to `showroom_store_category` (what the store SELLS, many-to-many).
+   * This is HOW the business operates, and a store is exactly one, so it lives
+   * here as a single FK — never a mapping table, never a denormalized type_name
+   * (JOIN `showroom_store_type` for the display label). Nullable: legacy rows are
+   * backfilled from the free-text `scale` descriptor and left for review.
+   */
+  typeId: integer("type_id").references(() => showroomStoreType.id, {
+    onDelete: "set null",
   }),
 
   // ── Location details (per-row = per-physical-location) ────────────────
@@ -66,6 +81,18 @@ export const showroomStores = sqliteTable("showroom_stores", {
    */
   latitude: real("latitude"),
   longitude: real("longitude"),
+
+  /**
+   * True when this store originated as a park-find (0032 D1): the car parked here,
+   * a proximity scan flagged it, a human approved the HITL candidate, and it was
+   * promoted into the directory. Distinguishes machine-discovered stores from
+   * hand-entered / scraped ones for provenance + review filters.
+   */
+  isIdentifiedByProximityScan: integer("is_identified_by_proximity_scan", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  /** The proximity-scan packet that surfaced this store, JSON — kept for provenance. */
+  proximityScanJson: text("proximity_scan_json"),
 
   /**
    * Region hub CAPTURED for this specific location, derived from its address /
@@ -116,6 +143,28 @@ export const showroomStores = sqliteTable("showroom_stores", {
    * categories, notes, tags and product areas.
    */
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+
+  /**
+   * When this store was MERGED into another (dedup / branch-collapse), points at the
+   * surviving KEEPER store's id — the row this one was folded into. Distinguishes a
+   * merged-away loser (DEFUNCT: deep-links should redirect to the keeper, and write
+   * endpoints should 409) from a store that was merely soft-deactivated (`is_active = 0`
+   * with NO keeper → still restorable, writes allowed per the note above). Soft
+   * self-reference (no hard FK, like `store_rating.replaced_by_id`) to avoid a circular
+   * constraint; always another `showroom_stores.id`. Follow the chain to the final keeper
+   * (a keeper can itself be merged later). Null = never merged.
+   */
+  keeperStoreId: integer("keeper_store_id"),
+
+  /**
+   * Online-only flag (0038) — this row is a web-only clearance source with no
+   * physical showroom (no address / GPS). Added from the Sale Scan Health page
+   * so web retailers' sales can be tracked alongside physical showrooms; drive
+   * routing + map features should exclude these.
+   */
+  isOnlineOnly: integer("is_online_only", { mode: "boolean" })
+    .notNull()
+    .default(false),
 
   /**
    * Large-selection flag — indicates a warehouse-scale or unusually broad

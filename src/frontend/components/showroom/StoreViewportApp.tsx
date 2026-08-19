@@ -23,6 +23,7 @@ import {
   CalendarPlus,
   CheckCircle2,
   ExternalLink,
+  FileText,
   Globe,
   ImagePlus,
   Loader2,
@@ -42,12 +43,16 @@ import {
   Trash2,
   Upload,
   Users,
+  View,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { NavigateTeslaButton } from "@/components/tesla/NavigateTeslaButton";
+import { StoreVisitsSection } from "@/components/visits/StoreVisitsSection";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,14 +65,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EntityDocumentsPanel } from "@/components/documents";
 import { noteEditorHref } from "@/components/notes";
+import { NoteBody } from "./NoteBody";
 
 import { ScrapeResultsModal } from "./ScrapeResultsModal";
 import { RecordVisitModal } from "./visit/RecordVisitModal";
 import { AssociateBrandsModal } from "./associate/AssociateBrandsModal";
 import { AssociateProductsModal } from "./associate/AssociateProductsModal";
-import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
+import { type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
+import { VisitPhotosManager } from "./photos/VisitPhotosManager";
+import { StreetViewTour } from "./photos/StreetViewTour";
 import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
+import { ShowroomGmailPanel } from "@/components/gmail/ShowroomGmailPanel";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
 import { EditStoreModal, type EditableStore } from "./EditStoreModal";
@@ -82,16 +91,20 @@ import {
   ManageLinksModal,
   SocialLinks,
   SOCIAL_LINK_TYPES,
+  TypeEditor,
   UploadPhotoModal,
   type StoreCategoryChip,
 } from "./hero";
+import { LocationsSpot } from "./locations/LocationsModal";
+import { asLinkType } from "./intake/LinksField";
+import { absoluteHref } from "./hero/SocialLinks";
 import type { HoursJson } from "./intake/hours-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type SectionKey = "brands-products" | "contacts" | "notes" | "photos";
+export type SectionKey = "brands-products" | "contacts" | "notes" | "photos" | "visits";
 
-const VALID_SECTIONS: SectionKey[] = ["brands-products", "contacts", "notes", "photos"];
+const VALID_SECTIONS: SectionKey[] = ["brands-products", "contacts", "notes", "photos", "visits"];
 
 function isSectionKey(v: string | undefined | null): v is SectionKey {
   return v != null && (VALID_SECTIONS as string[]).includes(v);
@@ -138,6 +151,13 @@ interface StoreDetail {
   name: string;
   description: string | null;
   pricePoint: string | null;
+  /** Multi-location summary (0045/0047) — count + unique cities sorted asc. */
+  locationCount?: number;
+  locationCities?: string[];
+  // Business-model type (joined from showroom_store_type on GET /:id).
+  typeId: number | null;
+  typeName: string | null;
+  typeColor: string | null;
   phoneNumber: string | null;
   emailAddress: string | null;
   /**
@@ -162,6 +182,8 @@ interface StoreDetail {
   locationState: string | null;
   locationZipCode: string | null;
   googleMapsLink: string | null;
+  /** Google Place id — used to log Street View render events for cost context. */
+  placeId: string | null;
   /** Places coordinates — preferred over the address text for Tesla navigation. */
   latitude: number | null;
   longitude: number | null;
@@ -182,6 +204,39 @@ interface MappedProduct {
   mappingId: number;
   product: { id: number; itemName: string; brandId: number | null };
   brandName: string | null;
+}
+
+/** One line from a pending quote/invoice, GET /:id/pending-quotes (0042 P4/P5). */
+interface PendingQuoteLine {
+  id: number;
+  description: string | null;
+  quantity: number | null;
+  unitPrice: number | null;
+  lineTotal: number | null;
+  matchStatus: string;
+  /** Product this line was matched to / created as (P5); null if skipped. */
+  productId: number | null;
+  brandId: number | null;
+  productName: string | null;
+}
+
+/** A quote/invoice/receipt extracted from email, resolved to this store. */
+interface PendingQuote {
+  id: number;
+  kind: string;
+  vendorName: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  subtotal: number | null;
+  tax: number | null;
+  total: number | null;
+  currency: string | null;
+  confidence: number | null;
+  status: string;
+  emailId: number;
+  createdAt: number | null;
+  lineItems: PendingQuoteLine[];
 }
 
 /** One discounted item from a clearance snapshot (see ClearanceItem in D1). */
@@ -501,10 +556,6 @@ function ScrapeBadge({
   );
 }
 
-/** Author-trusted PlateJS HTML block (rating context / note snippets). */
-const PROSE_CLASS =
-  "prose prose-sm prose-invert max-w-none text-sm leading-relaxed [&_a]:text-sky-400 [&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-sm [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5";
-
 // ─── Main component ─────────────────────────────────────────────────────────────
 
 export function StoreViewportApp({
@@ -522,6 +573,8 @@ export function StoreViewportApp({
 
   // Section data.
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
+  const [pendingQuotes, setPendingQuotes] = useState<PendingQuote[]>([]);
+  const [resolvingQuoteId, setResolvingQuoteId] = useState<number | null>(null);
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [photos, setPhotos] = useState<ShowroomPhoto[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
@@ -534,6 +587,10 @@ export function StoreViewportApp({
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryStartIndex, setGalleryStartIndex] = useState(0);
+
+  // Inbox unread badge (0040 P4). The button now opens the full-page inbox (0041);
+  // the hidden panel below stays mounted only to keep this count fresh.
+  const [inboxUnread, setInboxUnread] = useState(0);
 
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
@@ -590,6 +647,40 @@ export function StoreViewportApp({
       toast.error(e instanceof Error ? e.message : "Failed to load mapped products");
     }
   }, [id]);
+
+  const loadPendingQuotes = useCallback(async () => {
+    try {
+      const data = await api<{ quotes: PendingQuote[] }>(
+        `/api/showroom-stores/${id}/pending-quotes`,
+      );
+      setPendingQuotes(data.quotes ?? []);
+    } catch (e) {
+      console.error("[store/pending-quotes]", e);
+      // Non-fatal: a quotes fetch failure must not blank the whole viewport.
+    }
+  }, [id]);
+
+  const resolveQuote = useCallback(
+    async (quote: PendingQuote, action: "confirm" | "reject") => {
+      if (resolvingQuoteId != null) return;
+      setResolvingQuoteId(quote.id);
+      try {
+        const res = await fetch(
+          `/api/worker-emails/${quote.emailId}/invoices/${quote.id}/${action}`,
+          { method: "POST", credentials: "include" },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        toast.success(action === "confirm" ? "Quote confirmed" : "Quote dismissed");
+        await loadPendingQuotes();
+      } catch (e) {
+        console.error("[store/resolve-quote]", e);
+        toast.error(e instanceof Error ? e.message : "Failed to update quote");
+      } finally {
+        setResolvingQuoteId(null);
+      }
+    },
+    [resolvingQuoteId, loadPendingQuotes],
+  );
 
   const loadNotes = useCallback(async () => {
     try {
@@ -662,21 +753,6 @@ export function StoreViewportApp({
     }
   }, [id, loadGalleryPhotos, loadStore]);
 
-  const deleteVisitPhoto = useCallback(async (imageId: number) => {
-    try {
-      const res = await fetch(`/api/showroom-stores/${id}/photos/${imageId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`Failed (${res.status})`);
-      toast.success("Visit photo deleted.");
-      void loadPhotos();
-    } catch (e) {
-      console.error("[store/delete-visit-photo]", e);
-      toast.error("Failed to delete photo.");
-    }
-  }, [id, loadPhotos]);
-
   useEffect(() => {
     setLoading(true);
     void loadStore();
@@ -686,6 +762,7 @@ export function StoreViewportApp({
     void loadContacts();
     void loadGalleryPhotos();
     void loadSales();
+    void loadPendingQuotes();
   }, [
     loadStore,
     loadMappedProducts,
@@ -694,6 +771,7 @@ export function StoreViewportApp({
     loadContacts,
     loadGalleryPhotos,
     loadSales,
+    loadPendingQuotes,
   ]);
 
   // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
@@ -976,6 +1054,16 @@ export function StoreViewportApp({
 
   // ── Bento sections ──────────────────────────────────────────────────────────
 
+  // The store's 360° walkthrough (Matterport or other), if a SHOWROOM_TOUR link
+  // exists. Surfaced in the Photos section and flagged on its bento tile.
+  const tourUrl = useMemo(
+    () =>
+      absoluteHref(
+        store?.links?.find((l) => asLinkType(l.type) === "SHOWROOM_TOUR")?.url,
+      ),
+    [store?.links],
+  );
+
   const bentoSections: ShowroomBentoSection[] = useMemo(
     () => [
       {
@@ -998,11 +1086,17 @@ export function StoreViewportApp({
         icon: <StickyNote className="size-5" />,
       },
       {
+        key: "visits",
+        title: "Visits",
+        description: "Arrivals, dwell & your visit notes",
+        icon: <MapPin className="size-5" />,
+      },
+      {
         key: "photos",
         title: "Showroom photos",
         description: `${galleryPhotos.length + photos.length} photo${
           galleryPhotos.length + photos.length === 1 ? "" : "s"
-        } · Places + your visits`,
+        } · Places + your visits${tourUrl ? " · 360° tour" : ""}`,
         icon: <ImagePlus className="size-5" />,
         preview:
           galleryPhotos.length > 0 || photos.length > 0 ? (
@@ -1026,6 +1120,7 @@ export function StoreViewportApp({
       photos,
       galleryPhotos,
       brandsWithCounts,
+      tourUrl,
     ],
   );
 
@@ -1050,7 +1145,7 @@ export function StoreViewportApp({
   const effectiveScrapeStatus: ScrapeStatus = scrapeStatus ?? store.scrapeStatus ?? "idle";
 
   return (
-    <main className="container mx-auto max-w-5xl px-4 py-10">
+    <main className="w-full px-4 py-10 md:px-8">
       <a
         href="/admin/shopping/showrooms"
         className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
@@ -1133,6 +1228,15 @@ export function StoreViewportApp({
               onChanged={() => void loadStore()}
             />
 
+            {/* Business-model type — single FK, edited via the yellow-highlight modal. */}
+            <TypeEditor
+              storeId={id}
+              typeId={store.typeId}
+              typeName={store.typeName}
+              typeColor={store.typeColor}
+              onChanged={() => void loadStore()}
+            />
+
             {store.description ? (
               <p className="mt-2 text-sm text-muted-foreground">{store.description}</p>
             ) : null}
@@ -1172,6 +1276,15 @@ export function StoreViewportApp({
               links={store.links}
               onOpenLinks={() => setManageLinksOpen(true)}
             />
+            {store.latitude != null && store.longitude != null ? (
+              <div className="mt-2">
+                <NavigateTeslaButton
+                  latitude={store.latitude}
+                  longitude={store.longitude}
+                  className="h-12 gap-2"
+                />
+              </div>
+            ) : null}
           </div>
 
           {/* Office-hours mini-card — click for full hours + contact + map, plus
@@ -1185,6 +1298,16 @@ export function StoreViewportApp({
           </div>
           </div>
 
+        {/* Locations spot — count + city chips, opens the locations modal (0045/0047). */}
+        <div className="mt-4">
+          <LocationsSpot
+            storeId={store.id}
+            storeName={store.name}
+            locationCount={store.locationCount ?? 0}
+            locationCities={store.locationCities ?? []}
+          />
+        </div>
+
         {/* Visit rating + context note. */}
         {store.rating !== null || store.ratingContextHtml ? (
           <div className="mt-5 rounded-lg bg-muted/40 p-4">
@@ -1194,13 +1317,11 @@ export function StoreViewportApp({
               </span>
               {store.rating !== null ? <VisitStars rating={store.rating} /> : null}
             </div>
-            {store.ratingContextHtml ? (
-              <div
-                className={`mt-2 ${PROSE_CLASS}`}
-                // Single trusted homeowner's own authored content, escaped at write time.
-                dangerouslySetInnerHTML={{ __html: store.ratingContextHtml }}
-              />
-            ) : null}
+            <NoteBody
+              className="mt-2"
+              markdown={store.ratingContextMarkdown}
+              html={store.ratingContextHtml}
+            />
           </div>
         ) : null}
 
@@ -1242,6 +1363,30 @@ export function StoreViewportApp({
           >
             <Package className="size-3.5" /> Associate products
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="relative gap-1.5"
+            aria-label={`Inbox${inboxUnread > 0 ? ` (${inboxUnread} unread)` : ""}`}
+            render={<a href={`/admin/shopping/store/${id}/inbox`} />}
+          >
+            <Mail className="size-3.5" /> Inbox
+            {inboxUnread > 0 ? (
+              <span className="ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-sky-500 px-1.5 text-[11px] font-semibold text-white">
+                {inboxUnread}
+              </span>
+            ) : null}
+          </Button>
+        </div>
+
+        {/* Hidden inbox panel — kept mounted only so the unread badge above
+            populates on load; the Inbox button now opens the full-page inbox. */}
+        <div className="hidden">
+          <ShowroomGmailPanel
+            storeId={id}
+            storeName={store.name}
+            onUnreadChange={setInboxUnread}
+          />
         </div>
 
         </div>
@@ -1259,16 +1404,24 @@ export function StoreViewportApp({
       {/* ── Active section content ────────────────────────────────────────────── */}
       <div className="mt-6">
         {section === "brands-products" ? (
-          <BrandsProductsSection
-            brands={brandsWithCounts}
-            products={mappedProducts}
-            removingBrandId={removingBrandId}
-            removingProductId={removingProductId}
-            onRemoveBrand={removeBrand}
-            onRemoveProduct={removeMappedProduct}
-            onAssociateBrands={() => setBrandsOpen(true)}
-            onAssociateProducts={() => setProductsOpen(true)}
-          />
+          <div className="space-y-6">
+            <PendingQuotesPanel
+              quotes={pendingQuotes}
+              resolvingQuoteId={resolvingQuoteId}
+              onConfirm={(q) => void resolveQuote(q, "confirm")}
+              onDismiss={(q) => void resolveQuote(q, "reject")}
+            />
+            <BrandsProductsSection
+              brands={brandsWithCounts}
+              products={mappedProducts}
+              removingBrandId={removingBrandId}
+              removingProductId={removingProductId}
+              onRemoveBrand={removeBrand}
+              onRemoveProduct={removeMappedProduct}
+              onAssociateBrands={() => setBrandsOpen(true)}
+              onAssociateProducts={() => setProductsOpen(true)}
+            />
+          </div>
         ) : section === "contacts" ? (
           <ContactsSection
             contacts={contacts}
@@ -1282,20 +1435,27 @@ export function StoreViewportApp({
             onEditNote={openEditNote}
             onDeleteNote={setDeleteNoteTarget}
           />
+        ) : section === "visits" ? (
+          <StoreVisitsSection storeId={id} />
         ) : (
           <PhotosSection
+            storeId={id}
+            tourUrl={tourUrl}
+            placeId={store.placeId}
+            lat={store.latitude}
+            lng={store.longitude}
             galleryPhotos={galleryPhotos}
             photos={photos}
             uploading={uploading}
             onUploadClick={() => setUploadOpen(true)}
             onImportFiles={uploadPhotos}
             onPhotoSaved={loadPhotos}
+            onChanged={loadPhotos}
             onOpenGallery={(index) => {
               setGalleryStartIndex(index);
               setGalleryOpen(true);
             }}
             onDeleteGalleryPhoto={deleteGalleryPhoto}
-            onDeleteVisitPhoto={deleteVisitPhoto}
           />
         )}
       </div>
@@ -1804,6 +1964,156 @@ function BrandListCard({
 
 // ─── Section: Brands & Products ─────────────────────────────────────────────────
 
+/** Format a numeric amount as currency; blank when null. */
+function fmtMoney(n: number | null | undefined, currency = "USD"): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
+  } catch {
+    return `$${n.toFixed(2)}`;
+  }
+}
+
+/**
+ * Pending quotes/invoices/receipts extracted from email and resolved to THIS
+ * showroom (0042 P4). Shows the header + line items in-context so the user can
+ * confirm or dismiss without leaving the store. Product mapping (match/create)
+ * arrives in P5; for now "Open email" deep-links to the full HITL review.
+ */
+function PendingQuotesPanel({
+  quotes,
+  resolvingQuoteId,
+  onConfirm,
+  onDismiss,
+}: {
+  quotes: PendingQuote[];
+  resolvingQuoteId: number | null;
+  onConfirm: (quote: PendingQuote) => void;
+  onDismiss: (quote: PendingQuote) => void;
+}) {
+  if (quotes.length === 0) return null;
+
+  return (
+    <div className="rounded-xl bg-card p-5 ring-1 ring-amber-500/30">
+      <div className="flex items-center gap-2">
+        <FileText className="size-4 text-amber-500" aria-hidden />
+        <h2 className="text-base font-semibold">
+          Pending from email ({quotes.length})
+        </h2>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Quotes and invoices we matched to this showroom — confirm to keep, dismiss
+        if it isn’t theirs.
+      </p>
+
+      <div className="mt-4 space-y-3">
+        {quotes.map((q) => {
+          const busy = resolvingQuoteId === q.id;
+          const label = q.kind === "receipt" ? "Receipt" : "Quote/Invoice";
+          return (
+            <div
+              key={q.id}
+              className="rounded-lg border border-border/50 bg-background/40 p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs">
+                      {label}
+                    </Badge>
+                    {q.invoiceNumber ? (
+                      <span className="text-xs text-muted-foreground">
+                        #{q.invoiceNumber}
+                      </span>
+                    ) : null}
+                    {q.confidence != null ? (
+                      <span className="text-xs text-muted-foreground">
+                        {Math.round(q.confidence * 100)}% confidence
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 truncate text-sm font-medium">
+                    {q.vendorName ?? "Unknown vendor"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {q.total != null ? `Total ${fmtMoney(q.total, q.currency ?? "USD")}` : "No total"}
+                    {q.invoiceDate ? ` · ${q.invoiceDate}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <a
+                    href={`/admin/shopping/receipt-review`}
+                    className={buttonVariants({ size: "sm", variant: "ghost" })}
+                  >
+                    <ExternalLink className="size-3.5" /> Review &amp; map
+                  </a>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={busy}
+                    onClick={() => onConfirm(q)}
+                  >
+                    {busy ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="size-3.5" />
+                    )}
+                    Confirm
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="gap-1.5 text-muted-foreground"
+                    disabled={busy}
+                    onClick={() => onDismiss(q)}
+                  >
+                    <X className="size-3.5" /> Dismiss
+                  </Button>
+                </div>
+              </div>
+
+              {q.lineItems.length > 0 ? (
+                <ul className="mt-3 divide-y divide-border/40 border-t border-border/40 text-sm">
+                  {q.lineItems.map((li) => (
+                    <li key={li.id} className="py-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          {li.quantity != null ? `${li.quantity}× ` : ""}
+                          {li.description ?? "—"}
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          {fmtMoney(li.lineTotal ?? li.unitPrice, q.currency ?? "USD")}
+                        </span>
+                      </div>
+                      {li.productId != null && li.productName ? (
+                        <div className="mt-0.5 flex items-center gap-1.5 pl-4 text-xs text-muted-foreground">
+                          <Package className="size-3" aria-hidden />
+                          <span className="min-w-0 truncate">{li.productName}</span>
+                          <Badge
+                            variant="outline"
+                            className={
+                              li.matchStatus === "created"
+                                ? "border-emerald-500/40 text-emerald-500"
+                                : ""
+                            }
+                          >
+                            {li.matchStatus === "created" ? "new from quote" : "matched"}
+                          </Badge>
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function BrandsProductsSection({
   brands,
   products,
@@ -2093,11 +2403,11 @@ function NotesSection({
                     </span>
                   ) : null}
                 </div>
-                {note.contentHtml ? (
-                  <div
-                    className={`mt-1.5 line-clamp-3 ${PROSE_CLASS}`}
-                    // Single trusted homeowner's own authored content, escaped at write time.
-                    dangerouslySetInnerHTML={{ __html: note.contentHtml }}
+                {note.contentMarkdown?.trim() || note.contentHtml?.trim() ? (
+                  <NoteBody
+                    className="mt-1.5 line-clamp-3"
+                    markdown={note.contentMarkdown}
+                    html={note.contentHtml}
                   />
                 ) : (
                   <p className="mt-1.5 text-xs text-muted-foreground/70">No content.</p>
@@ -2170,6 +2480,63 @@ function GalleryThumb({
   );
 }
 
+/** Is this a Matterport URL we can embed directly in an iframe? */
+function isMatterport(url: string): boolean {
+  try {
+    return /(^|\.)matterport\.com$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The store's 360° walkthrough. A Matterport link embeds inline (their /show/
+ * URLs are iframe-able); any other tour URL (Google Maps "See inside", a hosted
+ * 360, etc.) renders as a big open-in-new-tab tile.
+ */
+function TourCard({ url }: { url: string }) {
+  return (
+    <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          <View className="size-4 text-muted-foreground" /> 360° Tour
+        </h2>
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className={cn(buttonVariants({ size: "sm", variant: "outline" }), "gap-1.5")}
+        >
+          <ExternalLink className="size-3.5" /> Open in new tab
+        </a>
+      </div>
+      {isMatterport(url) ? (
+        <div className="mt-4 aspect-video overflow-hidden rounded-lg ring-1 ring-border/40">
+          <iframe
+            src={url}
+            title="360° showroom tour"
+            allow="fullscreen; xr-spatial-tracking"
+            allowFullScreen
+            // Defense-in-depth: the host is already checked (isMatterport), but a
+            // sandbox blocks top-level navigation + other ambient authority.
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            className="size-full"
+          />
+        </div>
+      ) : (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 flex aspect-video items-center justify-center rounded-lg bg-muted/40 text-sm text-muted-foreground ring-1 ring-border/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+        >
+          <View className="mr-2 size-5" /> Open the 360° walkthrough
+        </a>
+      )}
+    </div>
+  );
+}
+
 /**
  * Photos section — two collections:
  *   1. "From Google Places" — the stock photos pulled at intake/backfill time
@@ -2178,28 +2545,47 @@ function GalleryThumb({
  *      upload affordance right in the collection.
  */
 function PhotosSection({
+  storeId,
+  tourUrl,
+  placeId,
+  lat,
+  lng,
   galleryPhotos,
   photos,
   uploading,
   onUploadClick,
   onImportFiles,
   onPhotoSaved,
+  onChanged,
   onOpenGallery,
   onDeleteGalleryPhoto,
-  onDeleteVisitPhoto,
 }: {
+  storeId: number;
+  /** Absolute URL of the store's 360° tour (SHOWROOM_TOUR link), if any. */
+  tourUrl?: string | null;
+  /** Google Place id + coords — power the free Street View fallback tour. */
+  placeId: string | null;
+  lat: number | null;
+  lng: number | null;
   galleryPhotos: GalleryPhoto[];
   photos: ShowroomPhoto[];
   uploading: boolean;
   onUploadClick: () => void;
   onImportFiles: (files: File[]) => void | Promise<void>;
   onPhotoSaved: () => void;
+  onChanged: () => void;
   onOpenGallery: (index: number) => void;
   onDeleteGalleryPhoto: (photoId: number) => void;
-  onDeleteVisitPhoto: (imageId: number) => void;
 }) {
   return (
     <div className="space-y-6">
+      {/* ── 360° walkthrough: manual link wins; else free Street View probe ── */}
+      {tourUrl ? (
+        <TourCard url={tourUrl} />
+      ) : (
+        <StreetViewTour storeId={storeId} placeId={placeId} lat={lat} lng={lng} />
+      )}
+
       {/* ── Collection: Google Places stock photos ── */}
       <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
         <div className="flex items-center justify-between gap-2">
@@ -2273,27 +2659,12 @@ function PhotosSection({
           </div>
         </div>
 
-        {photos.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No photos yet. Upload a shot from your visit.
-          </p>
-        ) : (
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {photos.map((photo) => (
-              <div key={photo.id} className="group/vphoto relative">
-                <ShowroomPhotoPolaroid photo={photo} onSaved={onPhotoSaved} />
-                <button
-                  type="button"
-                  onClick={() => onDeleteVisitPhoto(photo.id)}
-                  className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/vphoto:opacity-100"
-                  title="Delete photo"
-                >
-                  <Trash2 className="size-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <VisitPhotosManager
+          storeId={storeId}
+          photos={photos}
+          onChanged={onChanged}
+          onPhotoSaved={onPhotoSaved}
+        />
       </div>
     </div>
   );

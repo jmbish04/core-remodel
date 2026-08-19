@@ -6,6 +6,10 @@
   "upload_source_maps": true,
   "workers_dev": true,
   "preview_urls": true,
+  // Vendor guest portal (0043): the short, memorable domain vendors/showrooms are
+  // pointed to. `custom_domain` provisions the DNS + TLS on the hacolby.app zone.
+  // Stripped from preview workers by scripts/deploy-preview.mjs (workers.dev only).
+  "routes": [{ "pattern": "remodel.hacolby.app", "custom_domain": true }],
   "rules": [
     { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
   ],
@@ -49,6 +53,9 @@
     // page URLs in MCP tool responses (e.g. the exact bug/budget/showroom page
     // to open) instead of bare paths. No trailing slash.
     "WORKER_URL": "https://core-remodel.hacolby.workers.dev",
+    // Public origin of the Pascal floorplan editor (Vercel). Used to build scene
+    // deep-links (`/scene/:id`) in Pascal API responses + MCP tools. No trailing slash.
+    "PASCAL_EDITOR_URL": "https://3d-remodel.vercel.app",
     "AI_GATEWAY_ID": "core-remodel",
     "CLICKUP_LIST_ID": "901714811766",
     // TODO(justin): fill in a Google Programmable Search Engine "cx" id
@@ -117,6 +124,11 @@
       "class_name": "ShowroomOnboardingWorkflow",
     },
     {
+      "name": "showroom-bulk-intake-workflow",
+      "binding": "SHOWROOM_BULK_INTAKE_WORKFLOW",
+      "class_name": "ShowroomBulkIntakeWorkflow",
+    },
+    {
       "name": "brand-research-workflow",
       "binding": "BRAND_RESEARCH_WORKFLOW",
       "class_name": "BrandResearchWorkflow",
@@ -141,6 +153,11 @@
       "binding": "BLANK_CANVAS_WORKFLOW",
       "class_name": "BlankCanvasBatchWorkflow",
     },
+    {
+      "name": "render-campaign-workflow",
+      "binding": "RENDER_CAMPAIGN_WORKFLOW",
+      "class_name": "RenderCampaignWorkflow",
+    },
   ],
   "triggers": {
     // "15 */4 * * *": Gmail comms hub ingestion (0013 P3-07) — every 4 hours.
@@ -161,7 +178,7 @@
     // 0 9 * * 1 — weekly provider price refresh (0029). Published list prices
 // change without notice; without a refreshed catalog every cost number on
 // /admin/system/agents/usage is a guess.
-    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1", "0 9 * * 1"],
+    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1", "0 9 * * 1", "0 11 * * *"],
   },
   "kv_namespaces": [
     {
@@ -223,107 +240,90 @@
     {
       "binding": "GITHUB_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GH_TOKEN",
-      "remote": true
+      "secret_name": "GH_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_ACCOUNT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_ACCOUNT_ID",
-      "remote": true
+      "secret_name": "CLOUDFLARE_ACCOUNT_ID"
     },
     {
       "binding": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
-      "remote": true
+      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN"
     },
     {
       "binding": "CF_IMAGES_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
-      "remote": true
+      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_WRANGLER_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN",
-      "remote": true
+      "secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN"
     },
     {
       "binding": "WORKER_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "WORKER_API_KEY",
-      "remote": true
+      "secret_name": "WORKER_API_KEY"
     },
     {
       "binding": "AI_GATEWAY_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
-      "remote": true
+      "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN"
     },
     {
       "binding": "CF_BROWSER_RENDER_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN",
-      "remote": true
+      "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN"
     },
     {
       "binding": "JULES_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "JULES_API_KEY",
-      "remote": true
+      "secret_name": "JULES_API_KEY"
     },
     {
       "binding": "GEMINI_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_API_KEY",
-      "remote": true
+      "secret_name": "GOOGLE_API_KEY"
     },
     {
       "binding": "ANTHROPIC_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "ANTHROPIC_API_KEY",
-      "remote": true
+      "secret_name": "ANTHROPIC_API_KEY"
     },
     {
       "binding": "FAL_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "FAL_API_KEY",
-      "remote": true
+      "secret_name": "FAL_API_KEY"
     },
     {
       "binding": "REPLICATE_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "REPLICATE_API_TOKEN",
-      "remote": true
+      "secret_name": "REPLICATE_API_TOKEN"
     },
     {
       "binding": "GOOGLE_MAPS_API",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_MAPS_API",
-      "remote": true
+      "secret_name": "GOOGLE_MAPS_API"
     },
     {
       "binding": "GOOGLE_SEARCH_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_SEARCH_API_KEY",
-      "remote": true
+      "secret_name": "GOOGLE_SEARCH_API_KEY"
     },
     {
       // Tessie hosted Fleet API bearer token. Read via getTessieToken().
       "binding": "TESSIE_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "TESSIE_API_TOKEN",
-      "remote": true
+      "secret_name": "TESSIE_API_TOKEN"
     },
     {
       // VIN of the vehicle ("Betsy") Tessie commands are addressed to.
       // Read via getTeslaVin().
       "binding": "TESLA_BETSY_VIN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "TESLA_BETSY_VIN",
-      "remote": true
+      "secret_name": "TESLA_BETSY_VIN"
     },
     // Tesla webhook/telemetry auth reuses the existing WORKER_API_KEY binding
     // (above) — no dedicated webhook secret.
@@ -331,48 +331,41 @@
       // ClickUp task mirror (0009): consumed by RemodelOrchestrator + /api/clickup.
       "binding": "CLICKUP_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLICKUP_TOKEN",
-      "remote": true
+      "secret_name": "CLICKUP_TOKEN"
     },
     {
       "binding": "CLICKUP_TEAM_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLICKUP_TEAM_ID",
-      "remote": true
+      "secret_name": "CLICKUP_TEAM_ID"
     },
     {
       // Gmail comms hub (P3-07): service-account DWD. The private key exceeds
       // the secrets-store value limit, so it is SPLIT — concatenate PT_1 + PT_2.
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
-      "remote": true
+      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1"
     },
     {
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
-      "remote": true
+      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2"
     },
     {
       "binding": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
-      "remote": true
+      "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL"
     },
     {
       // Google Photos Picker API (0019): 3-legged OAuth client. Populate via
       // `pnpm run secrets:google-photos` (parses the downloaded client-secret JSON).
       "binding": "GOOGLE_PHOTOS_CLIENT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_PHOTOS_CLIENT_ID",
-      "remote": true
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_ID"
     },
     {
       "binding": "GOOGLE_PHOTOS_CLIENT_SECRET",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_PHOTOS_CLIENT_SECRET",
-      "remote": true
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_SECRET"
     },
   ],
   "durable_objects": {
@@ -443,6 +436,27 @@
         "name": "REMODEL_MCP",
         "class_name": "RemodelMcpAgent",
       },
+      {
+        // 0023 ING-02: outbound Fleet-Telemetry connector. One singleton DO holds
+        // the Tessie WebSocket only while a drive is active in the daytime window;
+        // native alarms + circuit breaker bound its cost. Not an Agents-SDK DO.
+        "name": "TESLA_STREAM",
+        "class_name": "TeslaStreamDO",
+      },
+      {
+        // 0032 D2: discovery-finder realtime fan-out. One DO per search slug
+        // (room "search:<slug>") streams status/revision/results to an open
+        // finder page. Hibernatable WebSockets; no alarm, no growing storage.
+        "name": "DISCOVERY_HUB",
+        "class_name": "DiscoveryHub",
+      },
+      {
+        // 0038 Phase B/C: drives a repoless Jules session as the PRIMARY
+        // clearance extractor. Native-alarm batch loop; job state in KV, not DO
+        // SQLite; alarm deleted when the sweep finishes (dormant ~$0).
+        "name": "JULES_CLEARANCE_AGENT",
+        "class_name": "JulesClearanceAgent",
+      },
     ],
   },
   "migrations": [
@@ -512,6 +526,22 @@
       // Showroom Scout session DO.
       "tag": "v15",
       "new_sqlite_classes": ["ShowroomScout"],
+    },
+    {
+      // 0023 Tesla streaming-ingest connector DO.
+      "tag": "v16",
+      "new_sqlite_classes": ["TeslaStreamDO"],
+    },
+    {
+      // 0032 D2 discovery-finder realtime fan-out DO.
+      "tag": "v17",
+      "new_sqlite_classes": ["DiscoveryHub"],
+    },
+    {
+      // 0038 Jules clearance-analysis DO. Uses native alarms only; job state in
+      // KV, so this is nominally a sqlite class but stores nothing of size.
+      "tag": "v18",
+      "new_sqlite_classes": ["JulesClearanceAgent"],
     },
   ],
   "worker_loaders": [

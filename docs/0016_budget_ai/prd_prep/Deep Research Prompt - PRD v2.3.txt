@@ -1,0 +1,581 @@
+﻿Architecture and Product Requirements Document: Hybrid AI Construction Budgeting & Sourcing Platform
+<research_scratchpad>
+Phase 1: Deep Repository Research (Internal Scratchpad)
+1. Repository Structure Analysis (core-remodel mono-repo):
+   * Drizzle Schema Path: The application relies on a strictly typed data layer. Core budget schemas map directly to src/backend/db/schema/home/budget.ts. Additional schemas for workflows and agent states will reside in parallel directories.
+   * Agent Path: The @cloudflare/think agent logic, specifically for bid reconciliation, maps to src/backend/ai/agents/bid-reconciler.ts.
+   * Workflow Path: Cloudflare Workflows for orchestrating the sourcing and approval gates map to src/backend/workflows/deep-sourcing.ts.
+   * Frontend Path: The React/Next.js frontend pages for the budgeting interface are situated in src/frontend/app/budget/page.tsx, while specialized components like the fallback drag-and-drop interface reside in src/frontend/components/ui/fallback-mapper.tsx.
+   * API/Hono Path: Edge REST/RPC endpoints handling webhooks from external services (like Google Sheets) are strictly routed through src/api/routes/webhooks/sheets.ts.
+2. Data Source Analysis (2026_-_Renovation_Budget_Agent...json):
+   * Extracted schema fields required for the "Truth Table" and "Sourced Materials" entities:
+      * work_item (String/Text): The specific line item or trade activity (e.g., "Demolition", "Custom Cabinetry").
+      * category (String/Text): The grouping of the expense (e.g., "Labor", "Plumbing", "Electrical").
+      * max_unit_price (Decimal/Real): The strict budgetary ceiling for the unit/item.
+   * Support structures needed: Row IDs, explicit synchronization timestamps, and status enums to manage states between the database, the agent, and external spreadsheet views.
+3. Rule Synthesis & Architecture Primitives:
+   * Agent Engine: Utilizing @cloudflare/think for Durable Object-backed agents, enabling persistent sessions, sub-agent RPC, and fibers for crash recovery.
+   * Frontend Chat: Utilizing assistant-ui wrapped around @cloudflare/ai-chat/react's useAgentChat hook for persistent, stateful real-time chat streaming.
+   * Orchestration: Cloudflare Workflows (ThinkWorkflow) will manage durable multi-step processes, specifically leveraging step.waitForEvent('approval') for human-in-the-loop bid verification.
+   * Database: D1 (SQLite) paired with Drizzle ORM.
+   * Conflict Strategy: "Last-Write-Wins with D1 bias" for Google Sheets synchronization, utilizing the SyncRevisionLog schema to handle disjointed state transitions.
+</research_scratchpad>
+Executive Architectural Vision
+The core-remodel platform introduces a sophisticated, edge-native architecture designed to solve the chronic unpredictability of construction estimation and material sourcing. Industry data demonstrates that homeowners typically invest between ten and fifteen percent of a property's total value into a comprehensive kitchen or whole-home remodel.1 These capital-intensive projects are highly sensitive to financial deviations. The initial baseline budget is frequently destabilized by unexpected discoveries—such as compromised plumbing or degraded load-bearing structures—that trigger cascading cost overruns.2 Traditional estimating workflows rely heavily on static spreadsheets and manual data entry, which rapidly drift from reality as contractor bids arrive, material supply chains fluctuate, and scope adjustments are negotiated.1 The primary objective of this architecture is to transition from static budgeting to a "Hybrid AI" model. This model automatically ingests unstructured external data, such as contractor PDF estimates and vendor material catalogs, utilizes advanced reasoning models to map these disparate items to internal standardized cost codes, and meticulously orchestrates human-in-the-loop approval workflows before any financial commitments are formalized.
+The system is constructed upon a foundation of four critical technological pillars provided by the Cloudflare developer ecosystem. The data layer utilizes Cloudflare D1, a globally distributed serverless database built on SQLite, interfaced via Drizzle ORM. This layer must enforce rigorous schemas and manage complex distributed state conflicts through a specialized synchronization ledger. The cognitive layer is powered by the @cloudflare/think SDK.4 This framework provides durable, stateful execution environments where autonomous agents retain memory, execute typed remote procedure calls, and survive network interruptions via a highly robust Durable Object backing.4 The orchestration layer leverages Cloudflare Workflows to handle long-running, asynchronous business processes. This allows the system to pause operations indefinitely at zero compute cost while waiting for mandatory human authorizations.6 Finally, the presentation layer blends real-time WebSocket communication via assistant-ui and @cloudflare/ai-chat/react with highly tactile manual intervention components powered by @dnd-kit/core.8
+
+
+  
+
+
+
+This architecture blueprint provides the exhaustive technical specifications required to build the core-remodel mono-repo. The integration of edge computing, durable AI execution, and strict concurrency resolution algorithms creates a system capable of managing the extreme volatility of construction procurement while maintaining an unassailable audit trail.
+Database Architecture and Synchronization Ledger
+The persistence layer serves as the immutable system of record for the entire estimation and procurement lifecycle. Because construction budgets represent legally binding financial commitments, the underlying data structures must enforce uncompromising constraints, support comprehensive historical auditing, and gracefully manage concurrent mutations. These mutations can originate simultaneously from autonomous AI agents analyzing newly uploaded bids, and human project managers adjusting figures in synchronized Google Sheets.1
+To fulfill the requirements derived from the baseline JSON configuration, the schema must explicitly define entities for the "Truth Table" of expected costs and the dynamic ledger of "Sourced Materials." The fields work_item, category, and max_unit_price form the structural backbone of this truth table. The synchronization requirement introduces profound distributed systems challenges. To address data drift between the D1 edge database and external spreadsheet interfaces, a highly specialized SyncRevisionLog is implemented. This acts as both a transactional outbox and a cryptographic ledger, recording every state change to enforce a deterministic "Last-Write-Wins with D1 bias" conflict resolution algorithm.
+Core Schema Implementation (Drizzle ORM)
+The schema definitions are written in TypeScript, leveraging Drizzle ORM's SQLite dialect, which is meticulously optimized for Cloudflare D1 environments. The exact file path for this implementation is src/backend/db/schema/home/budget.ts. The schema avoids traditional distributed triggers, instead relying on the application layer to manage timestamps and state transitions, ensuring that side effects remain predictable and testable across the edge network.
+
+
+
+
+
+
+TypeScript
+// File: src/backend/db/schema/home/budget.ts
+import { sqliteTable, text, real, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+// Table: budget_items
+// Represents the master "Truth Table" of planned project expenses.
+export const budgetItems = sqliteTable('budget_items', {
+ id: text('id').primaryKey(), // UUID v4 implementation
+ projectId: text('project_id').notNull(),
+ workItem: text('work_item').notNull(),
+ category: text('category').notNull(),
+ maxUnitPrice: real('max_unit_price').notNull(),
+ quantity: real('quantity').notNull().default(1.0),
+ unitOfMeasure: text('unit_of_measure').notNull().default('EA'),
+ confidenceScore: real('confidence_score').notNull().default(1.0),
+ status: text('status', { enum: }).notNull().default('DRAFT'),
+ googleSheetRowId: integer('google_sheet_row_id'),
+ createdAt: integer('created_at', { mode: 'timestamp_ms' })
+  .notNull()
+  .default(sql`(strftime('%s%f', 'now') * 1000)`),
+ updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+  .notNull()
+  .default(sql`(strftime('%s%f', 'now') * 1000)`),
+}, (table) => {
+ return {
+   projectWorkItemIdx: uniqueIndex('project_work_item_idx').on(table.projectId, table.workItem),
+ };
+});
+
+// Table: sourced_materials
+// Represents actual vendor bids, contractor estimates, or catalog items mapped to budget_items.
+export const sourcedMaterials = sqliteTable('sourced_materials', {
+ id: text('id').primaryKey(),
+ budgetItemId: text('budget_item_id')
+  .notNull()
+  .references(() => budgetItems.id, { onDelete: 'cascade' }),
+ vendorName: text('vendor_name').notNull(),
+ sku: text('sku'),
+ quotedUnitPrice: real('quoted_unit_price').notNull(),
+ leadTimeDays: integer('lead_time_days'),
+ isSelected: integer('is_selected', { mode: 'boolean' }).notNull().default(false),
+ createdAt: integer('created_at', { mode: 'timestamp_ms' })
+  .notNull()
+  .default(sql`(strftime('%s%f', 'now') * 1000)`),
+});
+
+// Table: sync_revision_log
+// Enforces the "Last-Write-Wins with D1 bias" logic for external spreadsheet syncing.
+export const syncRevisionLog = sqliteTable('sync_revision_log', {
+ id: text('id').primaryKey(),
+ entityId: text('entity_id').notNull(), // Maps to budgetItems.id
+ entityType: text('entity_type').notNull(), // e.g., 'BUDGET_ITEM'
+ mutationType: text('mutation_type', { enum: }).notNull(),
+ payload: text('payload', { mode: 'json' }).notNull(), // Serialized state
+ source: text('source', { enum: }).notNull(),
+ appliedAt: integer('applied_at', { mode: 'timestamp_ms' })
+  .notNull()
+  .default(sql`(strftime('%s%f', 'now') * 1000)`),
+ hash: text('hash').notNull(), // SHA-256 of payload for drift detection
+});
+
+Relational Dynamics and Data Integrity Constraints
+The design of the budget_items table acts as the definitive system of record. Construction budgets require categorization into standardized divisions, such as Labor, Plumbing, Electrical, and Flooring.1 The category and work_item fields enforce this structure. The inclusion of the googleSheetRowId field establishes a critical bidirectional linkage between the internal SQLite representation and the external, user-facing spreadsheet interface.
+A fundamental pillar of this Hybrid AI architecture is the confidenceScore column. When the agentic layer parses an unstructured PDF quote from a contractor, it must attempt to semantically map the quoted line items to the predefined budget_items. The inherent ambiguity of construction jargon dictates that the AI cannot always achieve perfect certainty. If the semantic similarity is low, the system assigns a degraded confidenceScore. Any score falling below a strict operational threshold automatically prevents the AI from advancing the item into an APPROVED status. Instead, the item is flagged for mandatory human intervention via a specialized Drag-and-Drop mapping interface on the frontend. This programmatic constraint mathematically guarantees that the AI cannot autonomously commit financial resources to highly ambiguous or unrecognized categories.
+The following table summarizes the data types and their architectural purpose within the budget_items entity:
+
+
+Field Name
+	SQLite Data Type
+	Architectural Purpose
+	projectId
+	Text
+	Sharding key for multitenancy and primary filter for project-specific queries.
+	workItem
+	Text
+	The granular identifier of the construction task or material (e.g., "Demolition").
+	category
+	Text
+	The macro-level CSI division grouping (e.g., "Labor", "Plumbing").1
+	maxUnitPrice
+	Real
+	The strict financial ceiling. Quotes exceeding this threshold trigger workflow alerts.
+	confidenceScore
+	Real
+	Ranges from 0.0 to 1.0. Determines if AI can autonomously route the item or if human intervention is required.
+	status
+	Text
+	Manages the lifecycle state machine transitioning from DRAFT to LOCKED.
+	googleSheetRowId
+	Integer
+	The foreign key mapping to external spreadsheet rows for bidirectional synchronization.
+	Agentic Reasoning Layer (@cloudflare/think)
+The intelligent core of the budgeting platform operates on the @cloudflare/think SDK. Project Think represents a fundamental evolution in agentic architecture by shipping a suite of primitives built explicitly for the edge. These include durable execution with fibers, which provide crash recovery and automatic keepalives; persistent sessions that maintain tree-structured messages and allow for non-destructive compaction; and deeply integrated SQLite workspaces.4
+A Think agent operates within a Cloudflare Durable Object.5 This means the agent incurs zero financial cost when it is idle, resting in a state of hibernation until a WebSocket message, a scheduled task, or an external webhook awakens it.4 Upon awakening, the agent immediately resumes its exact context, with full access to its transactional storage and historical memory.4 The primary actor within this system is the BidReconciler, a long-lived entity capable of conversing with users, analyzing dense material catalogs, and dispatching complex sub-agent workflows.
+BidReconciler Class Implementation
+The BidReconciler extends the foundational Think class. It acts as the orchestration brain when a user uploads new estimating documents. The implementation mandates a highly restrictive system prompt to confine the agent's reasoning strictly to the domain of construction budgeting, preventing hallucinated cost categories. The exact filepath for this actor is src/backend/ai/agents/bid-reconciler.ts.
+
+
+
+
+
+
+TypeScript
+// File: src/backend/ai/agents/bid-reconciler.ts
+import { Think } from "@cloudflare/think";
+import { tool } from "ai";
+import { z } from "zod";
+import type { Env } from "../../types/env"; 
+
+export class BidReconciler extends Think<Env> {
+ // Define the reasoning model required by the Think architecture
+ getModel() {
+   return this.env.AI.chat("@cf/meta/llama-3-8b-instruct"); 
+ }
+
+ // The strict behavioral prompt enforcing construction budgeting constraints
+ getSystemPrompt() {
+   return `You are the Elite Bid Reconciler for 'core-remodel', an expert construction estimator.
+Your primary directive is to map unstructured contractor bids and material catalogs to our strict internal Truth Table schema.
+When evaluating bids, you must adhere to the following rules:
+1. Extract the 'work_item', 'category', and 'max_unit_price' precisely as they appear or map to standard industry conventions.
+2. If a vendor's quoted price exceeds the established 'max_unit_price', you must flag it as an overage immediately.
+3. Under no circumstances may you invent categories. You must align items to standard CSI divisions (e.g., Labor, Plumbing, Electrical, Flooring).
+4. If you lack the confidence to map a vendor line item to an existing budget work item, you are mandated to use the 'requestManualMapping' tool.
+5. Once a bid mapping is completed and validated, you must trigger the formal approval process using the 'triggerApprovalWorkflow' tool.`;
+ }
+
+ // Tools available to the agent for interacting with the system and human operators
+ getTools() {
+   return {
+     queryTruthTable: tool({
+       description: "Fetch the current baseline budget items for a project from the D1 database.",
+       parameters: z.object({
+         projectId: z.string().describe("The unique identifier for the project"),
+       }),
+       execute: async ({ projectId }) => {
+         // Internal call to Drizzle/D1 to fetch budget_items
+         // Implementation abstracted for brevity; returns structured array
+         return { items: }; 
+       },
+     }),
+     
+     requestManualMapping: tool({
+       description: "Used when confidence is low. Flags an item for human review via the Drag-and-Drop UI.",
+       parameters: z.object({
+         unmappedVendorItem: z.string(),
+         vendorPrice: z.number(),
+         suggestedCategories: z.array(z.string()),
+       }),
+       execute: async (args) => {
+         // Emits an event to the client UI, pausing autonomous reconciliation for this specific item
+         return { status: "pending_human_review", message: "Flagged for user interface resolution." };
+       },
+     }),
+
+     triggerApprovalWorkflow: tool({
+       description: "Initiates the Cloudflare Workflow for formal financial approval of a sourced material.",
+       parameters: z.object({
+         budgetItemId: z.string(),
+         vendorName: z.string(),
+         quotedUnitPrice: z.number(),
+       }),
+       execute: async (args) => {
+         // Starts the background workflow, injecting the agent's identity for future callbacks
+         await this.runWorkflow("DEEP_SOURCING_WORKFLOW", args, { metadata: args });
+         return { status: "workflow_started", details: "Awaiting human approval." };
+       },
+     }),
+   };
+ }
+}
+
+The tool architecture provides the agent with distinct mechanisms to interact with the broader environment. The queryTruthTable tool allows the agent to autonomously fetch the latest D1 database state, ensuring its reasoning is grounded in real-time data rather than stale context. The requestManualMapping tool is the safety valve; it allows the AI to gracefully degrade to human supervision when semantic certainty drops, preventing catastrophic misallocations of budget line items. Finally, triggerApprovalWorkflow serves as the bridge between synchronous agentic thought and asynchronous, long-running business orchestration.12
+Furthermore, Think agents support MCP (Model Context Protocol) tools. If the platform needs to integrate with external enterprise resource planning (ERP) systems in the future, the agent automatically merges MCP tools from connected servers into its toolset.14 By setting waitForMcpConnections, the platform ensures that external data systems are fully connected before inference begins.14 The architecture also natively supports submitMessages() for durable, one-off programmatic turns that require inspection capabilities after the calling function returns.5
+Orchestration Layer (Cloudflare Workflows)
+While the BidReconciler handles cognitive mapping and data extraction, the actual procurement process is a multi-stage operation requiring deterministic execution, automatic retry handling, and, crucially, human authorization before funds are committed. This is the explicit domain of Cloudflare Workflows.6
+Workflows are designed for jobs where sequential steps matter and state must persist across long temporal gaps. A workflow instance can remain active for minutes, hours, or even weeks without incurring compute costs while idling.7 The system implements DeepSourcingWorkflow, located at src/backend/workflows/deep-sourcing.ts.
+
+
+  
+
+
+
+This workflow utilizes the ThinkWorkflow class to maintain an umbilical connection with the originating agent.13 When the workflow concludes, or if it encounters a terminal error, it can seamlessly update the agent's conversational thread. The critical architectural feature leveraged here is step.waitForEvent, which allows the workflow instance to pause operations completely detached from active billing metrics while it waits for a project manager to review the bid on the frontend.6
+Deep Sourcing Workflow Implementation
+The execution flow processes the initial data, enters hibernation to wait for external approval, and handles timeouts gracefully.
+
+
+
+
+
+
+TypeScript
+// File: src/backend/workflows/deep-sourcing.ts
+import { ThinkWorkflow } from "@cloudflare/think/workflows";
+import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
+
+interface SourcingParams {
+ budgetItemId: string;
+ vendorName: string;
+ quotedUnitPrice: number;
+}
+
+interface ApprovalPayload {
+ approved: boolean;
+ notes?: string;
+}
+
+export class DeepSourcingWorkflow extends ThinkWorkflow<Env, SourcingParams> {
+ async run(event: WorkflowEvent<SourcingParams>, step: WorkflowStep) {
+   const { budgetItemId, vendorName, quotedUnitPrice } = event.payload;
+
+   // Step 1: Pre-process and log the pending bid immutably
+   await step.do("log-pending-bid", async () => {
+     // Drizzle ORM insert into sourced_materials with isSelected = false
+   });
+
+   // Step 2: Human-in-the-loop Approval Gate
+   // The workflow halts here indefinitely up to the specified timeout.
+   let approvalEvent;
+   try {
+     approvalEvent = await step.waitForEvent<ApprovalPayload>("Wait for PM bid approval", {
+       type: "bid-approval",
+       timeout: "48 hours", 
+     });
+   } catch (error) {
+     // Handles the timeout scenario gracefully, preventing stale executions 
+     await step.do("handle-timeout", async () => {
+       await this.agent.saveMessages([{ role: "assistant", content: `Approval for vendor ${vendorName} timed out after 48 hours.` }]);
+     });
+     return; // Terminate workflow early
+   }
+
+   // Step 3: Conditional execution based on human input extracted from the event payload [17]
+   if (approvalEvent.payload.approved) {
+     await step.do("commit-financials", async () => {
+       // 1. Update sourced_materials to set isSelected = true
+       // 2. Update budget_items status to 'APPROVED'
+       // 3. Notify agent of successful completion
+       await this.agent.saveMessages();
+     });
+   } else {
+     await step.do("reject-bid", async () => {
+       await this.agent.saveMessages();
+     });
+   }
+ }
+}
+
+The configuration of the timeout parameter within step.waitForEvent is paramount for operational safety. In construction management, unapproved bids represent systemic financial risk; material costs change daily. If the project manager fails to respond within the designated window—configured here as 48 hours—the waitForEvent method inherently throws an error.16 The implementation catches this error, records the timeout within the agent's persistent chat thread, and safely terminates the operation. This logic prevents an architectural flaw where stale bids could be automatically processed days later simply because a user clicked an old approval link.
+Furthermore, ThinkWorkflow provides robust idempotency. By default, steps infer an idempotency key using the format think-workflow:<workflowName>:<workflowId>:<stepName>.13 This ensures that if the Cloudflare infrastructure attempts to retry a step due to an underlying network partition, the D1 database is not subjected to duplicate inserts or unintended mutations. When the project manager eventually approves the bid via the frontend interface, the API layer dispatches a signal directly to this specific workflow instance. Using instance.sendEvent({ type: "bid-approval", payload: { approved: true } }), the workflow is immediately awakened to proceed with the financial commitments.16
+Frontend Architecture and Client Interactions
+The presentation layer is constructed using React and heavily leverages specialized hooks to interact directly with the edge network. The frontend must satisfy two disparate user experiences simultaneously: a fluid, conversational interface for exploring the budget logically with the AI, and a rigid, highly tactile interface for manually overriding the AI's data mappings when certainty drops.
+Agent Chat Integration (useAgentChat and assistant-ui)
+To surface the BidReconciler to the user, the platform utilizes the @cloudflare/ai-chat/react package integrated within the visual layout engine of assistant-ui.8 The useAgentChat hook manages the underlying WebSocket connection directly to the specific Durable Object housing the Think agent.
+A critical architectural consideration involves the React re-render lifecycle and component hydration. When standard React state updates cause the component tree to re-render, the useAgentChat hook can rapidly disconnect and reconnect the WebSocket if the agent instance ID is not firmly memoized. This phenomenon leads to severe UI flashing and potential data loss.18 To mitigate this, the integration must tightly isolate the agent identity using standard React memoization patterns and utilize the structural extensions provided by assistant-ui correctly.
+
+
+
+
+
+
+TypeScript
+// File: src/frontend/app/budget/page.tsx
+'use client';
+
+import { useAgentChat } from "@cloudflare/ai-chat/react";
+import { Thread } from "@assistant-ui/react";
+import { useMemo } from "react";
+import { BudgetDataTable } from "@/components/budget-table";
+
+export default function BudgetReconciliationChat({ projectId }: { projectId: string }) {
+ // Memoize the thread ID to prevent UI flashing and WebSocket thrashing on re-renders 
+ const threadId = useMemo(() => `reconciler-${projectId}`, [projectId]);
+
+ const {
+   messages,
+   sendMessage,
+   status,
+   addToolApprovalResponse
+ } = useAgentChat({
+   agent: "BidReconciler",
+   id: threadId,
+   // Ensure stream resumption is explicitly enabled to handle edge disconnects 
+   resume: true,
+ });
+
+ return (
+   <div className="flex h-screen w-full">
+     <div className="w-2/3 border-r p-6">
+       {/* The primary data table visualization */}
+       <BudgetDataTable projectId={projectId} />
+     </div>
+     <div className="w-1/3 bg-gray-50 border-l">
+       <Thread 
+         messages={messages} 
+         onSendMessage={sendMessage}
+         status={status}
+         // Assistant-UI requires mapping tool approvals if the agent utilizes client-side gating 
+         onToolApproval={addToolApprovalResponse} 
+       />
+     </div>
+   </div>
+ );
+}
+
+The WebSocket implementation provided by @cloudflare/ai-chat ensures that conversations are automatically persisted into the Durable Object's SQLite instance, allowing them to survive restarts.8 The inclusion of the resume: true flag in the configuration is a non-negotiable requirement.10 Construction professionals frequently lose cellular connection while inspecting physical job sites. If a network interruption occurs, the resume parameter guarantees that the chat history, including any in-flight streaming chunks, instantly re-synchronizes upon reconnection without dropping contextual continuity. Furthermore, the UI gracefully handles explicit tool approval responses via the addToolApprovalResponse method, bridging the gap between agentic intent and user permission.10
+The following table details the essential properties exposed by the useAgentChat hook utilized by the UI components 10:
+
+
+Property Export
+	Type
+	Architectural Purpose
+	messages
+	ChatMessage
+	The chronological array of persistent chat messages synchronized from the edge.
+	sendMessage
+	(message) => void
+	Transmits user intent to the Durable Object for inference.
+	status
+	string
+	Represents the execution state, returning values like "idle", "submitted", "streaming", or "error".
+	addToolApprovalResponse
+	({ id, approved }) => void
+	Required for tools configured with needsApproval. Injects user authorization back into the model's context.10
+	resume
+	boolean
+	Configuration flag enabling stream resumption. Defaults to true. Imperative for mobile reliability.10
+	Fallback Drag-and-Drop Mapping UI (@dnd-kit/core)
+The artificial intelligence models will occasionally fail to confidently associate a vendor's highly abbreviated, jargon-filled invoice item (e.g., "1/2in PEX-A x 100ft") with the formal budget_items category (e.g., "Plumbing Rough-In Materials"). When the BidReconciler assigns a low confidence score and triggers the requestManualMapping tool, the frontend must dynamically transition to reveal a highly tactile Drag-and-Drop fallback interface.
+The platform utilizes @dnd-kit/core due to its modular architecture, strict accessibility compliance, and reliance on React context rather than the legacy HTML5 Drag and Drop API, which suffers from severe cross-browser inconsistencies and poor mobile touch support.
+The architecture of the fallback UI, located at src/frontend/components/ui/fallback-mapper.tsx, consists of three distinct interactive layers. The DndContext acts as the root provider, managing global drag state and collision physics. The SortableContext serves as the unmapped queue, representing a vertical list of vendor line items that the AI could not definitively place. Finally, the Droppable Zones represent the visual containers of the target CSI divisions or specific work_items where the unmapped items can be deposited.
+To guarantee high-performance rendering and a fluid user experience, the collision detection algorithm must be explicitly and intentionally configured. Standard drag-and-drop libraries default to collision algorithms that evaluate the intersection of rectangular bounding boxes. However, for a complex list-to-grid mapping interface, the closestCenter algorithm provides a significantly more intuitive interaction. It calculates the geometric distance between the center point of the dragged item and the center points of potential droppable zones, preventing erratic layout shifts and ghosting during rapid drag operations across dense data grids.
+
+
+
+
+
+
+TypeScript
+// File: src/frontend/components/ui/fallback-mapper.tsx
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { DroppableCategoryZone, VendorItemCard } from './mapper-nodes';
+
+export function FallbackMapper({ unmappedItems, categories, onMapComplete }) {
+ // Enforce rigid pointer sensors to prevent accidental drag initiation during vertical mobile touch scrolling
+ const sensors = useSensors(
+   useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+ );
+
+ const handleDragEnd = (event) => {
+   const { active, over } = event;
+   // active.id represents the vendor item; over.id represents the target budget category
+   if (over && active.id!== over.id) {
+     onMapComplete(active.id, over.id);
+   }
+ };
+
+ return (
+   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+     <div className="mapper-container flex gap-8">
+       {/* The Source Queue: Unmapped Vendor Items */}
+       <div className="w-1/2 bg-gray-100 p-4 rounded-md shadow-inner">
+         <h3 className="font-bold mb-4 text-gray-700">Unmapped Items</h3>
+         <SortableContext items={unmappedItems} strategy={verticalListSortingStrategy}>
+           {unmappedItems.map(item => <VendorItemCard key={item.id} id={item.id} data={item} />)}
+         </SortableContext>
+       </div>
+       
+       {/* The Target Grid: Authorized Budget Categories */}
+       <div className="w-1/2 grid grid-cols-2 gap-4">
+         {categories.map(cat => <DroppableCategoryZone key={cat.id} id={cat.id} title={cat.title} />)}
+       </div>
+     </div>
+   </DndContext>
+ );
+}
+
+Once the user completes the manual mapping by dropping the item into the correct zone, the frontend invokes the onMapComplete callback. This function dispatches the resolution back to the BidReconciler agent via the chat interface's sendMessage function, injecting the user's explicit decision into the AI's context window. The agent then resumes its processing loop and triggers the downstream approval workflow, treating the human input as an absolute truth value.
+API Edge Routing and Webhook Synchronization
+The core-remodel platform does not exist in an isolated vacuum; construction professionals rely heavily on widespread spreadsheet software. A core baseline requirement is bidirectional synchronization with Google Sheets to allow stakeholders to view and edit budgets in familiar environments.1 The API layer, built entirely on the Hono web framework and deployed directly to Cloudflare Workers, serves as the gatekeeper. It handles external webhooks, cryptographically authenticates incoming payloads, and mutates the D1 database with sub-millisecond latency.
+Last-Write-Wins with D1 Bias Algorithm
+Conflict resolution in distributed systems, especially when merging state from disconnected third-party platforms, is notoriously complex. When a user modifies a cell in a Google Sheet at the exact moment the BidReconciler AI autonomously adjusts the same max_unit_price in the D1 database, a fundamental data collision occurs.
+To resolve this reliably, the architecture mandates a specialized "Last-Write-Wins (LWW) with D1 bias" strategy. This deterministic algorithm dictates that the timestamp of the mutation determines the ultimate winner. However, in the event of an exact collision, or if the external system's timestamp is mathematically unverifiable or heavily delayed due to network queuing, the internal D1 state takes absolute precedence. This constraint ensures the integrity of the AI's reasoning loop and protects the financial approval workflows from being subverted by stale external spreadsheet data.
+The logic is executed securely within src/api/routes/webhooks/sheets.ts.
+
+
+
+
+
+
+TypeScript
+// File: src/api/routes/webhooks/sheets.ts
+import { Hono } from 'hono';
+import { eq } from 'drizzle-orm';
+import { db } from '../../db'; 
+import { budgetItems, syncRevisionLog } from '../../db/schema/home/budget';
+import crypto from 'crypto';
+import type { Env } from '../../types/env';
+
+const webhookRouter = new Hono<{ Bindings: Env }>();
+
+webhookRouter.post('/sheets/sync', async (c) => {
+ const payload = await c.req.json();
+ const { sheetRowId, updatedFields, sheetTimestamp } = payload;
+
+ // Step 1: Authenticate the Webhook (HMAC signature verification abstracted)
+ 
+ // Step 2: Begin LWW Resolution Strategy wrapped in a strict D1 transaction
+ const result = await db.transaction(async (tx) => {
+   // Retrieve the current state of the D1 record based on the sheet mapping
+   const existingRecord = await tx.select()
+    .from(budgetItems)
+    .where(eq(budgetItems.googleSheetRowId, sheetRowId))
+    .get();
+
+   if (!existingRecord) {
+     return { status: 404, message: "Unmapped row. Cannot sync." };
+   }
+
+   const d1Timestamp = new Date(existingRecord.updatedAt).getTime();
+   const sheetTime = new Date(sheetTimestamp).getTime();
+
+   // The LWW logic with D1 bias implementation
+   // If the database was updated more recently than the sheet's mutation time, 
+   // the system REJECTS the sheet's payload to protect internal state.
+   if (d1Timestamp >= sheetTime) {
+      // Log the rejected mutation for cryptographic audit purposes
+      await tx.insert(syncRevisionLog).values({
+        id: crypto.randomUUID(),
+        entityId: existingRecord.id,
+        entityType: 'BUDGET_ITEM',
+        mutationType: 'UPDATE',
+        payload: JSON.stringify(updatedFields),
+        source: 'GOOGLE_SHEETS',
+        hash: crypto.createHash('sha256').update(JSON.stringify(updatedFields)).digest('hex'),
+      });
+      return { status: 409, message: "Conflict: Internal D1 state is newer. Sheet update rejected." };
+   }
+
+   // If the sheet represents the absolute latest intent, accept the mutation
+   await tx.update(budgetItems)
+    .set({
+      ...updatedFields,
+       updatedAt: new Date(sheetTime), // Align D1 time to the sheet's accepted time
+     })
+    .where(eq(budgetItems.id, existingRecord.id));
+
+   // Log the successful mutation to the ledger
+   await tx.insert(syncRevisionLog).values({
+        id: crypto.randomUUID(),
+        entityId: existingRecord.id,
+        entityType: 'BUDGET_ITEM',
+        mutationType: 'UPDATE',
+        payload: JSON.stringify(updatedFields),
+        source: 'GOOGLE_SHEETS',
+        hash: crypto.createHash('sha256').update(JSON.stringify(updatedFields)).digest('hex'),
+   });
+
+   return { status: 200, message: "Sync applied successfully." };
+ });
+
+ return c.json(result, result.status);
+});
+
+This endpoint encapsulates the entire synchronization theory. By routing the Google Sheets webhook directly to the Cloudflare Worker running Hono, the payload is verified at the edge network node closest to the request origin, dramatically reducing latency. The db.transaction() ensures that the read of the updatedAt timestamp and the subsequent write (if the validation passes) occur atomically. If a concurrent operation attempts to modify the exact same row, D1's internal SQLite concurrency models will serialize the transaction, preventing race conditions that could otherwise corrupt the max_unit_price calculations.
+The syncRevisionLog is updated regardless of whether the incoming payload is accepted or rejected. This creates a mathematically verifiable audit trail of every attempted system mutation. If a user complains that a Google Sheets update did not reflect in the application, developers can query the revision log, identify the SHA-256 hash of the payload, and conclusively prove that the update was rejected due to a newer, AI-driven D1 update (the D1 bias).
+The HTTP response codes are highly deterministic, mapping exactly to the outcome of the LWW algorithm:
+HTTP Status Code
+	Scenario
+	System Action
+	200 OK
+	The sheet timestamp is newer than the D1 timestamp.
+	Payload accepted, database mutated, success logged to SyncRevisionLog.
+	404 Not Found
+	The sheetRowId does not exist in D1.
+	Payload rejected, no data mutated.
+	409 Conflict
+	The D1 timestamp is equal to or newer than the sheet.
+	Payload rejected, D1 bias enforced, rejection logged to SyncRevisionLog.
+	Workflow Event Interception and Resumption
+Beyond managing data synchronization, the API layer must also facilitate the human-in-the-loop workflow resumption. As defined in the orchestration layer, the DeepSourcingWorkflow utilizes step.waitForEvent to pause its execution indefinitely.7 The frontend React UI does not communicate directly with the workflow engine; it communicates via the stateless Hono API, maintaining strict architectural separation of concerns.
+When the project manager clicks "Approve" on a pending vendor bid within the user interface, the frontend issues an authenticated POST request to /api/webhooks/workflows/approve. The Hono router extracts the specific workflow instanceId and the boolean approval status from the request body.
+Using the Workers API binding for Workflows, the edge function accesses the suspended workflow and pushes the event explicitly to that instance:
+
+
+
+
+
+
+TypeScript
+// Conceptual Hono endpoint for resuming workflows located within the webhook router
+webhookRouter.post('/workflows/approve', async (c) => {
+ const { instanceId, approved } = await c.req.json();
+ 
+ // Connect to the specific suspended workflow instance using the binding
+ const instance = await c.env.DEEP_SOURCING_WORKFLOW.get(instanceId);
+ 
+ // Dispatch the event to satisfy the step.waitForEvent constraint 
+ await instance.sendEvent({
+   type: "bid-approval",
+   payload: { approved }
+ });
+
+ return c.json({ success: true, message: "Approval dispatched to workflow." });
+});
+
+This pattern completely decouples the stateful, long-running orchestration logic from the highly concurrent, stateless API endpoints. The edge function processes the incoming request and completes its execution in milliseconds, consuming minimal compute resources. Concurrently, the background Cloudflare Workflow awakens, processes the sendEvent payload, evaluates the approval boolean, and permanently locks the budget within the D1 database.
+System Scalability, Concurrency, and Observability
+Implementing this architecture requires strict adherence to Cloudflare's deployment boundaries and scale considerations. Because @cloudflare/think utilizes Durable Objects, WebSocket connections and RPC calls are inherently routed to a single, globally unique node containing that specific agent's SQLite state.4 While this guarantees strong consistency for the AI's context window and local workspace, it limits horizontal scaling for a single conversation thread. Therefore, the system is architected to utilize a unique BidReconciler agent instance per construction project (memoized via threadId in the frontend). This naturally shards the application's compute load across the global edge network based on active construction projects, avoiding centralized bottlenecks.
+The database layer, D1, operates via distributed read replicas with a single primary writer node. The Last-Write-Wins algorithm implemented in the webhook layer is specifically designed to tolerate the eventual consistency of D1's read nodes by enforcing atomic writes wrapped in strict transactions during critical conflict resolution pathways.
+Furthermore, Cloudflare Workflows support massive scale, allowing the platform to run up to 4,500 Workflow instances concurrently.22 This means thousands of vendor bids can be simultaneously paused, waiting for human approval, without exhausting system resources or triggering rate limits. The platform utilizes built-in observability tools, including new CPU time metrics, which allow engineering teams to continuously monitor which workflow instances are consuming the most resources or contributing disproportionately to billing metrics.22 Developers can also leverage vitest to rigorously test these workflows locally and within CI/CD pipelines before deploying to the edge, ensuring deterministic behavior prior to production.22
+By strictly adhering to this comprehensive architectural blueprint—the Drizzle schemas matching the required json entities, the Think agents maintaining durable context, the zero-cost Workflow execution pauses, and the deterministic API conflict resolution—the core-remodel platform will achieve unprecedented reliability and automation within the construction budgeting domain.
+Works cited
+   1. Understanding the Kitchen Remodeling Process: What to Expect - Cabinet IQ, accessed July 7, 2026, https://cabinetiq.com/learn/understand-kitchen-remodeling-process/
+   2. 'Uh-Oh' Remodeling Moments and How Pros Handled Them - Houzz, accessed July 7, 2026, https://www.houzz.com/magazine/uh-oh-remodeling-moments-and-how-pros-handled-them-stsetivw-vs~143064247
+   3. Onward and Westward - JWC Media, accessed July 7, 2026, https://jwcmedia.com/onward-and-westward/
+   4. Project Think: building the next generation of AI agents on Cloudflare, accessed July 7, 2026, https://blog.cloudflare.com/project-think/
+   5. Think · Cloudflare Agents docs, accessed July 7, 2026, https://developers.cloudflare.com/agents/harnesses/think/
+   6. Build your first Workflow - Cloudflare Docs, accessed July 7, 2026, https://developers.cloudflare.com/workflows/get-started/guide/
+   7. Overview · Cloudflare Workflows docs, accessed July 7, 2026, https://developers.cloudflare.com/workflows/
+   8. Chat agents - Cloudflare Docs, accessed July 7, 2026, https://developers.cloudflare.com/agents/communication-channels/chat/chat-agents/
+   9. Cloudflare Agents Integration — assistant-ui, accessed July 7, 2026, https://www.assistant-ui.com/docs/integrations/frameworks/cloudflare-agents/overview
+   10. agents/packages/ai-chat/README.md at main · cloudflare/agents - GitHub, accessed July 7, 2026, https://github.com/cloudflare/agents/blob/main/packages/ai-chat/README.md
+   11. STATE PUBLIC WORKS BOARD - Nevada Legislature, accessed July 7, 2026, https://www.leg.state.nv.us/Session/82nd2023/Budgets/Official%20CIP%202023-25.pdf
+   12. Agents as tools - Cloudflare Docs, accessed July 7, 2026, https://developers.cloudflare.com/agents/runtime/execution/agent-tools/
+   13. Workflows · Cloudflare Agents docs, accessed July 7, 2026, https://developers.cloudflare.com/agents/harnesses/think/workflows/
+   14. Tools · Cloudflare Agents docs, accessed July 7, 2026, https://developers.cloudflare.com/agents/harnesses/think/tools/
+   15. Agents SDK v0.12.4: chat recovery, routing retries, durable Think submissions, and Voice connection control · Changelog - Cloudflare Docs, accessed July 7, 2026, https://developers.cloudflare.com/changelog/post/2026-05-13-agents-sdk-v0124/
+   16. Events and parameters · Cloudflare Workflows docs, accessed July 7, 2026, https://developers.cloudflare.com/workflows/build/events-and-parameters/
+   17. Human-in-the-Loop Image Tagging with waitForEvent · Cloudflare ..., accessed July 7, 2026, https://developers.cloudflare.com/workflows/examples/wait-for-event/
+   18. `useAgentChat`, when re-render with a different agent instance, accessed July 7, 2026, https://github.com/cloudflare/agents/issues/420
+   19. needsApproval tools not returning a tool_result block · Issue #10980 · vercel/ai - GitHub, accessed July 7, 2026, https://github.com/vercel/ai/issues/10980
+   20. cloudflare/vinext-agents-example - GitHub, accessed July 7, 2026, https://github.com/cloudflare/vinext-agents-example
+   21. Chat agent - Cloudflare Docs, accessed July 7, 2026, https://developers.cloudflare.com/agents/examples/chat-agent/
+   22. Workflows is now Generally Available · Changelog - Cloudflare Docs, accessed July 7, 2026, https://developers.cloudflare.com/changelog/post/2025-04-07-workflows-ga/

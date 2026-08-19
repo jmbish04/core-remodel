@@ -109,7 +109,7 @@ export function ProductViewportApp({ id }: { id: number }) {
 
   if (loading) {
     return (
-      <main className="container mx-auto max-w-6xl px-4 py-10">
+      <main className="w-full px-4 py-10 md:px-8">
         <div className="flex min-h-[300px] items-center justify-center text-muted-foreground">
           <Loader2 className="size-6 animate-spin" />
         </div>
@@ -119,7 +119,7 @@ export function ProductViewportApp({ id }: { id: number }) {
 
   if (error || !data) {
     return (
-      <main className="container mx-auto max-w-6xl px-4 py-10">
+      <main className="w-full px-4 py-10 md:px-8">
         <BackLink />
         <div className="mt-6 flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-2xl bg-card p-6 text-center ring-1 ring-border/40">
           <p className="text-sm text-muted-foreground">{error ?? "Product not found."}</p>
@@ -135,7 +135,7 @@ export function ProductViewportApp({ id }: { id: number }) {
   const { product, findings, specs, images, intel } = data;
 
   return (
-    <main className="container mx-auto max-w-6xl px-4 py-10">
+    <main className="w-full px-4 py-10 md:px-8">
       <BackLink />
 
       {/* TOP — gallery + identity + pricing intel */}

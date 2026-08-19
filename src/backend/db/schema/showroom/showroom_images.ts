@@ -7,7 +7,9 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { showroomImageGroups } from "./image_groups";
 import { showroomStores } from "./stores";
+import { showroomStoreLocations } from "./store_location";
 
 /**
  * Showroom Images — storefront and showroom interior imagery discovered during
@@ -24,6 +26,24 @@ export const showroomImages = sqliteTable(
       .notNull()
       .references(() => showroomStores.id, { onDelete: "cascade" }),
 
+    /**
+     * Physical site this image belongs to (Phase L, plan 0031). Nullable = brand-level or
+     * not-yet-backfilled; FK → showroom_store_locations, ON DELETE SET NULL. Backfilled to
+     * the store's primary location.
+     */
+    locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+      onDelete: "set null",
+    }),
+
+    /**
+     * Optional folder this photo belongs to (0040 P3). NULL = a loose photo shown
+     * outside any stack. ON DELETE SET NULL so deleting a group loosens its photos
+     * rather than destroying them.
+     */
+    groupId: integer("group_id").references(() => showroomImageGroups.id, {
+      onDelete: "set null",
+    }),
+
     sourceUrl: text("source_url").notNull(),
     sourcePageUrl: text("source_page_url"),
     cfImageId: text("cf_image_id"),
@@ -31,7 +51,9 @@ export const showroomImages = sqliteTable(
 
     altText: text("alt_text"),
     imageKind: text("image_kind", {
-      enum: ["storefront", "showroom", "logo", "map", "unknown"],
+      // "visit" = homeowner-uploaded visit photo; the rest are discovered by the
+      // sourcing sweep. The "Your visit photos" card must only ever show "visit".
+      enum: ["visit", "storefront", "showroom", "logo", "map", "unknown"],
     })
       .notNull()
       .default("unknown"),

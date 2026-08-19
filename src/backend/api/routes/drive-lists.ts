@@ -9,13 +9,28 @@
  *
  * Mounted at `/api/drive-lists`.
  */
-import { driveListStops, driveLists, showroomStores } from "@backend/db";
-import {
-  HOME_ARRIVAL_AFTER_MINUTES,
-  HOME_RADIUS_M,
-} from "@backend/services/drive-home-arrival-rules";
+import { driveListNotes, driveListStops, driveLists, showroomStores, storeNotes } from "@backend/db";
+import { HOME_RADIUS_M } from "@backend/services/drive-home-arrival-rules";
 import { getHomeCoords } from "@backend/services/drive-home-arrival";
-import { createDriveList, parseDriveNotes, setActiveDrive } from "@backend/services/drive-lists";
+import {
+  addDriveStops,
+  createDriveList,
+  createDriveNote,
+  deleteDriveNote,
+  type DriveStopInput,
+  type DriveStopUpdateInput,
+  fillMissingStopCoords,
+  listDriveNotes,
+  parseDriveNotes,
+  removeDriveStop,
+  setActiveDrive,
+  setDriveNoteRead,
+  updateDriveList,
+  updateDriveStop,
+} from "@backend/services/drive-lists";
+import { getDriveTiming } from "@backend/services/drive-timing";
+import { getLocation, tessieConfigured } from "@backend/services/tesla";
+import { getStreamControl, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -128,6 +143,24 @@ driveListsRouter.post("/", async (c) => {
 });
 
 /**
+ * GET /api/drive-lists/active — THE active drive ({ id, slug, title }) or null.
+ *
+ * Cheap probe for the global "active drive" banner and the viewport's activate
+ * control (so it can name the drive it would deactivate). Declared BEFORE
+ * `/:slug` so the literal path wins over the slug pattern.
+ */
+driveListsRouter.get("/active", async (c) => {
+  const db = drizzle(c.env.DB);
+  const [row] = await db
+    .select({ id: driveLists.id, slug: driveLists.slug, title: driveLists.title })
+    .from(driveLists)
+    .where(eq(driveLists.isActive, true))
+    .orderBy(desc(driveLists.updatedAt))
+    .limit(1);
+  return c.json({ active: row ?? null });
+});
+
+/**
  * GET /api/drive-lists/home-location — the project's coordinates, as used by the
  * home-arrival rule that ends an active drive.
  *
@@ -143,7 +176,10 @@ driveListsRouter.get("/home-location", async (c) => {
   return c.json({
     home,
     radiusM: HOME_RADIUS_M,
-    afterLocalMinutes: HOME_ARRIVAL_AFTER_MINUTES,
+    // No wall-clock cutoff anymore — a car PARKED within radiusM ends the drive
+    // at any hour. Field kept (null) so existing readers don't break.
+    afterLocalMinutes: null,
+    requiresParked: true,
     timezone: "America/Los_Angeles",
   });
 });
@@ -161,6 +197,9 @@ driveListsRouter.get("/:slug", async (c) => {
     .where(eq(driveListStops.driveListId, drive.id))
     .orderBy(asc(driveListStops.sortOrder), asc(driveListStops.id))
     .all();
+  // Fill any missing stop coords from the linked showroom so the map plots and
+  // navigation works even for stops created without their own lat/lng.
+  await fillMissingStopCoords(db, stops);
 
   return c.json({ ...drive, notes: parseDriveNotes(drive.notes), stops });
 });
@@ -174,9 +213,39 @@ driveListsRouter.get("/:slug", async (c) => {
  */
 driveListsRouter.patch("/:slug", async (c) => {
   const db = drizzle(c.env.DB);
-  const body = (await c.req.json().catch(() => ({}))) as { isActive?: boolean };
+  const slug = c.req.param("slug");
+  const body = (await c.req.json().catch(() => ({}))) as {
+    isActive?: boolean;
+    title?: string;
+    description?: string | null;
+    notes?: string[] | null;
+    status?: "draft" | "active" | "completed" | "archived";
+    startLatitude?: number;
+    startLongitude?: number;
+  };
+
+  // Field edits (title/description/notes/status) are a separate concern from
+  // activation. `status` here is a lifecycle label only and never flips the
+  // active pointer — activation stays on the gated isActive path below.
+  const hasFieldEdit =
+    body.title !== undefined ||
+    body.description !== undefined ||
+    body.notes !== undefined ||
+    body.status !== undefined;
+  if (body.isActive === undefined && hasFieldEdit) {
+    const res = await updateDriveList(db, {
+      slug,
+      title: body.title,
+      description: body.description,
+      notes: body.notes,
+      status: body.status,
+    });
+    if (!res) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true, id: res.id, slug: res.slug });
+  }
+
   if (typeof body.isActive !== "boolean") {
-    return c.json({ error: "`isActive` (boolean) is required" }, 400);
+    return c.json({ error: "`isActive` (boolean) or an editable field is required" }, 400);
   }
   const [drive] = await db
     .select({ id: driveLists.id })
@@ -185,23 +254,91 @@ driveListsRouter.patch("/:slug", async (c) => {
     .limit(1);
   if (!drive) return c.json({ error: "Not found" }, 404);
 
+  // A drive list may only be ACTIVATED inside the daytime streaming window
+  // (default 07:00–20:00 Pacific) — the streaming DO is time-boxed, so activation
+  // outside it would only ever poll. Deactivation is always allowed.
+  if (body.isActive) {
+    const control = await getStreamControl(c.env);
+    if (!isWithinStreamWindow(new Date(), control)) {
+      return c.json(
+        {
+          error: `A drive can only be made active between ${String(control.windowStartHour).padStart(2, "0")}:00 and ${String(control.windowEndHour).padStart(2, "0")}:00 Pacific.`,
+          windowStartHour: control.windowStartHour,
+          windowEndHour: control.windowEndHour,
+        },
+        409,
+      );
+    }
+  }
+
   await setActiveDrive(db, body.isActive ? drive.id : null);
+
+  // On activation, stamp the official start time + the device's location so the
+  // live per-stop timing (GET /:slug/plan) can project forward from here. Coords
+  // come from the client (browser geolocation) when provided, else the Tesla's
+  // live GPS; null is fine — timing then reads relative from the first stop.
+  if (body.isActive) {
+    let lat = typeof body.startLatitude === "number" ? body.startLatitude : null;
+    let lng = typeof body.startLongitude === "number" ? body.startLongitude : null;
+    if (lat == null || lng == null) {
+      try {
+        if (await tessieConfigured(c.env)) {
+          const loc = await getLocation(c.env);
+          if (loc) {
+            lat = loc.latitude;
+            lng = loc.longitude;
+          }
+        }
+      } catch {
+        /* leave null — timing falls back to relative-from-first-stop */
+      }
+    }
+    await db
+      .update(driveLists)
+      .set({ startedAt: new Date(), startLatitude: lat, startLongitude: lng })
+      .where(eq(driveLists.id, drive.id))
+      .run();
+  }
+
+  // Match the streaming DO to the new active state (fire-and-forget). The DO's own
+  // lifecycle guard is the source of truth; this just makes start/stop prompt
+  // instead of waiting for the next alarm tick.
+  try {
+    const stub = c.env.TESLA_STREAM.get(c.env.TESLA_STREAM.idFromName("singleton"));
+    c.executionCtx.waitUntil(
+      stub
+        .fetch(body.isActive ? "https://do/start" : "https://do/stop", { method: "POST" })
+        // Drain the DO response body so the subrequest stream doesn't linger.
+        // Return the cancel promise so waitUntil actually tracks it to completion.
+        .then((res) => res.body?.cancel())
+        .catch((err) => console.error("[drive-lists] tesla stream signal failed:", err)),
+    );
+  } catch (err) {
+    console.error("[drive-lists] tesla stream stub failed:", err);
+  }
+
   return c.json({ ok: true, isActive: body.isActive });
 });
 
-/** PATCH /api/drive-lists/:slug/stops/:stopId — toggle/set a stop's visited state. */
+/**
+ * PATCH /api/drive-lists/:slug/stops/:stopId — edit a stop.
+ *
+ * Backwards-compatible with the `{ visited }` check-off, but now accepts any of
+ * the stop's editable fields (name/address/hours/skipped/sortOrder/…) via the
+ * shared `updateDriveStop` service.
+ */
 driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
   const db = drizzle(c.env.DB);
   const slug = c.req.param("slug");
   const stopId = Number(c.req.param("stopId"));
   if (!Number.isFinite(stopId)) return c.json({ error: "Invalid stop id" }, 400);
 
-  const body = (await c.req.json().catch(() => ({}))) as { visited?: boolean };
-  if (typeof body.visited !== "boolean") {
-    return c.json({ error: "`visited` (boolean) is required" }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  if (body === null || typeof body !== "object" || Object.keys(body).length === 0) {
+    return c.json({ error: "At least one editable stop field is required" }, 400);
   }
 
-  // Resolve the drive first so a stop can't be toggled through the wrong slug.
+  // Resolve the drive first so a stop can't be edited through the wrong slug.
   const [drive] = await db
     .select({ id: driveLists.id })
     .from(driveLists)
@@ -218,11 +355,9 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
     return c.json({ error: "Stop not found on this drive" }, 404);
   }
 
-  await db
-    .update(driveListStops)
-    .set({ visited: body.visited, visitedAt: body.visited ? new Date() : null })
-    .where(eq(driveListStops.id, stopId))
-    .run();
+  // The MCP tool is the zod-validated surface; this admin API trusts the caller
+  // and forwards recognized keys (the service ignores anything it doesn't read).
+  await updateDriveStop(db, stopId, body as DriveStopUpdateInput);
 
   // Recompute completion for the response. Progress alone decides which landing
   // tab the drive falls in (pending / in progress / finished), so checking a
@@ -240,6 +375,205 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
   await db.update(driveLists).set({ updatedAt: new Date() }).where(eq(driveLists.id, drive.id)).run();
 
   return c.json({ ok: true, visited: body.visited, stopCount: total, visitedCount });
+});
+
+/** POST /api/drive-lists/:slug/stops — append one or more stops to a drive. */
+driveListsRouter.post("/:slug/stops", async (c) => {
+  const db = drizzle(c.env.DB);
+  const slug = c.req.param("slug");
+  const body = (await c.req.json().catch(() => ({}))) as { stops?: DriveStopInput[] };
+  if (!Array.isArray(body.stops) || body.stops.length === 0) {
+    return c.json({ error: "`stops` (non-empty array) is required" }, 400);
+  }
+  const res = await addDriveStops(db, { slug }, body.stops);
+  if (!res) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true, ...res }, 201);
+});
+
+/** DELETE /api/drive-lists/:slug/stops/:stopId — remove a stop from a drive. */
+driveListsRouter.delete("/:slug/stops/:stopId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const slug = c.req.param("slug");
+  const stopId = Number(c.req.param("stopId"));
+  if (!Number.isFinite(stopId)) return c.json({ error: "Invalid stop id" }, 400);
+
+  const [drive] = await db
+    .select({ id: driveLists.id })
+    .from(driveLists)
+    .where(eq(driveLists.slug, slug))
+    .limit(1);
+  if (!drive) return c.json({ error: "Not found" }, 404);
+
+  const [stop] = await db
+    .select({ driveListId: driveListStops.driveListId })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop || stop.driveListId !== drive.id) {
+    return c.json({ error: "Stop not found on this drive" }, 404);
+  }
+
+  await removeDriveStop(db, stopId);
+  return c.json({ ok: true, stopId, driveListId: drive.id });
+});
+
+/** Resolve a drive id from its slug, or null. */
+async function driveIdBySlug(db: ReturnType<typeof drizzle>, slug: string): Promise<number | null> {
+  const [drive] = await db
+    .select({ id: driveLists.id })
+    .from(driveLists)
+    .where(eq(driveLists.slug, slug))
+    .limit(1);
+  return drive?.id ?? null;
+}
+
+/**
+ * GET /api/drive-lists/:slug/plan — live per-stop timing along the drive's order.
+ *
+ * Free to call (straight-line travel estimate, no Maps SKU). Anchors on the
+ * captured start when the drive is active; otherwise projects from now.
+ */
+driveListsRouter.get("/:slug/plan", async (c) => {
+  const db = drizzle(c.env.DB);
+  const timing = await getDriveTiming(db, c.req.param("slug"));
+  if (!timing) return c.json({ error: "Not found" }, 404);
+  return c.json(timing);
+});
+
+/** GET /api/drive-lists/:slug/notes — drive-global + per-stop notes. */
+driveListsRouter.get("/:slug/notes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  return c.json(await listDriveNotes(db, driveId));
+});
+
+/** POST /api/drive-lists/:slug/notes — create a note ({ body, stopId?, source? }). */
+driveListsRouter.post("/:slug/notes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    body?: string;
+    stopId?: number | null;
+    source?: "user" | "ai";
+  };
+  if (!body.body?.trim()) return c.json({ error: "`body` is required" }, 400);
+  const note = await createDriveNote(db, driveId, {
+    body: body.body,
+    stopId: body.stopId ?? null,
+    source: body.source,
+  });
+  return c.json({ ok: true, note }, 201);
+});
+
+/** PATCH /api/drive-lists/:slug/notes/:noteId — set/clear read (collapsed) state. */
+driveListsRouter.patch("/:slug/notes/:noteId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const noteId = Number(c.req.param("noteId"));
+  if (!Number.isFinite(noteId)) return c.json({ error: "Invalid note id" }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as { read?: boolean };
+  if (typeof body.read !== "boolean") return c.json({ error: "`read` (boolean) is required" }, 400);
+
+  const [note] = await db
+    .select({ driveListId: driveListNotes.driveListId })
+    .from(driveListNotes)
+    .where(eq(driveListNotes.id, noteId))
+    .limit(1);
+  if (!note || note.driveListId !== driveId) {
+    return c.json({ error: "Note not found on this drive" }, 404);
+  }
+  await setDriveNoteRead(db, noteId, body.read);
+  return c.json({ ok: true, read: body.read });
+});
+
+/** DELETE /api/drive-lists/:slug/notes/:noteId — delete a note. */
+driveListsRouter.delete("/:slug/notes/:noteId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const noteId = Number(c.req.param("noteId"));
+  if (!Number.isFinite(noteId)) return c.json({ error: "Invalid note id" }, 400);
+
+  const [note] = await db
+    .select({ driveListId: driveListNotes.driveListId })
+    .from(driveListNotes)
+    .where(eq(driveListNotes.id, noteId))
+    .limit(1);
+  if (!note || note.driveListId !== driveId) {
+    return c.json({ error: "Note not found on this drive" }, 404);
+  }
+  await deleteDriveNote(db, noteId);
+  return c.json({ ok: true });
+});
+
+/**
+ * POST /api/drive-lists/:slug/stops/:stopId/rating — rate the stop's showroom.
+ *
+ * Writes to the canonical showroom visit log (the stop's linked showroom's
+ * latest-visit `rating` + `ratingContext*`, plus a `store_notes` visit note) —
+ * the same path as the `record_showroom_visit` MCP tool. A stop with no linked
+ * showroom cannot be rated (400). `deferFeedback` instead files an AI follow-up
+ * note on the stop for after the drive.
+ */
+driveListsRouter.post("/:slug/stops/:stopId/rating", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const stopId = Number(c.req.param("stopId"));
+  if (!Number.isFinite(stopId)) return c.json({ error: "Invalid stop id" }, 400);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    rating?: number;
+    contextMarkdown?: string;
+    deferFeedback?: boolean;
+  };
+  if (!Number.isInteger(body.rating) || body.rating! < 1 || body.rating! > 5) {
+    return c.json({ error: "`rating` must be an integer 1–5" }, 400);
+  }
+
+  const [stop] = await db
+    .select({ id: driveListStops.id, driveListId: driveListStops.driveListId, showroomStoreId: driveListStops.showroomStoreId, name: driveListStops.name })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop || stop.driveListId !== driveId) {
+    return c.json({ error: "Stop not found on this drive" }, 404);
+  }
+  if (stop.showroomStoreId == null) {
+    return c.json({ error: "This stop is not linked to a registered showroom, so it can't be rated." }, 400);
+  }
+
+  const context = body.contextMarkdown?.trim() || `Visit — ${body.rating}★ (from drive)`;
+  // Canonical visit log: latest-visit rating on the store + a store note.
+  await db
+    .update(showroomStores)
+    .set({ rating: body.rating, ratingContextMarkdown: context, ratingContextHtml: context })
+    .where(eq(showroomStores.id, stop.showroomStoreId))
+    .run();
+  await db
+    .insert(storeNotes)
+    .values({
+      storeId: stop.showroomStoreId,
+      title: `Visit — ${body.rating}★`,
+      contentMarkdown: context,
+      note: context,
+    })
+    .run();
+
+  // Deferred feedback: an AI follow-up note pinned to this stop, dated.
+  let followUpNote = null;
+  if (body.deferFeedback) {
+    const date = new Date().toISOString().slice(0, 10);
+    followUpNote = await createDriveNote(db, driveId, {
+      body: `AI: follow up on feedback after drive list is completed ${date}`,
+      stopId,
+      source: "ai",
+    });
+  }
+  return c.json({ ok: true, rating: body.rating, showroomStoreId: stop.showroomStoreId, followUpNote });
 });
 
 export default driveListsRouter;

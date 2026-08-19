@@ -1,0 +1,190 @@
+[
+  {
+    "taskKey": "D0-DB-01",
+    "title": "Document ingestion and clause extraction with required citation",
+    "description": "contract_clauses and vendor_terms. Every extracted clause stores a citation to page and line in the source document, or it is not stored as found. Structured output with an explicit JSON schema; never degrade a failed parse to empty. On a document this consequential a silent empty extraction is worse than a loud failure.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 1,
+    "changeType": "new"
+  },
+  {
+    "taskKey": "D0-AI-01",
+    "title": "Not-found is a distinct state from not-present",
+    "description": "'No change-order clause found - confirm before signing' must never render as 'there is no change-order clause'. Silence read as absence is the dangerous failure in this whole feature. Enforce at the model layer, not in copy.",
+    "workstream": "ai",
+    "phase": 0,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-01"]
+  },
+  {
+    "taskKey": "D0-DB-04",
+    "title": "Seed contract_check_definitions from the CSLB publications",
+    "description": "Author the hard checks as seeded definition rows with EXACT citations, from r2_resources/cslb_docs/publications. Down payment cap (lesser of $1,000 or 10%), payment schedule must state amount plus what work it covers, payments cannot exceed value of performed work, Mechanics Lien Warning BPC 7159(e)(4), right to cancel 3 or 5 days and 10-day refund BPC 7159(e)(6)(b), written change orders, warranty parts plus duration, start and end dates, permit responsibility, license number address phone, HIS signature authority BPC 7151.2, finance charges separate, commission pro rata, workers comp, sub/supplier list. NOT a retrieval corpus - the publications are provenance recorded on each row; the table is the runtime source of truth. A check must be deterministic and its citation exact.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 3,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-01"]
+  },
+  {
+    "taskKey": "D0-DB-05",
+    "title": "Seed the CSLB three-tier specificity rubric",
+    "description": "Good expectations / Trouble ahead / Good luck, with the publication's own examples as reference. The regulator publishes the scale so the product needs no opinion of its own. Used to grade every scope line and every payment trigger.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 4,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-04"]
+  },
+  {
+    "taskKey": "D1-UI-01",
+    "title": "Pre-signature contract review",
+    "description": "Review the draft before signature against the scope already registered in the system. Risks as written, plus what is MISSING - where detail needs to be inked in, derived from work the system already knows about. The translation thesis pointed at the contract itself.",
+    "workstream": "frontend",
+    "phase": 1,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D0-AI-01"]
+  },
+  {
+    "taskKey": "D1-UI-04",
+    "title": "Specificity grading with drafted upgrades",
+    "description": "Grade each scope line and payment trigger on the CSLB rubric, show the tier, and DRAFT THE UPGRADE. The system already holds the registered scope - actual fixture, model, room, dimension - so it can propose the 'good expectations' version of a line the contractor wrote as 'trouble ahead'.",
+    "workstream": "frontend",
+    "phase": 1,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-05", "D1-UI-01"]
+  },
+  {
+    "taskKey": "D1-API-05",
+    "title": "Payment-trigger verifiability test",
+    "description": "Every payment trigger must resolve to conditions the system can later verify. 'Upon delivery of phase 1, pay' fails three ways: it fails the statutory requirement to explain what the payment covers, it invites payment exceeding the value of performed work, and it makes payment QC impossible. Flag before signature with a proposed replacement drawn from the project's own scope and inspection points. This is what makes a contract machine-checkable by Phase 2.",
+    "workstream": "api",
+    "phase": 1,
+    "sortOrder": 3,
+    "changeType": "new",
+    "dependsOn": ["D1-UI-01"]
+  },
+  {
+    "taskKey": "D2-API-01",
+    "title": "Payment-schedule QC engine",
+    "description": "Map contract phase conditions to verifiable system state. Contractor says phase complete and payment due; the system checks against tasks actually marked complete and answers in real time. Reports state and contract conditions only - never characterizes intent, never accuses.",
+    "workstream": "api",
+    "phase": 2,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-01"]
+  },
+  {
+    "taskKey": "D2-UI-02",
+    "title": "Payment request review surface",
+    "description": "Shows the request, the contract clause it cites, and the per-condition system state with what is met and unmet. Requires no confrontation skill from the homeowner: it is not an argument, it is state. Cheapest high-value surface in the plan - ship it early.",
+    "workstream": "frontend",
+    "phase": 2,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["D2-API-01"]
+  },
+  {
+    "taskKey": "D3-API-02",
+    "title": "Change-order awareness",
+    "description": "When the contract defines a change-order process and a change occurs, trigger that process and price it by the contract's own terms. Answers the question 0041's Change Impact Assessment already asks: what does the contract say the change order costs.",
+    "workstream": "api",
+    "phase": 3,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-01"]
+  },
+  {
+    "taskKey": "D4-API-03",
+    "title": "Vendor and supplier T&C recourse",
+    "description": "Late order impacting timeline, options to change a product on an existing invoice, restocking fees, return windows, and whether the homeowner still qualifies. Lets 0041's Change Impact Assessment answer its purchases questions instead of asking the homeowner to go read an invoice.",
+    "workstream": "api",
+    "phase": 4,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-01"]
+  },
+  {
+    "taskKey": "D5-DB-02",
+    "title": "Dispute model with independently tracked contested items",
+    "description": "disputes, contested_items (raised|disputed|compromised|satisfied|reneged|escalated|unresolved), append-only item_events with separate occurred_at and immutable recorded_at, dispute_branches. A compromise on one item never closes another - bundling is how five grievances become one conceded and four evaporated.",
+    "workstream": "database",
+    "phase": 5,
+    "sortOrder": 1,
+    "changeType": "new"
+  },
+  {
+    "taskKey": "D5-API-04",
+    "title": "Branches as impact-blocking edges",
+    "description": "relationship | licensing_complaint | permit | payment. Modeled as impact_blocks edges in the 0041 graph so blast radius and node health work for free. Do NOT build a parallel dependency mechanism. Branches run independently; only the relationship branch is critical path.",
+    "workstream": "api",
+    "phase": 5,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["D5-DB-02"]
+  },
+  {
+    "taskKey": "D6-DB-03",
+    "title": "Violation definitions with NOT NULL citation",
+    "description": "Scopes: contract clause, state regulation, state law, permit, license. citation is NOT NULL by design - PRODUCT.md principle 7 enforced structurally rather than by discipline. Flagging against contested items, linking to the specific contract clause where contractual.",
+    "workstream": "database",
+    "phase": 6,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D5-DB-02"]
+  },
+  {
+    "taskKey": "D7-AI-02",
+    "title": "Licensing board complaint draft",
+    "description": "Assemble a draft from recorded facts in the board's own structure. Information not legal advice: cite sources, point at the board's process, never predict an outcome or advise to sue. Every statute and deadline cited and verifiable or phrased as the question to ask.",
+    "workstream": "ai",
+    "phase": 7,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D6-DB-03"]
+  },
+  {
+    "taskKey": "D8-UI-03",
+    "title": "Replacement contractor handoff package",
+    "description": "0041's trade-ready package plus a mid-project delta and factual disclosure. Leads with original goals and current state in trade terms, then known condition of what they would inherit, then the dispute - disclosed completely but never as the headline. A grievance-led package filters exactly wrong: good contractors walk, bad ones read an easy mark.",
+    "workstream": "frontend",
+    "phase": 8,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D5-API-04"]
+  },
+  {
+    "taskKey": "D9-API-06",
+    "title": "Mechanics lien clock",
+    "description": "Compute statutory windows from recorded event dates, each citing its published source. Preliminary Notice 20 days after work start or material delivery; lien recorded within 90 days of completion/occupancy/acceptance; owner Notice of Completion within 15 days shortens claimant windows to 60 (prime) / 30 (sub or supplier); foreclosure action within 90 days of recording; service on owner plus proof of service affidavit or the lien is unenforceable. Also BPC 7031 - a non-licensed individual cannot foreclose on work valued over $500. Applying published windows, never inventing day counts.",
+    "workstream": "api",
+    "phase": 9,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D0-DB-04"]
+  },
+  {
+    "taskKey": "D9-UI-05",
+    "title": "Preventive lien posture",
+    "description": "Preliminary Notice register so the homeowner tracks who can claim; conditional release before payment and unconditional release after; the right to withhold the next payment until unconditional releases for the previous one are in hand; Notice of Completion prompt within 15 days; joint-check option; sub and supplier list from the contract. Checklist state on the payment branch, not prose in a help page.",
+    "workstream": "frontend",
+    "phase": 9,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["D9-API-06"]
+  },
+  {
+    "taskKey": "D10-UI-06",
+    "title": "Dispute communication guardrails",
+    "description": "Surfaced the moment a dispute opens, not buried in help. Put it in writing with exact problems, requested resolution, and a reasonable deadline; first-class AND certified mail or PDF by email, keep a copy; keep grievances inside the written contract and signed change orders; IF ESCALATION LOOKS LIKELY LIMIT INFORMAL TEXTS AND EMAILS - the least obvious and most actionable instruction in the corpus, and the argument for the product becoming the channel of record early; photograph defective and incomplete work before any replacement starts; ask a replacement contractor whether they will explain the prior work's problems; give the contractor a real opportunity to respond first and record that it happened. Carry the four-year CSLB complaint window, extendable by written warranty.",
+    "workstream": "frontend",
+    "phase": 10,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["D5-DB-02"]
+  }
+]

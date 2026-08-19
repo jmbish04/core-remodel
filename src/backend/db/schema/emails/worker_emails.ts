@@ -111,6 +111,28 @@ export const workerEmails = sqliteTable(
     reviewNotes: text("review_notes"),
     reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
 
+    // ── AI trust gate (0042) ─────────────────────────────────────────────
+    /** Provenance: `worker` (trusted, remodel@) or `gmail` (cautious). */
+    source: text("source").notNull().default("worker"),
+    /**
+     * AI extraction lifecycle (0042), independent of `status`:
+     *   auto_done        → AI extraction ran automatically (trusted source)
+     *   pending_approval → non-AI work done; awaiting user OK to run AI
+     *   approved         → user approved; AI extraction ran
+     *   failed           → AI extraction attempted and errored
+     *
+     * INVARIANT: the pipeline ALWAYS sets this explicitly at insert from
+     * decision.deferAiUntilApproval (Gmail → pending_approval, worker →
+     * auto_done), so the column default is never reached in practice. The
+     * default stays `auto_done` only because it is the value 0161 already wrote
+     * to every existing (pre-0042, all worker-sourced) row — changing it would
+     * force a full D1 rebuild of this cascade-parent table for no behavioural
+     * gain. Any NEW insert path MUST set ai_status explicitly.
+     */
+    aiStatus: text("ai_status").notNull().default("auto_done"),
+    aiApprovedAt: integer("ai_approved_at", { mode: "timestamp" }),
+    aiApprovedBy: text("ai_approved_by"),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),

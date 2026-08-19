@@ -1,0 +1,38 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { AlertsApp } from "@/components/alerts/AlertsApp";
+---
+
+<BaseLayout
+  title="Alerts — The Monolith"
+  description="Everything that needs your attention: new email, pending AI approvals, extracted quotes to map."
+>
+  <main class="w-full px-4 py-8 pb-12 md:px-8">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M10.268 21a2 2 0 0 0 3.464 0"></path>
+          <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path>
+        </svg>
+        Alerts
+      </h1>
+      <p class="text-muted-foreground">
+        New email, emails awaiting your OK to AI-process, and extracted quotes/invoices to map.
+      </p>
+    </div>
+
+    <AlertsApp client:only="react" />
+  </main>
+</BaseLayout>

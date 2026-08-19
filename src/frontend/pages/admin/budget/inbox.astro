@@ -1,0 +1,48 @@
+---
+/**
+ * @fileoverview 0035 Phase 4 budget workbench page.
+ *
+ * Thin Astro shell mounting the `<BudgetInboxApp />` island — a decision
+ * inbox of derived alerts (`GET /api/budget/inbox`) stacked over a per-room
+ * committed/spent/remaining finance rollup (`GET /api/budget/rooms-finance`).
+ */
+import { BudgetInboxApp } from "@/components/BudgetInboxApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Budget Inbox - 126 Colby Remodel Mission Control"
+  description="Decision inbox of derived budget alerts, plus a per-room committed/spent/remaining finance rollup."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M22 12h-6l-2 3h-4l-2-3H2"></path>
+          <path
+            d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+          ></path>
+        </svg>
+        Budget Inbox
+      </h1>
+      <p class="text-muted-foreground">
+        What needs your attention — derived alerts across estimates, funding, and
+        phasing — plus a per-room committed vs. spent finance rollup.
+      </p>
+    </div>
+
+    <BudgetInboxApp client:only="react" />
+  </main>
+</BaseLayout>

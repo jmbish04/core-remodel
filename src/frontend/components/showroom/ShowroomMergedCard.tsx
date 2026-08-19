@@ -14,6 +14,7 @@
 
 import {
   Globe,
+  Building2,
   Instagram,
   MapPin,
   Phone,
@@ -36,8 +37,14 @@ export interface ShowroomCardData {
   name: string;
   cityName: string | null;
   hubName: string | null;
+  /** Multi-location summary (0045/0047) — total sites + unique cities sorted asc. */
+  locationCount?: number;
+  locationCities?: string[];
   pricePoint: "$" | "$$" | "$$$" | "$$$$" | null;
   categories: string[];
+  /** Business-model type (joined from showroom_store_type); null = untyped. */
+  typeName?: string | null;
+  typeColor?: string | null;
   heroImageCfImagesUrl: string | null;
   iconCfImagesUrl: string | null;
   hours: HourRow[];
@@ -362,6 +369,32 @@ export function ShowroomMergedCard({
             </span>
           )}
 
+          {(store.locationCount ?? 0) >= 2 && (
+            <span className="inline-flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1 font-medium text-foreground/70">
+                <Building2 className="size-3 shrink-0" aria-hidden="true" />
+                {store.locationCount} locations
+              </span>
+              {(store.locationCities ?? [])
+                .slice()
+                .sort((a, b) => a.localeCompare(b))
+                .slice(0, 3)
+                .map((c) => (
+                  <span
+                    key={c}
+                    className="rounded bg-muted px-1 py-0 text-[10px] text-muted-foreground"
+                  >
+                    {c}
+                  </span>
+                ))}
+              {(store.locationCities?.length ?? 0) > 3 && (
+                <span className="text-[10px] text-muted-foreground/60">
+                  +{(store.locationCities?.length ?? 0) - 3}
+                </span>
+              )}
+            </span>
+          )}
+
           <RatingsRow store={store} />
 
           {category && (
@@ -376,6 +409,28 @@ export function ShowroomMergedCard({
                   +{store.categories.length - 1}
                 </span>
               )}
+            </span>
+          )}
+
+          {store.typeName && (
+            <span
+              className="inline-flex w-fit items-center gap-1 rounded border px-1.5 py-0 text-[10px] font-medium"
+              style={
+                store.typeColor
+                  ? {
+                      backgroundColor: `${store.typeColor}1f`,
+                      color: store.typeColor,
+                      borderColor: `${store.typeColor}55`,
+                    }
+                  : undefined
+              }
+            >
+              <span
+                className="size-1.5 rounded-full"
+                style={{ backgroundColor: store.typeColor ?? "currentColor" }}
+                aria-hidden="true"
+              />
+              {store.typeName}
             </span>
           )}
 

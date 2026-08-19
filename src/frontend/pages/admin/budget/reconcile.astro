@@ -1,0 +1,48 @@
+---
+/**
+ * @fileoverview Estimate-line reconciliation HITL page.
+ *
+ * Thin Astro shell mounting `<EstimateReconcileApp />` — the human review queue
+ * for mapping estimate line items to rooms. Data comes from
+ * `GET /api/estimates/reconcile/queue`; the AI staging step is
+ * `POST /api/estimates/line-items/:id/ai-suggest`; the human write is
+ * `PATCH /api/estimates/line-items/:id/reconcile`.
+ */
+import { EstimateReconcileApp } from "@/components/EstimateReconcileApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Reconcile Estimate Lines - 126 Colby Remodel Mission Control"
+  description="Map estimate line items to rooms — review AI-suggested rooms with their reasoning, then confirm or reject each mapping."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M20 6 9 17l-5-5"></path>
+          <path d="M3 3h4v4"></path>
+        </svg>
+        Reconcile Estimate Lines
+      </h1>
+      <p class="text-muted-foreground">
+        Map each unmapped estimate line item to a room — ask AI for a suggestion,
+        see its reasoning, then confirm or reject.
+      </p>
+    </div>
+
+    <EstimateReconcileApp client:only="react" />
+  </main>
+</BaseLayout>

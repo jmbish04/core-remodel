@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
-import { showroomStores } from "@backend/db";
+import { showroomStores, showroomStoreType } from "@backend/db";
+import { loadStoreLocationCounts } from "@backend/services/showroom/locations";
 import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
 import { z } from "zod";
 
@@ -9,21 +10,29 @@ import { defineTool, READ_ONLY } from "../../types";
 
 /** Shape a store row into a compact list row for `list_showrooms`. The website
  *  is derived from the store's WEBSITE link (URLs live in showroom_store_links,
- *  no longer on the store row). */
+ *  no longer on the store row). `typeName` is resolved from a small id→name map
+ *  (showroom_store_type is a tiny config table — one fetch, no per-row join). */
 function storeListDto(
   s: typeof showroomStores.$inferSelect,
   website: string | null,
+  typeName: string | null,
+  locationCount: number,
 ) {
   return {
     id: s.id,
     name: s.name,
     pricePoint: s.pricePoint,
+    /** The PRIMARY site only. A store with `locationCount > 1` has more — get_showroom lists them. */
     address: s.locationAddress,
+    locationCount,
     zipCode: s.zipCode,
     phone: s.phoneNumber,
     website,
     rating: s.rating,
     isAppointmentOnly: s.isAppointmentOnly,
+    typeId: s.typeId,
+    typeName,
+    isActive: s.isActive,
   };
 }
 
@@ -32,7 +41,16 @@ export const listShowrooms = defineTool({
   category: "showrooms",
   title: "List showrooms",
   description:
-    "List showroom store locations as compact rows (id, name, pricePoint, address, phone, website, rating). Optional filters: free-text `q` over name/description/address, exact `pricePoint` ($..$$$$), and `isAppointmentOnly`. Use a store's `id` as the target for get_showroom and every write tool.",
+    "List showroom BUSINESSES as compact rows (id, name, pricePoint, address, locationCount, phone, website, rating). " +
+    "Each row is one business, NOT one address — Bay Area chains run several sites under a single store row, so " +
+    "`address` is only the PRIMARY site and `locationCount` tells you how many sites exist in total. Pass " +
+    "`multiLocationOnly: true` to return just the chains (locationCount > 1); call get_showroom for the full " +
+    "`locations[]` array of any row. " +
+    "By default only ACTIVE stores are returned (soft-deleted junk/duplicates are hidden); pass " +
+    "`includeInactive: true` to also include inactive ones (each row carries `isActive`). Optional filters: " +
+    "free-text `q` over name/description/address, exact `pricePoint` ($..$$$$), `isAppointmentOnly`, and `typeId` " +
+    "(business-model type — see list_store_types). Each row carries `typeId`/`typeName`. Use a " +
+    "store's `id` as the target for get_showroom and every write tool.",
   inputShape: {
     q: z
       .string()
@@ -46,6 +64,22 @@ export const listShowrooms = defineTool({
       .boolean()
       .optional()
       .describe("Only stores flagged appointment-only (true) or walk-in (false)"),
+    typeId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Filter to one business-model type id (see list_store_types)"),
+    includeInactive: z
+      .boolean()
+      .optional()
+      .describe("Include soft-deleted (inactive) stores too. Default false — only active stores."),
+    multiLocationOnly: z
+      .boolean()
+      .optional()
+      .describe(
+        "Only businesses with more than one physical site (locationCount > 1) — i.e. the Bay Area chains.",
+      ),
     limit: z.number().int().positive().max(200).optional(),
     offset: z.number().int().min(0).optional(),
   },
@@ -57,6 +91,7 @@ export const listShowrooms = defineTool({
         name: z.string().nullable(),
         pricePoint: z.string().nullable(),
         address: z.string().nullable(),
+        locationCount: z.number().int(),
         rating: z.number().nullable(),
       }),
     ),
@@ -64,14 +99,13 @@ export const listShowrooms = defineTool({
   examples: [
     { title: "All showrooms", args: {} },
     { title: "Affordable tile places", args: { q: "tile", pricePoint: "$$" } },
+    { title: "Chains with several Bay Area sites", args: { multiLocationOnly: true } },
   ],
   handler: async ({ db }, input) => {
-    // Soft-deleted stores never surface to the agent.
-    const all = await db
-      .select()
-      .from(showroomStores)
-      .where(eq(showroomStores.isActive, true))
-      .all();
+    // Soft-deleted stores are hidden unless includeInactive is set.
+    const all = input.includeInactive
+      ? await db.select().from(showroomStores).all()
+      : await db.select().from(showroomStores).where(eq(showroomStores.isActive, true)).all();
     const filtered = all.filter((s) => {
       if (input.q && !matchesQuery([s.name, s.description, s.locationAddress], input.q)) {
         return false;
@@ -80,12 +114,27 @@ export const listShowrooms = defineTool({
       if (input.isAppointmentOnly != null && s.isAppointmentOnly !== input.isAppointmentOnly) {
         return false;
       }
+      if (input.typeId != null && s.typeId !== input.typeId) return false;
       return true;
     });
-    const linksMap = await getStoreLinksMap(db, filtered.map((s) => s.id));
+    const counts = await loadStoreLocationCounts(db, filtered.map((s) => s.id));
+    // Applied AFTER the counts load — the count is what the filter tests.
+    const scoped = input.multiLocationOnly
+      ? filtered.filter((s) => (counts.get(s.id) ?? 0) > 1)
+      : filtered;
+
+    const linksMap = await getStoreLinksMap(db, scoped.map((s) => s.id));
+    // Tiny config table — one fetch, build an id→displayName map for the DTO.
+    const typeRows = await db.select().from(showroomStoreType).all();
+    const typeName = new Map(typeRows.map((t) => [t.id, t.displayName]));
     return paginate(
-      filtered.map((s) =>
-        storeListDto(s, linksToLegacyUrls(linksMap.get(s.id) ?? []).websiteUrl),
+      scoped.map((s) =>
+        storeListDto(
+          s,
+          linksToLegacyUrls(linksMap.get(s.id) ?? []).websiteUrl,
+          s.typeId != null ? (typeName.get(s.typeId) ?? null) : null,
+          counts.get(s.id) ?? 0,
+        ),
       ),
       input.limit ?? 50,
       input.offset ?? 0,

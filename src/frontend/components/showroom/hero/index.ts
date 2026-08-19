@@ -5,6 +5,7 @@
  */
 
 export { CategoryChipsEditor, type StoreCategoryChip } from "./CategoryChipsEditor";
+export { TypeEditor } from "./TypeEditor";
 export {
   SocialLinks,
   SOCIAL_LINK_TYPES,

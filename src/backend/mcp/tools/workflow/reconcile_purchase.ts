@@ -208,7 +208,7 @@ export const reconcilePurchase = defineTool({
       // 4e) mark purchased with this product.
       await call(ctx, "mark_material_purchased", {
         materialId,
-        purchasedShowroomProductId: product.product.id,
+        productId: product.product.id,
       });
       mSteps.push("marked purchased");
 

@@ -1,0 +1,2 @@
+CREATE INDEX `park_sessions_hitl_queue_idx` ON `park_sessions` (`hitl_queue_id`);--> statement-breakpoint
+CREATE INDEX `showroom_store_hitl_queue_store_idx` ON `showroom_store_hitl_queue` (`store_id`);

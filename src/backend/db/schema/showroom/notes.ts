@@ -3,6 +3,7 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
 import { showroomStoreProducts } from "./store_products";
+import { showroomStoreLocations } from "./store_location";
 
 /**
  * Store Notes — freeform notes on a store location.
@@ -14,6 +15,15 @@ export const storeNotes = sqliteTable("store_notes", {
   storeId: integer("store_id")
     .notNull()
     .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+  /**
+   * Physical site this note is about (Phase L, plan 0031). Nullable = brand-level or
+   * not-yet-backfilled; FK → showroom_store_locations, ON DELETE SET NULL. Backfilled to
+   * the store's primary location.
+   */
+  locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+    onDelete: "set null",
+  }),
 
   timestamp: integer("timestamp", { mode: "timestamp" }).default(
     sql`(unixepoch())`

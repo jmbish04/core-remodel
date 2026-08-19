@@ -22,10 +22,7 @@
  * the sweep.
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq } from "drizzle-orm";
-import { z } from "zod";
-
+import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import {
   showroomStoreLinks,
   showroomStoreSales,
@@ -33,9 +30,11 @@ import {
   type ClearanceDetails,
   type ClearanceItem,
 } from "@backend/db/schema/showroom/index";
-import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
+import { meteredAiRun } from "@backend/services/usage/metered-ai";
 import { parseStructuredResponse } from "@backend/utils/ai-json";
-
+import { and, desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -44,8 +43,16 @@ import { parseStructuredResponse } from "@backend/utils/ai-json";
 /** Workers-AI embedding model — mirrors the showroom scrape + deep-sweep RAG. */
 const EMBED_MODEL = "@cf/baai/bge-large-en-v1.5" as const;
 
-/** Workers-AI instruct model for the clearance extraction. */
-const EXTRACT_MODEL = "@cf/moonshotai/kimi-k2.6" as const;
+/**
+ * Workers-AI instruct model for the FALLBACK clearance extraction (Jules is the
+ * primary — see services/jules). `@cf/moonshotai/kimi-k2.7-code` — a 262k-context
+ * frontier model that is more reliable on JSON-schema structured output than
+ * gpt-oss-120b. It is NOT the old kimi-k2.6 (which returned empty `content` and
+ * blanked snapshots — see ai/health.ts): k2.7 exposes a configurable thinking
+ * mode, and we pin `thinking: false` on the extraction call (below) so it emits
+ * the structured answer directly instead of into a reasoning field.
+ */
+const EXTRACT_MODEL = "@cf/moonshotai/kimi-k2.7-code" as const;
 
 /** Chars of page markdown fed to the extractor. */
 const EXTRACT_CHAR_BUDGET = 12_000;
@@ -193,53 +200,147 @@ export interface SalePageResult {
 }
 
 /**
- * Scrape + extract ONE sale page, writing a row only when the content changed.
+ * Move a link to the back of the sweep queue by stamping `updatedAt`.
  *
- * Returns `unchanged` when the hash matches the newest row for this link (the
- * common weekly case — most sale pages sit still), `empty` when the page
- * changed but lists nothing discounted, `recorded` when a snapshot was written.
+ * `sweepShowroomSales` orders by `updatedAt ASC`, so a link that is unchanged
+ * (the common case) or that permanently errors must still advance — otherwise it
+ * sits at the head and a capped run re-scans the same few pages every week while
+ * the tail never gets swept. Both the Workers-AI sweep and the Jules DO call this
+ * up front, per page, so an ATTEMPT (not just a successful write) rotates the queue.
+ */
+export async function touchClearanceLink(env: Env, linkId: number): Promise<void> {
+  await drizzle(env.DB)
+    .update(showroomStoreLinks)
+    .set({ updatedAt: new Date() })
+    .where(eq(showroomStoreLinks.id, linkId));
+}
+
+/** Scrape one clearance page to normalized markdown. Empty string on a blank page. */
+export async function scrapeClearanceMarkdown(env: Env, url: string): Promise<string> {
+  const scraped = await scrapeUrl(env, url);
+  return (scraped.markdown ?? scraped.text ?? "").trim();
+}
+
+/** Stable content hash of a page's markdown (normalized so cosmetic churn is ignored). */
+export function computeClearanceHash(markdown: string): Promise<string> {
+  return stableHash(normalizeForHash(markdown));
+}
+
+/** True when `contentHash` equals the newest recorded snapshot for this link. */
+export async function isClearanceUnchanged(
+  env: Env,
+  linkId: number,
+  contentHash: string,
+): Promise<boolean> {
+  const [newest] = await drizzle(env.DB)
+    .select({ contentHash: showroomStoreSales.contentHash })
+    .from(showroomStoreSales)
+    .where(eq(showroomStoreSales.clearanceWebsiteId, linkId))
+    .orderBy(desc(showroomStoreSales.timestamp))
+    .limit(1);
+  return newest?.contentHash === contentHash;
+}
+
+/**
+ * Supersede the prior snapshot for this link and write the new one (+ embed).
+ * Assumes the caller already confirmed the content CHANGED — extraction and the
+ * change-check are the caller's job so an unchanged page never reaches here and
+ * never costs a Jules/AI call. Shared by the Workers-AI sweep and the Jules DO.
+ *
+ * A changed page that lists nothing on sale is still recorded (empty `items[]`)
+ * so the viewport's alert CLEARS when a sale ends instead of showing last month's.
+ */
+export async function persistSaleSnapshot(
+  env: Env,
+  params: {
+    storeId: number;
+    link: { id: number; url: string };
+    contentHash: string;
+    details: ClearanceDetails;
+  },
+): Promise<SalePageResult> {
+  const db = drizzle(env.DB);
+  const items = params.details.items.slice(0, MAX_ITEMS_PER_SNAPSHOT);
+  const finalDetails = { ...params.details, items };
+  const ragUuid = crypto.randomUUID();
+
+  // Supersede-then-insert as ONE all-or-nothing D1 batch: no generated-id
+  // dependency between them (ragUuid is JS-side), so a batch is safe and keeps
+  // "exactly one isCurrent row per link" atomic. (D1 has no transactions — see
+  // the CLAUDE.md D1 rule; db.batch is the sanctioned atomic unit.)
+  await db.batch([
+    db
+      .update(showroomStoreSales)
+      .set({ isCurrent: false })
+      .where(
+        and(
+          eq(showroomStoreSales.clearanceWebsiteId, params.link.id),
+          eq(showroomStoreSales.isCurrent, true),
+        ),
+      ),
+    db.insert(showroomStoreSales).values({
+      storeId: params.storeId,
+      clearanceWebsiteId: params.link.id,
+      sourceUrl: params.link.url,
+      clearanceDetailsJson: finalDetails,
+      contentHash: params.contentHash,
+      ragUuid,
+      isCurrent: true,
+      timestamp: new Date(),
+    }),
+  ]);
+
+  // Embedding is a nice-to-have for RAG — never fail the write over it.
+  try {
+    await embedSaleSnapshot(env, {
+      ragUuid,
+      storeId: params.storeId,
+      pageUrl: params.link.url,
+      details: finalDetails,
+    });
+  } catch (err) {
+    console.error(`[showroom-sales] embed failed for link ${params.link.id}:`, err);
+  }
+
+  return {
+    linkId: params.link.id,
+    url: params.link.url,
+    outcome: items.length > 0 ? "recorded" : "empty",
+    itemCount: items.length,
+  };
+}
+
+/**
+ * Scrape + extract ONE sale page via the Workers-AI FALLBACK extractor, writing a
+ * row only when the content changed. The Jules DO is the primary path; this is
+ * what `sweepShowroomSales` runs when Jules is unavailable, and what the DO calls
+ * per-link when a Jules batch reply can't be parsed.
  */
 export async function sweepSalePage(
   env: Env,
   storeId: number,
   link: { id: number; url: string },
 ): Promise<SalePageResult> {
-  const db = drizzle(env.DB);
-
-  // Mark the ATTEMPT up front, not just a successful write. `sweepShowroomSales`
-  // orders its queue by `updatedAt ASC`, so a link that is unchanged (the common
-  // case) or that permanently errors must still move to the back — otherwise it
-  // sits at the head of the queue and a capped run re-scans the same few pages
-  // every week while the tail never gets swept. Mirrors the same
-  // stampede guard in brand-enrichment.
-  await db
-    .update(showroomStoreLinks)
-    .set({ updatedAt: new Date() })
-    .where(eq(showroomStoreLinks.id, link.id));
+  // Mark the attempt up front so the queue rotates even on unchanged/error.
+  await touchClearanceLink(env, link.id);
 
   try {
-    const scraped = await scrapeUrl(env, link.url);
-    const markdown = scraped.markdown ?? scraped.text ?? "";
-    if (!markdown.trim()) {
-      return { linkId: link.id, url: link.url, outcome: "error", itemCount: 0, error: "empty page" };
+    const markdown = await scrapeClearanceMarkdown(env, link.url);
+    if (!markdown) {
+      return {
+        linkId: link.id,
+        url: link.url,
+        outcome: "error",
+        itemCount: 0,
+        error: "empty page",
+      };
     }
 
-    const contentHash = await stableHash(normalizeForHash(markdown));
-
-    // ── Change detection ──────────────────────────────────────────────────
-    // Compare against the NEWEST row for this link. Unchanged → write nothing.
-    const [newest] = await db
-      .select({ contentHash: showroomStoreSales.contentHash })
-      .from(showroomStoreSales)
-      .where(eq(showroomStoreSales.clearanceWebsiteId, link.id))
-      .orderBy(desc(showroomStoreSales.timestamp))
-      .limit(1);
-
-    if (newest?.contentHash === contentHash) {
+    const contentHash = await computeClearanceHash(markdown);
+    if (await isClearanceUnchanged(env, link.id, contentHash)) {
       return { linkId: link.id, url: link.url, outcome: "unchanged", itemCount: 0 };
     }
 
-    // ── Extraction ────────────────────────────────────────────────────────
     const details = await extractClearance(env, link.url, markdown);
     if (!details) {
       return {
@@ -251,48 +352,7 @@ export async function sweepSalePage(
       };
     }
 
-    // Page changed but nothing is on sale. Record the snapshot anyway (with an
-    // empty items[]) — that's what lets the viewport's alert CLEAR when a sale
-    // ends, instead of showing last month's clearance forever.
-    const items = details.items.slice(0, MAX_ITEMS_PER_SNAPSHOT);
-    const ragUuid = crypto.randomUUID();
-
-    // Supersede the previous snapshot for this link before inserting the new
-    // one, so exactly one row per link is ever `isCurrent`.
-    await db
-      .update(showroomStoreSales)
-      .set({ isCurrent: false })
-      .where(
-        and(
-          eq(showroomStoreSales.clearanceWebsiteId, link.id),
-          eq(showroomStoreSales.isCurrent, true),
-        ),
-      );
-
-    await db.insert(showroomStoreSales).values({
-      storeId,
-      clearanceWebsiteId: link.id,
-      sourceUrl: link.url,
-      clearanceDetailsJson: { ...details, items },
-      contentHash,
-      ragUuid,
-      isCurrent: true,
-      timestamp: new Date(),
-    });
-
-    // Embedding is a nice-to-have for RAG — never fail the sweep over it.
-    try {
-      await embedSaleSnapshot(env, { ragUuid, storeId, pageUrl: link.url, details: { ...details, items } });
-    } catch (err) {
-      console.error(`[showroom-sales] embed failed for link ${link.id}:`, err);
-    }
-
-    return {
-      linkId: link.id,
-      url: link.url,
-      outcome: items.length > 0 ? "recorded" : "empty",
-      itemCount: items.length,
-    };
+    return persistSaleSnapshot(env, { storeId, link, contentHash, details });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[showroom-sales] sweep failed for ${link.url}:`, err);
@@ -309,13 +369,19 @@ export async function sweepSalePage(
  * on top is what guarantees the row matches `ClearanceDetails` — a model that
  * returns a price as "$1,200" or omits `items` must not reach D1.
  */
-async function extractClearance(
+export async function extractClearance(
   env: Env,
   pageUrl: string,
   markdown: string,
 ): Promise<ClearanceDetails | null> {
   try {
-    const raw = (await env.AI.run(
+    // Metered: `meteredAiRun` checks the WORKERS_AI spend breaker BEFORE the call
+    // (throws SpendBlockedError when over the ceiling — caught below → null, so a
+    // tripped breaker halts extraction spend without blanking a snapshot) and
+    // records usage after. The Browser-Rendering scrape is separately gated inside
+    // `scrapeUrl`. See services/usage/metered-ai.
+    const raw = (await meteredAiRun(
+      env,
       EXTRACT_MODEL as Parameters<typeof env.AI.run>[0],
       {
         messages: [
@@ -326,8 +392,13 @@ async function extractClearance(
           { role: "user", content: buildClearancePrompt(pageUrl, markdown) },
         ],
         response_format: { type: "json_schema", json_schema: CLEARANCE_JSON_SCHEMA },
+        // k2.7-code is a reasoning model — DISABLE thinking so the structured
+        // answer lands in `content` rather than a reasoning field (the empty-
+        // content trap that broke k2.6 extraction). See ai/health.ts.
+        chat_template_kwargs: { thinking: false },
         gateway: { id: env.AI_GATEWAY_ID },
       } as Parameters<typeof env.AI.run>[1],
+      { feature: "clearance_extract" },
     )) as { response?: unknown } & Partial<ClearanceDetails>;
 
     const source = parseStructuredResponse<ClearanceDetails>(raw, "showroom clearance extraction");
@@ -376,10 +447,16 @@ async function embedSaleSnapshot(
     .join("\n");
   if (!text.trim()) return;
 
-  const embeddingResult = (await env.AI.run(
+  // Metered too — the embedding is a WORKERS_AI call. A tripped breaker throws
+  // here; the caller wraps embedSaleSnapshot in try/catch (embedding is
+  // best-effort), so a blocked embed never fails the snapshot write.
+  const embeddingResult = (await meteredAiRun(
+    env,
     EMBED_MODEL,
-    { text: [text.slice(0, 4_000)] },
-    { gateway: { id: env.AI_GATEWAY_ID } },
+    { text: [text.slice(0, 4_000)], gateway: { id: env.AI_GATEWAY_ID } } as Parameters<
+      typeof env.AI.run
+    >[1],
+    { feature: "clearance_embed" },
   )) as { data: number[][] };
 
   const values = embeddingResult.data?.[0];
@@ -415,19 +492,44 @@ export interface SalesSweepSummary {
   errors: number;
 }
 
+/** One clearance page to sweep — the shared work item for both the Jules DO and the fallback sweep. */
+export interface ClearanceLink {
+  id: number;
+  storeId: number;
+  url: string;
+}
+
 /**
- * Sweep every store that has at least one sale/clearance link.
+ * The active-store `WEBSITE_CLEARANCE` links, oldest-attempt first (so a capped
+ * run rotates through the whole corpus over successive weeks). Shared by the
+ * Jules DO kickoff and the Workers-AI sweep so both draw from the same queue.
+ */
+export async function collectClearanceLinks(env: Env, limit: number): Promise<ClearanceLink[]> {
+  return drizzle(env.DB)
+    .select({
+      id: showroomStoreLinks.id,
+      storeId: showroomStoreLinks.storeId,
+      url: showroomStoreLinks.url,
+    })
+    .from(showroomStoreLinks)
+    .innerJoin(showroomStores, eq(showroomStoreLinks.storeId, showroomStores.id))
+    .where(and(eq(showroomStoreLinks.type, "WEBSITE_CLEARANCE"), eq(showroomStores.isActive, true)))
+    .orderBy(showroomStoreLinks.updatedAt)
+    .limit(limit);
+}
+
+/**
+ * Sweep every store that has at least one sale/clearance link via the Workers-AI
+ * FALLBACK extractor. The Jules DO is the primary path (see the weekly cron); this
+ * runs when Jules is unavailable and remains the manual-catch-up path.
  *
  * `limit` bounds pages per run so the cron can't run away on a large directory
- * — each page costs a Browser Rendering call plus an AI call. Stores are taken
- * oldest-snapshot-first so a capped run rotates through the whole corpus over
- * successive weeks rather than re-scanning the same head every time.
+ * — each page costs a Browser Rendering call plus an AI call.
  */
 export async function sweepShowroomSales(
   env: Env,
   opts: { limit?: number } = {},
 ): Promise<SalesSweepSummary> {
-  const db = drizzle(env.DB);
   const limit = opts.limit ?? 40;
 
   const summary: SalesSweepSummary = {
@@ -439,23 +541,7 @@ export async function sweepShowroomSales(
     errors: 0,
   };
 
-  const links = await db
-    .select({
-      id: showroomStoreLinks.id,
-      storeId: showroomStoreLinks.storeId,
-      url: showroomStoreLinks.url,
-    })
-    .from(showroomStoreLinks)
-    .innerJoin(showroomStores, eq(showroomStoreLinks.storeId, showroomStores.id))
-    .where(
-      and(
-        eq(showroomStoreLinks.type, "WEBSITE_CLEARANCE"),
-        eq(showroomStores.isActive, true),
-      ),
-    )
-    .orderBy(showroomStoreLinks.updatedAt)
-    .limit(limit);
-
+  const links = await collectClearanceLinks(env, limit);
   if (links.length === 0) return summary;
 
   const storeIds = new Set<number>();

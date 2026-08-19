@@ -26,7 +26,10 @@ export const CONFIG_NAV: ConfigNavGroup[] = [
   {
     id: "integrations",
     label: "Integrations",
-    items: [{ href: "/admin/config/integrations/tesla", label: "Tesla / Tessie" }],
+    items: [
+      { href: "/admin/config/integrations/tesla", label: "Tesla / Tessie" },
+      { href: "/admin/config/tesla", label: "Tesla Location" },
+    ],
   },
   {
     id: "platform",
@@ -46,5 +49,15 @@ export const CONFIG_NAV: ConfigNavGroup[] = [
       { href: "/admin/config/photo/subcategories", label: "Sub-categories" },
       { href: "/admin/config/photo/colors", label: "Colors" },
     ],
+  },
+  {
+    id: "showroom",
+    label: "Showroom",
+    items: [{ href: "/admin/config/showroom/store-types", label: "Store Types" }],
+  },
+  {
+    id: "budget",
+    label: "Budget",
+    items: [{ href: "/admin/config/budget/phases", label: "Phases" }],
   },
 ];

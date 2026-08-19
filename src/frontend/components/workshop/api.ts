@@ -212,6 +212,79 @@ export async function runRecipe(
   return data;
 }
 
+/** A persisted furnishing/material (procurement extraction, recipe 6.1). */
+export interface FurnishingItem {
+  id: string;
+  label: string;
+  category: string;
+  note: string;
+  /** detected | dismissed | adopted. */
+  status: string;
+}
+
+/** Run the vision extraction over a node's image → persisted shopping-list items. */
+export async function extractFurnishings(nodeId: string): Promise<FurnishingItem[]> {
+  const { data } = await request<{ items: FurnishingItem[] }>(
+    `/nodes/${encodeURIComponent(nodeId)}/extract-furnishings`,
+    { method: "POST" },
+  );
+  return data.items;
+}
+
+/** Load a node's already-extracted furnishings (no re-scan). */
+export async function getNodeFurnishings(nodeId: string): Promise<FurnishingItem[]> {
+  const { data } = await request<{ items: FurnishingItem[] }>(
+    `/nodes/${encodeURIComponent(nodeId)}/furnishings`,
+  );
+  return data.items;
+}
+
+/** Load a whole room's saved furnishings (the room shopping list). */
+export async function getRoomFurnishings(roomId: number | string): Promise<FurnishingItem[]> {
+  const { data } = await request<{ items: FurnishingItem[] }>(
+    `/rooms/${encodeURIComponent(String(roomId))}/furnishings`,
+  );
+  return data.items;
+}
+
+/** Result of a freeform conversational edit. */
+export interface FreeformEditResult {
+  node: BoardNode;
+  /** The model's thinking / narration for this edit (may be empty). */
+  thoughts: string;
+}
+
+/** Run one freeform edit turn on a node; returns the new child node + thoughts. */
+export async function editNode(
+  nodeId: string,
+  body: {
+    prompt: string;
+    referenceCfImageUrls?: string[];
+    maskBase64?: string;
+    imageSize?: "512px" | "1K" | "2K" | "4K";
+    aspectRatio?: string;
+    model?: "flash" | "pro";
+  },
+): Promise<FreeformEditResult> {
+  const { data } = await request<FreeformEditResult>(
+    `/nodes/${encodeURIComponent(nodeId)}/edit`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+  return data;
+}
+
+/** Curate a furnishing — dismiss / adopt / link a product. */
+export async function patchFurnishing(
+  id: string,
+  patch: { status?: "detected" | "dismissed" | "adopted"; productId?: number | null },
+): Promise<FurnishingItem> {
+  const { data } = await request<{ item: FurnishingItem }>(
+    `/furnishings/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return data.item;
+}
+
 // ---- Piles (collections) --------------------------------------------------
 
 export async function createCollection(

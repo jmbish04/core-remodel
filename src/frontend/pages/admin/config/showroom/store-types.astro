@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ConfigDefinitionPage } from "@/components/config";
+---
+
+<BaseLayout title="Showroom Store Types — Configuration" description="Manage the business-model type vocabulary with color-coded badges.">
+  <ConfigDefinitionPage
+    client:only="react"
+    activeHref="/admin/config/showroom/store-types"
+    title="Showroom Store Types"
+    description="Business-model types (how a store operates — corporate, dealer, boutique, salvage…), each with a badge color. Orthogonal to what a store sells (categories)."
+    endpoint="/api/config/store-types"
+    columns={["name", "hex", "description"]}
+  />
+</BaseLayout>

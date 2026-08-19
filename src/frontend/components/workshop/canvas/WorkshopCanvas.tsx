@@ -54,6 +54,15 @@ interface WorkshopCanvasProps {
   onMix: (node: BoardNode) => void;
   onClayToPhotoreal: (node: BoardNode) => void;
   onFloorPlanFurnish: (node: BoardNode) => void;
+  onPlanToIsometric: (node: BoardNode) => void;
+  onEvolutionGrid: (node: BoardNode) => void;
+  onSketchToRender: (node: BoardNode) => void;
+  onElevationRender: (node: BoardNode) => void;
+  onCabinetReveal: (node: BoardNode) => void;
+  onFreeformEdit: (node: BoardNode) => void;
+  onExtractFurnishings: (node: BoardNode) => void;
+  onToneUnify: (node: BoardNode) => void;
+  onLightingEnhance: (node: BoardNode) => void;
   /** "Place image (I)" opens the drawer — our rendition of image placement. */
   onPlaceImage: () => void;
 }
@@ -95,6 +104,15 @@ export function WorkshopCanvas({
   onMix,
   onClayToPhotoreal,
   onFloorPlanFurnish,
+  onPlanToIsometric,
+  onEvolutionGrid,
+  onSketchToRender,
+  onElevationRender,
+  onCabinetReveal,
+  onFreeformEdit,
+  onExtractFurnishings,
+  onToneUnify,
+  onLightingEnhance,
   onPlaceImage,
 }: WorkshopCanvasProps) {
   const { containerRef, zoom, pan, spaceDown, setPan, zoomBy, fitToScreen } =
@@ -114,6 +132,7 @@ export function WorkshopCanvas({
     nodes,
     shapes,
     processingNodeIds,
+    processingNarration,
     justAddedNodeIds,
     moveNode,
     moveShape,
@@ -576,7 +595,7 @@ export function WorkshopCanvas({
             <RenderAmbience />
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3 pb-2 pt-6">
               <p className="font-mono text-[11px] leading-snug tracking-tight text-foreground/90">
-                Keeping your windows exactly where they are…
+                {processingNarration[node.id] ?? "Working on it…"}
               </p>
             </div>
           </div>
@@ -640,6 +659,15 @@ export function WorkshopCanvas({
         onMix={onMix}
         onClayToPhotoreal={onClayToPhotoreal}
         onFloorPlanFurnish={onFloorPlanFurnish}
+        onPlanToIsometric={onPlanToIsometric}
+        onEvolutionGrid={onEvolutionGrid}
+        onSketchToRender={onSketchToRender}
+        onElevationRender={onElevationRender}
+        onCabinetReveal={onCabinetReveal}
+        onFreeformEdit={onFreeformEdit}
+        onExtractFurnishings={onExtractFurnishings}
+        onToneUnify={onToneUnify}
+        onLightingEnhance={onLightingEnhance}
       />
     </div>
   );

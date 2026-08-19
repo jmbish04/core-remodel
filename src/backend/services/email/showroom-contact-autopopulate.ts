@@ -17,6 +17,8 @@ import {
   showroomStoreContacts,
 } from "@backend/db/schema/showroom/index";
 import { fieldOutContacts } from "@backend/api/routes/showroom-contacts";
+import { inferContactType, parseEmailIdentity } from "@backend/utils/contact-intake";
+import { evaluateContactWorthiness } from "@backend/utils/contact-person-gate";
 
 /** Free/public email providers never domain-match a store. */
 const PUBLIC_EMAIL_DOMAINS = new Set<string>([
@@ -28,7 +30,7 @@ const PUBLIC_EMAIL_DOMAINS = new Set<string>([
  * (against the store's WEBSITE link domain / email column) or a fuzzy name
  * match. Returns the store id, or null. Public providers never domain-match.
  */
-async function matchShowroomStore(
+export async function matchShowroomStore(
   senderEmail: string | null,
   senderName: string | null,
   env: Env,
@@ -76,47 +78,93 @@ async function matchShowroomStore(
   return null;
 }
 
+/** What the email pipeline hands us about an inbound sender. */
+export interface InboundSender {
+  /** Raw From value — may be `Name <addr>`; parsed into name + clean address. */
+  senderEmail: string | null;
+  /** The From display name, when the header carried one (used by the person gate). */
+  fromDisplayName?: string | null;
+  /** That person's job title/role, when the AI read one from the signature. */
+  contactTitle?: string | null;
+  /** The sending COMPANY — used only to match a store, never as the person name. */
+  companyName?: string | null;
+  senderPhone?: string | null;
+  senderWebsite?: string | null;
+  /** Plain-text body — scanned (no AI) for a signature name + bulk-mail tells. */
+  bodyText?: string | null;
+  /** True when the message carried a `List-Unsubscribe` header (bulk mail). */
+  listUnsubscribe?: boolean;
+}
+
 /**
  * Auto-register a showroom contact from an inbound email sender. Maps to a
  * showroom when one matches the domain/name; otherwise saves a DRAFT contact so
- * the HITL inbox can map it. Deduplicates on sender email. Never throws — the
- * caller wraps this so it can never break classification.
+ * the HITL inbox can map it. Deduplicates on the sender's clean email. Never
+ * throws — the caller wraps this so it can never break classification.
+ *
+ * A deterministic worker-code gate (`evaluateContactWorthiness`, NO AI) decides
+ * whether the sender is worth a contact at all: automated `no-reply@` mailers,
+ * bulk/marketing blasts (unsubscribe / List-Unsubscribe / view-in-browser), and
+ * senders with no identifiable PERSON are skipped — the email is still captured
+ * upstream, we just don't mint a phonebook contact. When it passes, the row
+ * stores the PERSON — a title-cased name (From display or body signature) + a
+ * clean `local@domain` email. The company name only feeds store matching.
  */
 export async function registerShowroomContactFromEmail(
-  senderEmail: string | null,
-  senderName: string | null,
-  senderPhone: string | null,
-  senderWebsite: string | null,
+  sender: InboundSender,
   env: Env,
 ): Promise<void> {
-  if (!senderEmail) return;
+  if (!sender.senderEmail) return;
+
+  // Split `Name <addr>` into a display name + a clean lowercased address.
+  const { email } = parseEmailIdentity(sender.senderEmail);
+  if (!email) return;
+
+  // Deterministic gate: is this a PERSON worth a contact, and what's their name?
+  // Rejects our own addresses, automated senders, bulk mail, and no-person mail.
+  const verdict = evaluateContactWorthiness({
+    fromEmail: sender.senderEmail,
+    fromDisplayName: sender.fromDisplayName,
+    bodyText: sender.bodyText,
+    listUnsubscribe: sender.listUnsubscribe,
+  });
+  if (!verdict.create) {
+    console.log(`[autopopulate] no contact for ${email}: ${verdict.reason}`);
+    return;
+  }
+  const personName = verdict.personName;
+
   const db = drizzle(env.DB);
 
-  // Dedup: skip when a contact already carries this email.
+  // Dedup: skip when a contact already carries this (clean) email.
   const [existing] = await db
     .select({ id: showroomStoreContacts.id })
     .from(showroomStoreContacts)
-    .where(eq(showroomStoreContacts.emailAddress, senderEmail.toLowerCase()))
+    .where(eq(showroomStoreContacts.emailAddress, email))
     .limit(1);
   if (existing) return;
 
-  const storeId = await matchShowroomStore(senderEmail, senderName, env);
+  // Match the store by email domain, then company name — NEVER the person name
+  // (a surname can collide with an unrelated showroom name). personName is for
+  // the contact row only.
+  const storeId = await matchShowroomStore(email, sender.companyName ?? null, env);
 
   await fieldOutContacts(
     db,
     {
       storeId: storeId ?? undefined,
-      match: { name: senderName ?? undefined, website: senderWebsite ?? undefined },
+      match: { name: sender.companyName ?? undefined, website: sender.senderWebsite ?? undefined },
       people: [
         {
-          fullName: senderName ?? undefined,
-          emailAddress: senderEmail.toLowerCase(),
-          phone: senderPhone ?? undefined,
-          type: "OTHER",
-          notes: `Auto-added from inbound email${senderWebsite ? ` · site ${senderWebsite}` : ""}`,
+          fullName: personName ?? undefined,
+          title: sender.contactTitle ?? undefined,
+          emailAddress: email,
+          phone: sender.senderPhone ?? undefined,
+          type: inferContactType(sender.contactTitle, email),
+          notes: `Auto-added from inbound email${sender.senderWebsite ? ` · site ${sender.senderWebsite}` : ""}`,
         },
       ],
-      urls: senderWebsite ? [{ url: senderWebsite, type: "WEBSITE" }] : undefined,
+      urls: sender.senderWebsite ? [{ url: sender.senderWebsite, type: "WEBSITE" }] : undefined,
     },
     env,
   );

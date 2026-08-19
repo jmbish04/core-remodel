@@ -99,17 +99,70 @@ export function isSafeInternalPath(path: string): boolean {
   );
 }
 
-export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
-  const [cookieValue, expectedHash] = await Promise.all([
-    Promise.resolve(getAccessCookieFromRequest(request)),
-    getAccessCookieHash(env),
-  ]);
+/**
+ * Constant-time string compare. Both the raw-key and hashed-cookie paths compare
+ * against a secret, so avoid the early-exit timing leak of `===`. Returns false
+ * for length mismatch (length itself is not secret here).
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
 
-  if (!cookieValue || !expectedHash) {
+/** The raw WORKER_API_KEY presented as `Authorization: Bearer <key>` or the
+ * `x-worker-api-key` header. Lets API clients that already hold the key — the
+ * codra review bot, QC scripts, any server-to-server caller — authenticate
+ * directly, without having to compute the SHA-256 the browser cookie uses. */
+function getBearerKeyFromRequest(request: Request): string | null {
+  const auth = request.headers.get("authorization");
+  if (auth) {
+    const match = /^bearer\s+(.+)$/i.exec(auth.trim());
+    if (match) {
+      return match[1].trim();
+    }
+  }
+  const header = request.headers.get("x-worker-api-key");
+  return header ? header.trim() : null;
+}
+
+/**
+ * Auth accepts EITHER form of the same secret, by channel:
+ *  1. the RAW WORKER_API_KEY, but ONLY via `Authorization: Bearer` /
+ *     `x-worker-api-key` (server-to-server clients that hold the key — codra,
+ *     QC scripts); and
+ *  2. the `remodel_access` cookie, which must be SHA-256(key) — never the raw
+ *     key. The cookie deliberately stores only the hash so a stolen cookie
+ *     (XSS, theft) never yields the reusable secret; accepting the raw key in
+ *     the cookie would defeat that, so we do not.
+ */
+export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
+  const apiKey = (await env.WORKER_API_KEY.get())?.trim() || "";
+  if (!apiKey) {
     return false;
   }
 
-  return cookieValue === expectedHash;
+  // 1) Raw key via header only (bearer / x-worker-api-key).
+  const bearerKey = getBearerKeyFromRequest(request);
+  if (bearerKey && timingSafeEqual(bearerKey, apiKey)) {
+    return true;
+  }
+
+  // 2) The remodel_access cookie — SHA-256(key) ONLY, never the raw key.
+  const cookieValue = getAccessCookieFromRequest(request);
+  if (cookieValue) {
+    const expectedHash = await hashString(apiKey);
+    if (expectedHash && timingSafeEqual(cookieValue, expectedHash)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export async function validatePasswordAgainstWorkerKey(

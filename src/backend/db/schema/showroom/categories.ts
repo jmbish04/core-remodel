@@ -14,6 +14,13 @@ export const showroomStoreCategory = sqliteTable("showroom_store_category", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   description: text("description"),
+  /**
+   * Parent UI grouping for the "Edit categories" modal + directory filters — a
+   * flat TEXT bucket (e.g. "Surfaces & Finishes", "Kitchen & Bath") rather than a
+   * recursive parent_id FK, so grouping stays a cheap in-memory reduce with no
+   * self-join. Every active category belongs to exactly one group.
+   */
+  uiGroup: text("ui_group").notNull().default("General"),
   isActive: integer("is_active", { mode: "boolean" }).default(true),
 });
 
@@ -58,6 +65,17 @@ export const showroomStoreCategoryMapping = sqliteTable(
     isBreadButter: integer("is_bread_butter", { mode: "boolean" }).default(
       false
     ),
+
+    /**
+     * The store's SINGLE primary category — the ONE it is most known for, which
+     * decides the one group the store appears under on the directory (so a
+     * multi-category store shows ONCE, in its primary group, instead of scattered
+     * across every category it maps to). Distinct from `is_bread_butter` (1-2
+     * "specialist" flags): exactly one row per store carries `is_primary = true`,
+     * enforced by the partial-unique index below. Set from the intake classifier's
+     * `primaryCategoryId`; the user can override in the Edit-categories modal.
+     */
+    isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
   },
   (t) => ({
     /**
@@ -73,6 +91,15 @@ export const showroomStoreCategoryMapping = sqliteTable(
     storeCategoryUniq: uniqueIndex(
       "showroom_store_category_mapping_store_category_uniq",
     ).on(t.storeId, t.categoryId),
+    /**
+     * At most ONE primary category per store — the directory groups a store under
+     * exactly this row. Partial (WHERE is_primary = 1) so the many non-primary
+     * mappings are unconstrained. A second `is_primary` write for the same store
+     * fails loud instead of silently scattering the store across groups.
+     */
+    onePrimaryPerStore: uniqueIndex("sscm_one_primary_per_store")
+      .on(t.storeId)
+      .where(sql`is_primary = 1`),
   }),
 );
 

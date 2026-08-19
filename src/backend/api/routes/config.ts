@@ -35,9 +35,11 @@ import { and, eq, asc, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
+  budgetPhases,
   categories,
   subcategories,
   colors,
+  showroomStoreType,
   photoCategories,
   photoSubcategories,
   photoColors,
@@ -251,6 +253,226 @@ configRouter.patch("/colors/:id", async (c) => {
   const [updated] = await db.update(colors).set(bodyParsed.data).where(eq(colors.id, idParsed.data.id)).returning();
   if (!updated) return c.json({ error: { code: "not_found", message: "Color not found" } }, 404);
   return c.json({ color: updated });
+});
+
+// ─── SHOWROOM STORE TYPES (business-model axis) ─────────────────────────────
+//
+// Powers /admin/config/showroom/store-types via the generic DefinitionTablePanel.
+// That panel speaks the colors dialect — `{ name, description, hexCode }` and
+// BARE array/object responses (the `api` helper does NOT unwrap an envelope).
+// So these routes ALIAS the table's real columns: displayName<->name,
+// htmlColor<->hexCode, and DERIVE the required unique `key` from the name on
+// create (the panel never sends a key).
+
+/** Row shaped for the panel: the def columns renamed to the panel's dialect. */
+function storeTypeRow(t: typeof showroomStoreType.$inferSelect) {
+  return {
+    id: t.id,
+    name: t.displayName,
+    description: t.description,
+    hexCode: t.htmlColor,
+    isActive: t.isActive,
+  };
+}
+
+/** snake_case machine key from a display name, e.g. "Big-box retail" -> "big_box_retail". */
+function slugifyKey(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60) || "type";
+}
+
+const createStoreTypeSchema = z.object({
+  name: z.string().min(1),
+  hexCode: z.string().min(1).optional().nullable(),
+  description: z.string().min(1).optional().nullable(),
+});
+const updateStoreTypeSchema = createStoreTypeSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+/** GET /store-types — active types, alphabetical. BARE array for the panel. */
+configRouter.get("/store-types", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select()
+    .from(showroomStoreType)
+    .where(eq(showroomStoreType.isActive, true))
+    .orderBy(asc(showroomStoreType.displayName));
+  return c.json(rows.map(storeTypeRow));
+});
+
+/** POST /store-types — create; key derived from name (unique-suffixed on clash). */
+configRouter.post("/store-types", async (c) => {
+  const parsed = createStoreTypeSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return badRequest(c, "Invalid store-type body", parsed.error.flatten());
+
+  const db = drizzle(c.env.DB);
+  // Derive a unique key from the name — the panel can't supply one, and `key`
+  // is a NOT NULL UNIQUE column. Suffix -2, -3, … on collision.
+  const base = slugifyKey(parsed.data.name);
+  const existing = new Set(
+    (await db.select({ key: showroomStoreType.key }).from(showroomStoreType)).map((r) => r.key),
+  );
+  let key = base;
+  for (let i = 2; existing.has(key); i++) key = `${base}_${i}`;
+
+  const [created] = await db
+    .insert(showroomStoreType)
+    .values({
+      key,
+      displayName: parsed.data.name,
+      description: parsed.data.description ?? null,
+      htmlColor: parsed.data.hexCode ?? null,
+    })
+    .returning();
+  return c.json(storeTypeRow(created), 201);
+});
+
+/** PATCH /store-types/:id — edit name/hex/description or soft-deactivate. */
+configRouter.patch("/store-types/:id", async (c) => {
+  const idParsed = idParamSchema.safeParse(c.req.param());
+  if (!idParsed.success) return badRequest(c, "Invalid store-type id");
+  const bodyParsed = updateStoreTypeSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!bodyParsed.success) return badRequest(c, "Invalid store-type body", bodyParsed.error.flatten());
+  if (Object.keys(bodyParsed.data).length === 0) return badRequest(c, "No fields to update");
+
+  // Alias the panel's dialect back to the real columns.
+  const patch: Partial<typeof showroomStoreType.$inferInsert> = {};
+  if (bodyParsed.data.name !== undefined) patch.displayName = bodyParsed.data.name;
+  if (bodyParsed.data.description !== undefined) patch.description = bodyParsed.data.description;
+  if (bodyParsed.data.hexCode !== undefined) patch.htmlColor = bodyParsed.data.hexCode;
+  if (bodyParsed.data.isActive !== undefined) patch.isActive = bodyParsed.data.isActive;
+
+  const db = drizzle(c.env.DB);
+  const [updated] = await db
+    .update(showroomStoreType)
+    .set(patch)
+    .where(eq(showroomStoreType.id, idParsed.data.id))
+    .returning();
+  if (!updated) return c.json({ error: { code: "not_found", message: "Store type not found" } }, 404);
+  return c.json(storeTypeRow(updated));
+});
+
+// ─── BUDGET PHASES (0035 grid) ──────────────────────────────────────────────
+//
+// Powers /admin/config/budget/phases via the generic DefinitionTablePanel, in
+// the same bare-array "colors dialect" as store-types. `budget_phases` carries a
+// NOT NULL UNIQUE `key` the panel never sends, so we DERIVE it from the name.
+// The panel's plain `description` maps to descriptionMarkdown (+ plaintext for
+// search); tone/sortOrder keep their defaults here and are tuned in the grid.
+
+/** Row shaped for the panel dialect. */
+function budgetPhaseRow(p: typeof budgetPhases.$inferSelect) {
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.descriptionMarkdown,
+    isActive: p.isActive,
+  };
+}
+
+const createBudgetPhaseSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1).optional().nullable(),
+});
+const updateBudgetPhaseSchema = createBudgetPhaseSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+/** GET /budget-phases — active phases, ordered by sortOrder then name. BARE array. */
+configRouter.get("/budget-phases", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select()
+    .from(budgetPhases)
+    .where(eq(budgetPhases.isActive, true))
+    .orderBy(asc(budgetPhases.sortOrder), asc(budgetPhases.name));
+  return c.json(rows.map(budgetPhaseRow));
+});
+
+/** POST /budget-phases — create; key derived from name (unique-suffixed on clash). */
+configRouter.post("/budget-phases", async (c) => {
+  const parsed = createBudgetPhaseSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return badRequest(c, "Invalid budget-phase body", parsed.error.flatten());
+
+  const db = drizzle(c.env.DB);
+  const base = slugifyKey(parsed.data.name);
+  const existing = new Set(
+    (await db.select({ key: budgetPhases.key }).from(budgetPhases)).map((r) => r.key),
+  );
+  let suffix = 2;
+  let key = base;
+  while (existing.has(key)) key = `${base}_${suffix++}`;
+
+  // Next sort_order = current max + 1, so new phases append to the grid.
+  const [{ maxSort }] = await db
+    .select({ maxSort: sql<number>`coalesce(max(${budgetPhases.sortOrder}), -1)` })
+    .from(budgetPhases);
+  const sortOrder = (maxSort ?? -1) + 1;
+
+  // The in-memory key check races: two concurrent creates with the same name can
+  // both derive the same key past the SELECT, and the second INSERT hits the
+  // UNIQUE(key) constraint. Retry with a bumped suffix on that failure; surface a
+  // 409 only if we somehow can't allocate a free key after several tries.
+  let created: typeof budgetPhases.$inferSelect | undefined;
+  for (let attempt = 0; attempt < 6 && !created; attempt++) {
+    try {
+      [created] = await db
+        .insert(budgetPhases)
+        .values({
+          key,
+          name: parsed.data.name,
+          descriptionMarkdown: parsed.data.description ?? null,
+          descriptionPlaintext: parsed.data.description ?? null,
+          sortOrder,
+        })
+        .returning();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/unique|constraint/i.test(msg)) {
+        key = `${base}_${suffix++}`;
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (!created) {
+    return c.json(
+      { error: { code: "conflict", message: "Could not allocate a unique phase key" } },
+      409,
+    );
+  }
+  return c.json(budgetPhaseRow(created), 201);
+});
+
+/** PATCH /budget-phases/:id — edit name/description or soft-deactivate. */
+configRouter.patch("/budget-phases/:id", async (c) => {
+  const idParsed = idParamSchema.safeParse(c.req.param());
+  if (!idParsed.success) return badRequest(c, "Invalid budget-phase id");
+  const bodyParsed = updateBudgetPhaseSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!bodyParsed.success) return badRequest(c, "Invalid budget-phase body", bodyParsed.error.flatten());
+  if (Object.keys(bodyParsed.data).length === 0) return badRequest(c, "No fields to update");
+
+  const patch: Partial<typeof budgetPhases.$inferInsert> = { datetimeUpdated: new Date() };
+  if (bodyParsed.data.name !== undefined) patch.name = bodyParsed.data.name;
+  if (bodyParsed.data.description !== undefined) {
+    patch.descriptionMarkdown = bodyParsed.data.description;
+    patch.descriptionPlaintext = bodyParsed.data.description;
+  }
+  if (bodyParsed.data.isActive !== undefined) patch.isActive = bodyParsed.data.isActive;
+
+  const db = drizzle(c.env.DB);
+  const [updated] = await db
+    .update(budgetPhases)
+    .set(patch)
+    .where(eq(budgetPhases.id, idParsed.data.id))
+    .returning();
+  if (!updated) return c.json({ error: { code: "not_found", message: "Budget phase not found" } }, 404);
+  return c.json(budgetPhaseRow(updated));
 });
 
 // ─── BRANDS (Phase 3 review form) ──────────────────────────────────────────

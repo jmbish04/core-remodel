@@ -1,22 +1,38 @@
-/**
- * Render pipeline API — staged virtual-staging renderer.
- * See docs/0004_ai_image_editing/IMPLEMENTATION_PLAN.md.
- */
-import { zValidator } from "@hono/zod-validator";
 import {
   canvasInspirationReferences,
   images,
   listingPhotos,
   renderCanvases,
+  renderCampaigns,
   renderSessions,
+  showroomImageGroups,
+  showroomImages,
+  showroomStores,
 } from "@backend/db";
-import { eq } from "drizzle-orm";
+/**
+ * Render pipeline API — staged virtual-staging renderer.
+ * See docs/0004_ai_image_editing/IMPLEMENTATION_PLAN.md.
+ */
+import { zValidator } from "@hono/zod-validator";
+import { desc, eq, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
+
+import {
+  cancelCampaign,
+  createCampaign,
+  getCampaign,
+  listCampaigns,
+} from "../../services/render/campaign";
+import {
+  mergeRefs,
+  referenceSchema,
+  resolveShowroomImageRefs,
+} from "../../services/render/references";
+import { runStage } from "../../services/render/stage-runner";
 
 const renderRouter = new Hono<{ Bindings: Env }>();
 
@@ -72,23 +88,182 @@ renderRouter.post(
   },
 );
 
+/**
+ * POST /api/render/sessions/from-images — create a session seeded with a set of
+ * images' Cloudflare URLs as inspiration references (0041 P2).
+ *
+ * Accepts `showroomImageIds` (resolved to their `deliveryUrl`) and/or explicit
+ * `references` ({url,label}). The seeds are stored on the session and surfaced in
+ * the studio inspiration rail. Bridges showroom photos (numeric ids, CF URLs) into
+ * the render pipeline without forcing them into the UUID `images` table.
+ */
+renderRouter.post(
+  "/sessions/from-images",
+  zValidator(
+    "json",
+    z.object({
+      name: z.string().min(1),
+      roomId: z.number().nullable().optional(),
+      showroomImageIds: z.array(z.number().int().positive()).max(500).optional(),
+      references: z.array(referenceSchema).max(500).optional(),
+    }),
+  ),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const body = c.req.valid("json");
+
+    const refs = await resolveShowroomImageRefs(db, {
+      showroomImageIds: body.showroomImageIds,
+      references: body.references,
+    });
+
+    if (refs.length === 0) {
+      return c.json({ error: "No images resolved — pass showroomImageIds or references." }, 400);
+    }
+
+    const id = crypto.randomUUID();
+    await db
+      .insert(renderSessions)
+      .values({
+        id,
+        roomId: body.roomId ?? null,
+        name: body.name,
+        seedReferenceUrlsJson: JSON.stringify(refs),
+      })
+      .run();
+    return c.json({ id, seedReferences: refs }, 201);
+  },
+);
+
+/** Parse a session's seed-reference JSON into [{url,label}] (never throws). */
+function parseSeedReferences(json: string | null): { url: string; label?: string }[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed)
+      ? parsed.filter((r): r is { url: string; label?: string } =>
+          Boolean(r && typeof r.url === "string"),
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 // GET /api/render/sessions/:id
 renderRouter.get("/sessions/:id", async (c) => {
   const db = drizzle(c.env.DB);
   const id = c.req.param("id");
-  const session = await db
-    .select()
-    .from(renderSessions)
-    .where(eq(renderSessions.id, id))
-    .get();
+  const session = await db.select().from(renderSessions).where(eq(renderSessions.id, id)).get();
   if (!session) return c.json({ error: "Session not found" }, 404);
   const canvases = await db
     .select()
     .from(renderCanvases)
     .where(eq(renderCanvases.sessionId, id))
     .all();
-  return c.json({ session, canvases });
+  return c.json({
+    session,
+    canvases,
+    seedReferences: parseSeedReferences(session.seedReferenceUrlsJson),
+  });
 });
+
+/**
+ * GET /api/render/reference-folders — list active showroom photo folders
+ * (showroom_image_groups) for the "add reference from folder" picker (0041 P3).
+ * Each carries its store name, member count, and a cover delivery URL.
+ */
+renderRouter.get("/reference-folders", async (c) => {
+  const db = drizzle(c.env.DB);
+  const groups = await db
+    .select({
+      id: showroomImageGroups.id,
+      name: showroomImageGroups.name,
+      storeId: showroomImageGroups.storeId,
+      storeName: showroomStores.name,
+      coverImageId: showroomImageGroups.coverImageId,
+    })
+    .from(showroomImageGroups)
+    .innerJoin(showroomStores, eq(showroomImageGroups.storeId, showroomStores.id))
+    .where(eq(showroomImageGroups.isActive, true))
+    .orderBy(desc(showroomImageGroups.createdAt))
+    .all();
+
+  // Bucket grouped photos to derive count + cover per folder. Only rows that
+  // actually belong to a folder — never scan the whole images table.
+  const grouped = await db
+    .select({
+      id: showroomImages.id,
+      groupId: showroomImages.groupId,
+      url: showroomImages.deliveryUrl,
+    })
+    .from(showroomImages)
+    .where(isNotNull(showroomImages.groupId))
+    .all();
+  const byGroup = new Map<number, { id: number; url: string }[]>();
+  for (const m of grouped) {
+    if (m.groupId == null) continue;
+    const list = byGroup.get(m.groupId) ?? [];
+    list.push({ id: m.id, url: m.url });
+    byGroup.set(m.groupId, list);
+  }
+
+  const folders = groups.map((g) => {
+    const mem = byGroup.get(g.id) ?? [];
+    const cover =
+      (g.coverImageId != null ? mem.find((m) => m.id === g.coverImageId)?.url : null) ??
+      mem[0]?.url ??
+      null;
+    return {
+      id: g.id,
+      name: g.name,
+      storeId: g.storeId,
+      storeName: g.storeName,
+      memberCount: mem.length,
+      coverUrl: cover,
+    };
+  });
+  return c.json({ folders });
+});
+
+/**
+ * POST /api/render/sessions/:id/references — add inspiration references to an
+ * existing session (0041 P3). Accepts `imageGroupId` (all photos in a folder),
+ * `showroomImageIds`, and/or explicit `references`. Merges into the seed list
+ * (deduped by url) and returns the updated set.
+ */
+renderRouter.post(
+  "/sessions/:id/references",
+  zValidator(
+    "json",
+    z.object({
+      imageGroupId: z.number().int().positive().optional(),
+      showroomImageIds: z.array(z.number().int().positive()).max(500).optional(),
+      references: z.array(referenceSchema).max(500).optional(),
+    }),
+  ),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const id = c.req.param("id");
+    const session = await db.select().from(renderSessions).where(eq(renderSessions.id, id)).get();
+    if (!session) return c.json({ error: "Session not found" }, 404);
+
+    const added = await resolveShowroomImageRefs(db, c.req.valid("json"));
+    if (added.length === 0) {
+      return c.json(
+        { error: "No images resolved — pass imageGroupId, showroomImageIds, or references." },
+        400,
+      );
+    }
+    const merged = mergeRefs(parseSeedReferences(session.seedReferenceUrlsJson), added);
+    await db
+      .update(renderSessions)
+      .set({ seedReferenceUrlsJson: JSON.stringify(merged), datetimeLastModified: new Date() })
+      .where(eq(renderSessions.id, id))
+      .run();
+    return c.json({ seedReferences: merged });
+  },
+);
 
 // POST /api/render/stage
 renderRouter.post(
@@ -183,22 +358,14 @@ renderRouter.post(
 renderRouter.get("/canvases/:id", async (c) => {
   const db = drizzle(c.env.DB);
   const id = c.req.param("id");
-  const canvas = await db
-    .select()
-    .from(renderCanvases)
-    .where(eq(renderCanvases.id, id))
-    .get();
+  const canvas = await db.select().from(renderCanvases).where(eq(renderCanvases.id, id)).get();
   if (!canvas) return c.json({ error: "Canvas not found" }, 404);
 
   const lineage: (typeof canvas)[] = [];
   let cursor = canvas.parentCanvasId;
   let guard = 0;
   while (cursor && guard++ < 50) {
-    const node = await db
-      .select()
-      .from(renderCanvases)
-      .where(eq(renderCanvases.id, cursor))
-      .get();
+    const node = await db.select().from(renderCanvases).where(eq(renderCanvases.id, cursor)).get();
     if (!node) break;
     lineage.unshift(node);
     cursor = node.parentCanvasId;
@@ -370,7 +537,12 @@ renderRouter.post(
         roomId: ang.roomId,
         lightingProfile: body.lightingProfile,
         references: heroResult.outputDeliveryUrl
-          ? [{ url: heroResult.outputDeliveryUrl, label: "the same kitchen (hero render) — match it exactly" }]
+          ? [
+              {
+                url: heroResult.outputDeliveryUrl,
+                label: "the same kitchen (hero render) — match it exactly",
+              },
+            ]
           : undefined,
       });
       canvases.push(r);
@@ -385,6 +557,90 @@ renderRouter.post(
     return c.json({ heroCanvasId: heroResult.id, canvases });
   },
 );
+
+// POST /api/render/campaigns — create a multi-room, multi-angle render campaign.
+renderRouter.post(
+  "/campaigns",
+  zValidator(
+    "json",
+    z.object({
+      name: z.string().min(1),
+      prompt: z.string().min(1),
+      designConfig: z.record(z.unknown()).optional(),
+      angles: z
+        .array(
+          z.object({
+            roomId: z.number().int(),
+            listingPhotoId: z.number().int(),
+            isHero: z.boolean().optional(),
+          }),
+        )
+        .min(1),
+    }),
+  ),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const body = c.req.valid("json");
+    try {
+      const { campaignId } = await createCampaign(db, c.env, {
+        name: body.name,
+        prompt: body.prompt,
+        designConfig: body.designConfig,
+        angles: body.angles,
+      });
+      return c.json({ campaignId }, 201);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 400);
+    }
+  },
+);
+
+// GET /api/render/campaigns — list campaigns newest first.
+renderRouter.get("/campaigns", async (c) => {
+  const db = drizzle(c.env.DB);
+  const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
+  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+  const campaigns = await listCampaigns(db, limit, offset);
+  return c.json({ campaigns, limit, offset });
+});
+
+// GET /api/render/campaigns/:id — full campaign detail.
+renderRouter.get("/campaigns/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const detail = await getCampaign(db, id);
+  if (!detail) return c.json({ error: "Campaign not found" }, 404);
+
+  // Enrich angles with canvas delivery URLs for the UI.
+  const canvasIds = detail.angles.map((a) => a.canvasId).filter((id): id is string => Boolean(id));
+  const canvases =
+    canvasIds.length > 0
+      ? await db.select().from(renderCanvases).where(inArray(renderCanvases.id, canvasIds)).all()
+      : [];
+  const canvasById = new Map(canvases.map((c) => [c.id, c]));
+
+  const enrichedAngles = detail.angles.map((a) => {
+    const canvas = a.canvasId ? canvasById.get(a.canvasId) : undefined;
+    const deliveryUrl = canvas
+      ? (metaDeliveryUrl(canvas.metadata) ??
+        (canvas.outputCfImageId ? deliveryUrlFromToken(canvas.outputCfImageId) : null))
+      : null;
+    return { ...a, canvasDeliveryUrl: deliveryUrl };
+  });
+
+  return c.json({ ...detail, angles: enrichedAngles });
+});
+
+// POST /api/render/campaigns/:id/cancel — cancel pending angles and pause.
+renderRouter.post("/campaigns/:id/cancel", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const campaign = await db.select().from(renderCampaigns).where(eq(renderCampaigns.id, id)).get();
+  if (!campaign) return c.json({ error: "Campaign not found" }, 404);
+  const result = await cancelCampaign(db, id);
+  return c.json(result);
+});
 
 // GET /api/render/realtime?session=<id> — WebSocket proxy to the shared DO channel.
 renderRouter.get("/realtime", async (c) => {

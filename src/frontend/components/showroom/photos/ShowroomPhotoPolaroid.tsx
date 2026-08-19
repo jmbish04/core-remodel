@@ -30,6 +30,10 @@ export interface ShowroomPhoto {
   altText: string | null;
   noteHtml: string | null;
   noteMarkdown: string | null;
+  /** Folder this photo belongs to (0040 P3); null = a loose photo. */
+  groupId?: number | null;
+  /** Discovered kind; homeowner uploads are "visit". */
+  imageKind?: string | null;
 }
 
 interface ShowroomPhotoPolaroidProps {

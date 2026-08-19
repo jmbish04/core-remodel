@@ -23,8 +23,42 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 
 import { GoogleMapsService } from "@/backend/services/google/maps";
+import { getGoogleMapsApiKey } from "@/backend/utils/secrets";
 
 export const placesRouter = new OpenAPIHono<{ Bindings: Env }>();
+
+/**
+ * GET /maps-js-key — hand the browser the Maps JavaScript API key.
+ *
+ * Street View is the ONE Maps feature that must run client-side (only the
+ * browser `StreetViewService`/`StreetViewPanorama` can detect + render a
+ * panorama). Rather than bake a key into the client bundle at build time, the
+ * key is served here at runtime from the `GOOGLE_MAPS_API` secrets-store
+ * binding — behind the same `requireAccessAuth` gate as the rest of `/api/places`,
+ * so only authenticated sessions receive it.
+ *
+ * NOTE (key restriction): this is the SAME key used server-side for Places. A
+ * Google key allows only ONE application-restriction type, so for the browser
+ * SDK to work this key must be HTTP-referrer-restricted (or unrestricted) AND
+ * have the Maps JavaScript API enabled. An IP-restricted server key will be
+ * rejected by the browser SDK. Use a dedicated referrer-restricted key value if
+ * you don't want to relax the server key.
+ */
+placesRouter.get("/maps-js-key", async (c) => {
+  // Never let a browser or intermediate proxy cache the credential.
+  c.header("Cache-Control", "no-store");
+  let key: string;
+  try {
+    key = await getGoogleMapsApiKey(c.env);
+  } catch (err) {
+    // A thrown error is an operational failure (binding read, etc.), not a
+    // clean "unset" — log it and surface a distinct 500 so it's debuggable.
+    console.error("maps-js-key: failed to read GOOGLE_MAPS_API:", err);
+    return c.json({ error: "Failed to read Maps key" }, 500);
+  }
+  if (!key) return c.json({ error: "Maps key not configured" }, 503);
+  return c.json({ key });
+});
 
 // ─── Shared error schemas ────────────────────────────────────────────────────
 

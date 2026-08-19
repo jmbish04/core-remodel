@@ -9,8 +9,9 @@
  * legacy rows that still hold one freeform chunk, splits on blank lines so old
  * drives also render as a stack of cards.
  */
-import { driveListStops, driveLists } from "@backend/db";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { driveListNotes, driveListStops, driveLists, showroomStores } from "@backend/db";
+import { distanceMeters } from "@backend/services/drive-home-arrival-rules";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** Drizzle D1 client (matches the MCP registry's `RemodelDb`). */
@@ -107,20 +108,80 @@ export interface DriveListCreateInput {
   stops: DriveStopInput[];
 }
 
+/**
+ * Backfill missing stop coordinates from each stop's linked showroom, in place.
+ *
+ * A stop can be created without lat/lng yet still link a geocoded showroom; the
+ * drive map and per-stop navigation both key off the stop's OWN coords, so
+ * without this the whole map falls back to an empty pin even though the
+ * coordinates exist on the linked showroom. Mutates and returns the same array.
+ * Stop counts are bounded (the planner caps a drive at 24 stops), so the id
+ * list needs no chunking.
+ */
+export async function fillMissingStopCoords<
+  T extends { showroomStoreId: number | null; latitude: number | null; longitude: number | null },
+>(db: RemodelDb, stops: T[]): Promise<T[]> {
+  const need = stops.filter(
+    (s) => (s.latitude == null || s.longitude == null) && s.showroomStoreId != null,
+  );
+  if (need.length === 0) return stops;
+  const ids = Array.from(new Set(need.map((s) => s.showroomStoreId as number)));
+  const coords = await db
+    .select({
+      id: showroomStores.id,
+      latitude: showroomStores.latitude,
+      longitude: showroomStores.longitude,
+    })
+    .from(showroomStores)
+    .where(inArray(showroomStores.id, ids));
+  const byId = new Map(coords.map((r) => [r.id, r]));
+  for (const s of stops) {
+    if (s.showroomStoreId == null) continue;
+    const sr = byId.get(s.showroomStoreId);
+    if (!sr) continue;
+    if (s.latitude == null) s.latitude = sr.latitude;
+    if (s.longitude == null) s.longitude = sr.longitude;
+  }
+  return stops;
+}
+
+/**
+ * Decode the handful of HTML entities that leak into drive-list display text
+ * when a drive is created from the MCP tools (e.g. "Wall &amp; Floor" stored for
+ * "Wall & Floor"). Drive titles/notes/stop fields are plain text, never HTML, so
+ * an entity here is always wrong. `&amp;` is decoded LAST so a double-encoded
+ * "&amp;lt;" resolves to "<". null/undefined pass through unchanged.
+ */
+export function decodeHtmlEntities<T extends string | null | undefined>(s: T): T {
+  if (s == null) return s;
+  return (s as string)
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&") as T;
+}
+
 /** Insert a drive list + its ordered stops. Returns the new id/slug/stopCount. */
 export async function createDriveList(
   db: RemodelDb,
   input: DriveListCreateInput,
 ): Promise<{ id: number; slug: string; stopCount: number }> {
-  const slug = await uniqueSlug(db, slugify(input.title));
+  // Decode HTML entities up front so neither the stored title nor the derived
+  // slug carries "&amp;"/"amp" — MCP-created drives were storing raw entities.
+  const title = decodeHtmlEntities(input.title);
+  const description = decodeHtmlEntities(input.description);
+  const notes = input.notes?.map((n) => decodeHtmlEntities(n));
+  const slug = await uniqueSlug(db, slugify(title));
   const status = input.status ?? "active";
   const [drive] = await db
     .insert(driveLists)
     .values({
       slug,
-      title: input.title,
-      description: input.description,
-      notes: serializeDriveNotes(input.notes),
+      title,
+      description,
+      notes: serializeDriveNotes(notes),
       status,
       sourceConversation: input.sourceConversation,
     })
@@ -135,19 +196,20 @@ export async function createDriveList(
     driveListId: drive.id,
     showroomStoreId: s.showroomStoreId,
     sortOrder: i,
-    leg: s.leg,
-    legWindow: s.legWindow,
-    name: s.name,
-    city: s.city,
-    address: s.address,
+    leg: decodeHtmlEntities(s.leg),
+    legWindow: decodeHtmlEntities(s.legWindow),
+    name: decodeHtmlEntities(s.name),
+    city: decodeHtmlEntities(s.city),
+    address: decodeHtmlEntities(s.address),
     phone: s.phone,
-    hours: s.hours,
-    note: s.note,
-    pick: s.pick,
+    hours: decodeHtmlEntities(s.hours),
+    note: decodeHtmlEntities(s.note),
+    pick: decodeHtmlEntities(s.pick),
     websiteUrl: s.websiteUrl,
     latitude: s.latitude,
     longitude: s.longitude,
     isOptional: s.isOptional ?? false,
+    kind: (s.isOptional ?? false) ? ("optional" as const) : ("core" as const),
   }));
   // Write via db.batch() of single-row inserts, chunked, so we never approach
   // Cloudflare D1's 100-bound-parameter-per-query limit on large drives.
@@ -159,7 +221,381 @@ export async function createDriveList(
     await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
   }
 
+  // Suggest nearby registered showrooms as proximity pitstops — generated ONCE
+  // here from D1 alone (no Maps SKU). They stay minimized + un-promoted until the
+  // user adds one, so they cost nothing downstream unless kept.
+  await generateProximityPitstops(db, drive.id).catch((err) =>
+    console.error("[drive-lists] proximity pitstop generation failed:", err),
+  );
+
   return { id: drive.id, slug, stopCount: input.stops.length };
+}
+
+/** How close a registered showroom must sit to the route to be suggested (10 mi). */
+const PITSTOP_RADIUS_M = 16_093;
+/** Cap on suggestions per drive, nearest-first. */
+const MAX_PITSTOPS = 6;
+
+/**
+ * Suggest registered showrooms near a drive's route as proximity pitstops.
+ *
+ * Pure D1 + haversine — no Google call, so this is free to run at create time.
+ * A candidate is any geocoded showroom NOT already on the drive whose nearest
+ * approach to a route point is within PITSTOP_RADIUS_M. Inserted minimized:
+ * `kind='pitstop'`, `suggested=true` (excluded from timing/progress/map until
+ * the user promotes it), `isOptional=true`.
+ */
+export async function generateProximityPitstops(
+  db: RemodelDb,
+  driveListId: number,
+): Promise<number> {
+  const stops = await db
+    .select({
+      id: driveListStops.id,
+      showroomStoreId: driveListStops.showroomStoreId,
+      latitude: driveListStops.latitude,
+      longitude: driveListStops.longitude,
+      sortOrder: driveListStops.sortOrder,
+    })
+    .from(driveListStops)
+    .where(eq(driveListStops.driveListId, driveListId));
+  await fillMissingStopCoords(db, stops);
+
+  const routePts = stops
+    .filter((s) => s.latitude != null && s.longitude != null)
+    .map((s) => ({ lat: s.latitude as number, lng: s.longitude as number }));
+  if (routePts.length === 0) return 0;
+
+  const onDrive = new Set(
+    stops.map((s) => s.showroomStoreId).filter((v): v is number => v != null),
+  );
+  const maxOrder = stops.reduce((m, s) => Math.max(m, s.sortOrder), -1);
+
+  const candidates = await db
+    .select({
+      id: showroomStores.id,
+      name: showroomStores.name,
+      phone: showroomStores.phoneNumber,
+      address: showroomStores.locationAddress,
+      city: showroomStores.locationCity,
+      lat: showroomStores.latitude,
+      lng: showroomStores.longitude,
+    })
+    .from(showroomStores);
+
+  const near: { c: (typeof candidates)[number]; dist: number }[] = [];
+  for (const cand of candidates) {
+    if (cand.lat == null || cand.lng == null || onDrive.has(cand.id)) continue;
+    let min = Infinity;
+    for (const p of routePts) {
+      const d = distanceMeters(p.lat, p.lng, cand.lat, cand.lng);
+      if (d < min) min = d;
+    }
+    if (min <= PITSTOP_RADIUS_M) near.push({ c: cand, dist: min });
+  }
+  near.sort((a, b) => a.dist - b.dist);
+  const chosen = near.slice(0, MAX_PITSTOPS);
+  if (chosen.length === 0) return 0;
+
+  let order = maxOrder + 1;
+  const values = chosen.map(({ c }) => ({
+    driveListId,
+    showroomStoreId: c.id,
+    sortOrder: order++,
+    name: c.name,
+    city: c.city,
+    address: c.address,
+    phone: c.phone,
+    pick: "Proximity pitstop",
+    latitude: c.lat,
+    longitude: c.lng,
+    isOptional: true,
+    kind: "pitstop" as const,
+    suggested: true,
+  }));
+  const CHUNK = 40;
+  for (let i = 0; i < values.length; i += CHUNK) {
+    const part = values.slice(i, i + CHUNK);
+    const stmts = part.map((v) => db.insert(driveListStops).values(v));
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+  }
+  return chosen.length;
+}
+
+/** Resolve a drive's id + slug from an `{ id }` or `{ slug }` selector. */
+async function resolveDrive(
+  db: RemodelDb,
+  sel: { id?: number; slug?: string },
+): Promise<{ id: number; slug: string } | null> {
+  const where =
+    sel.id != null
+      ? eq(driveLists.id, sel.id)
+      : sel.slug != null
+        ? eq(driveLists.slug, sel.slug)
+        : null;
+  if (!where) return null;
+  const [row] = await db
+    .select({ id: driveLists.id, slug: driveLists.slug })
+    .from(driveLists)
+    .where(where)
+    .limit(1);
+  return row ?? null;
+}
+
+/** Fields an update may set on a drive. Only provided keys are written. */
+export interface DriveListUpdateInput {
+  id?: number;
+  slug?: string;
+  title?: string;
+  description?: string | null;
+  notes?: string[] | null;
+  status?: "draft" | "active" | "completed" | "archived";
+}
+
+/**
+ * Patch a drive's own fields (title/description/notes/status). Only the keys
+ * present in `input` are written; text is entity-decoded on the way in.
+ *
+ * NOTE: `status` is a lifecycle LABEL only — it does NOT flip the single-active
+ * pointer (`is_active`). Activation stays exclusively on the gated path
+ * (`setActiveDrive`, reached via the drive page / PATCH isActive) so the
+ * 07:00–20:00 window rule can never be bypassed through a field edit.
+ * Returns the drive's id/slug, or null if no drive matched.
+ */
+export async function updateDriveList(
+  db: RemodelDb,
+  input: DriveListUpdateInput,
+): Promise<{ id: number; slug: string } | null> {
+  const drive = await resolveDrive(db, input);
+  if (!drive) return null;
+  const patch: Partial<typeof driveLists.$inferInsert> = { updatedAt: new Date() };
+  if (input.title !== undefined) patch.title = decodeHtmlEntities(input.title);
+  if (input.description !== undefined) patch.description = decodeHtmlEntities(input.description);
+  if (input.notes !== undefined) {
+    patch.notes = serializeDriveNotes(input.notes?.map((n) => decodeHtmlEntities(n)) ?? null);
+  }
+  if (input.status !== undefined) patch.status = input.status;
+  await db.update(driveLists).set(patch).where(eq(driveLists.id, drive.id)).run();
+
+  // Labeling a drive completed/archived/draft should not leave it as THE active
+  // drive. Deactivation is always allowed (only ACTIVATION is window-gated), so
+  // clearing the active pointer here can't bypass the 07:00–20:00 rule. We never
+  // ACTIVATE from a label change — that stays on the gated path.
+  if (input.status !== undefined && input.status !== "active") {
+    const [row] = await db
+      .select({ isActive: driveLists.isActive })
+      .from(driveLists)
+      .where(eq(driveLists.id, drive.id))
+      .limit(1);
+    if (row?.isActive) await setActiveDrive(db, null);
+  }
+  return drive;
+}
+
+/** Fields an update may set on a single stop. Only provided keys are written. */
+export interface DriveStopUpdateInput {
+  name?: string;
+  showroomStoreId?: number | null;
+  city?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  hours?: string | null;
+  note?: string | null;
+  pick?: string | null;
+  websiteUrl?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  leg?: string | null;
+  legWindow?: string | null;
+  isOptional?: boolean;
+  sortOrder?: number;
+  visited?: boolean;
+  skipped?: boolean;
+  /** Promote a suggested proximity pitstop onto the drive (false = keep it). */
+  suggested?: boolean;
+}
+
+/**
+ * Patch one stop's fields by stop id. Text fields are entity-decoded; toggling
+ * `isOptional` keeps `kind` in sync (core<->optional, never touching a pitstop).
+ * `visited`/`skipped` also stamp their `*_at` timestamp. Returns the owning
+ * drive id, or null if the stop does not exist.
+ */
+export async function updateDriveStop(
+  db: RemodelDb,
+  stopId: number,
+  input: DriveStopUpdateInput,
+): Promise<{ driveListId: number } | null> {
+  const [stop] = await db
+    .select({ driveListId: driveListStops.driveListId, kind: driveListStops.kind })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop) return null;
+
+  const patch: Partial<typeof driveListStops.$inferInsert> = {};
+  if (input.name !== undefined) patch.name = decodeHtmlEntities(input.name);
+  if (input.showroomStoreId !== undefined) patch.showroomStoreId = input.showroomStoreId;
+  if (input.city !== undefined) patch.city = decodeHtmlEntities(input.city);
+  if (input.address !== undefined) patch.address = decodeHtmlEntities(input.address);
+  if (input.phone !== undefined) patch.phone = input.phone;
+  if (input.hours !== undefined) patch.hours = decodeHtmlEntities(input.hours);
+  if (input.note !== undefined) patch.note = decodeHtmlEntities(input.note);
+  if (input.pick !== undefined) patch.pick = decodeHtmlEntities(input.pick);
+  if (input.websiteUrl !== undefined) patch.websiteUrl = input.websiteUrl;
+  if (input.latitude !== undefined) patch.latitude = input.latitude;
+  if (input.longitude !== undefined) patch.longitude = input.longitude;
+  if (input.leg !== undefined) patch.leg = decodeHtmlEntities(input.leg);
+  if (input.legWindow !== undefined) patch.legWindow = decodeHtmlEntities(input.legWindow);
+  if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
+  if (input.isOptional !== undefined) {
+    patch.isOptional = input.isOptional;
+    // Keep kind in sync, but never reclassify a pitstop as core/optional.
+    if (stop.kind !== "pitstop") patch.kind = input.isOptional ? "optional" : "core";
+  }
+  if (input.visited !== undefined) {
+    patch.visited = input.visited;
+    patch.visitedAt = input.visited ? new Date() : null;
+  }
+  if (input.skipped !== undefined) {
+    patch.skipped = input.skipped;
+    patch.skippedAt = input.skipped ? new Date() : null;
+  }
+  if (input.suggested !== undefined) patch.suggested = input.suggested;
+  await db.update(driveListStops).set(patch).where(eq(driveListStops.id, stopId)).run();
+  return { driveListId: stop.driveListId };
+}
+
+/**
+ * Append stops to an existing drive, after its current last stop. Returns the
+ * new stop count for the drive, or null if the drive does not exist.
+ */
+export async function addDriveStops(
+  db: RemodelDb,
+  sel: { id?: number; slug?: string },
+  stops: DriveStopInput[],
+): Promise<{ driveListId: number; added: number; stopCount: number } | null> {
+  const drive = await resolveDrive(db, sel);
+  if (!drive) return null;
+  if (stops.length === 0) return { driveListId: drive.id, added: 0, stopCount: 0 };
+
+  const [{ maxOrder } = { maxOrder: null }] = await db
+    .select({ maxOrder: sql<number | null>`max(${driveListStops.sortOrder})` })
+    .from(driveListStops)
+    .where(eq(driveListStops.driveListId, drive.id));
+  let order = (maxOrder ?? -1) + 1;
+
+  const values = stops.map((s) => ({
+    driveListId: drive.id,
+    showroomStoreId: s.showroomStoreId,
+    sortOrder: order++,
+    leg: decodeHtmlEntities(s.leg),
+    legWindow: decodeHtmlEntities(s.legWindow),
+    name: decodeHtmlEntities(s.name),
+    city: decodeHtmlEntities(s.city),
+    address: decodeHtmlEntities(s.address),
+    phone: s.phone,
+    hours: decodeHtmlEntities(s.hours),
+    note: decodeHtmlEntities(s.note),
+    pick: decodeHtmlEntities(s.pick),
+    websiteUrl: s.websiteUrl,
+    latitude: s.latitude,
+    longitude: s.longitude,
+    isOptional: s.isOptional ?? false,
+    kind: (s.isOptional ?? false) ? ("optional" as const) : ("core" as const),
+  }));
+  const STOP_BATCH_SIZE = 50;
+  for (let i = 0; i < values.length; i += STOP_BATCH_SIZE) {
+    const chunk = values.slice(i, i + STOP_BATCH_SIZE);
+    const stmts = chunk.map((val) => db.insert(driveListStops).values(val));
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+  }
+  const [{ n } = { n: 0 }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(driveListStops)
+    .where(eq(driveListStops.driveListId, drive.id));
+  return { driveListId: drive.id, added: values.length, stopCount: Number(n) };
+}
+
+/** Delete one stop by id. Returns the owning drive id, or null if not found. */
+export async function removeDriveStop(
+  db: RemodelDb,
+  stopId: number,
+): Promise<{ driveListId: number } | null> {
+  const [stop] = await db
+    .select({ driveListId: driveListStops.driveListId })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop) return null;
+  await db.delete(driveListStops).where(eq(driveListStops.id, stopId)).run();
+  return { driveListId: stop.driveListId };
+}
+
+// ── Drive-list notes (drive-global OR pinned to a stop) ──────────────────────
+
+/** A note to create on a drive. `stopId` null/absent = a drive-global note. */
+export interface DriveNoteInput {
+  body: string;
+  stopId?: number | null;
+  source?: "user" | "ai";
+}
+
+/** Create a note (entity-decoded). Returns the inserted row. */
+export async function createDriveNote(
+  db: RemodelDb,
+  driveListId: number,
+  input: DriveNoteInput,
+): Promise<typeof driveListNotes.$inferSelect> {
+  const [row] = await db
+    .insert(driveListNotes)
+    .values({
+      driveListId,
+      driveListStopId: input.stopId ?? null,
+      body: decodeHtmlEntities(input.body),
+      source: input.source ?? "user",
+    })
+    .returning();
+  return row;
+}
+
+/** All notes for a drive, split into drive-global and per-stop, oldest first. */
+export async function listDriveNotes(
+  db: RemodelDb,
+  driveListId: number,
+): Promise<{
+  drive: (typeof driveListNotes.$inferSelect)[];
+  byStop: Record<number, (typeof driveListNotes.$inferSelect)[]>;
+}> {
+  const rows = await db
+    .select()
+    .from(driveListNotes)
+    .where(eq(driveListNotes.driveListId, driveListId))
+    .orderBy(asc(driveListNotes.createdAt), asc(driveListNotes.id));
+  const drive = rows.filter((r) => r.driveListStopId == null);
+  const byStop: Record<number, (typeof driveListNotes.$inferSelect)[]> = {};
+  for (const r of rows) {
+    if (r.driveListStopId != null) (byStop[r.driveListStopId] ??= []).push(r);
+  }
+  return { drive, byStop };
+}
+
+/** Set/clear a note's read (collapsed) state. */
+export async function setDriveNoteRead(
+  db: RemodelDb,
+  noteId: number,
+  read: boolean,
+): Promise<void> {
+  await db
+    .update(driveListNotes)
+    .set({ readAt: read ? new Date() : null })
+    .where(eq(driveListNotes.id, noteId))
+    .run();
+}
+
+/** Delete a note by id. */
+export async function deleteDriveNote(db: RemodelDb, noteId: number): Promise<void> {
+  await db.delete(driveListNotes).where(eq(driveListNotes.id, noteId)).run();
 }
 
 /**

@@ -21,13 +21,13 @@
  * mappings. Every merge repoints first, then deletes the now-orphan type.
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-
-import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
-import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { generateStructuredOutput } from "@backend/ai/providers";
+import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
+import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
+import { SpendBlockedError } from "@backend/services/usage/metered-ai";
 import { z } from "@hono/zod-openapi";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 /**
  * Survivor name → the synonym/plural names folded into it.
@@ -47,8 +47,45 @@ const CANONICAL_MERGES: Record<string, string[]> = {
   Paint: ["Paint Supplies"],
 };
 
+/**
+ * Compound type name → the atomic types it should become.
+ *
+ * A brand tagged "Windows & Doors" is really a Windows brand AND a Doors brand;
+ * one smashed-together row is a category that can never match a Windows filter
+ * or a Doors filter. Splitting rewrites every such mapping into one row per
+ * atomic type, then drops the compound. Every target here is a real atomic
+ * category (created on demand if absent — e.g. "Wood Finishes").
+ *
+ * ONLY genuine multi-category compounds (joined by "&" / ",") live here.
+ * Single-word atomic types that are merely arguable groupings (Shades vs Window
+ * Coverings, Quartz vs Porcelain vs Slabs) are deliberately left alone — those
+ * are taste calls, not the mechanical un-smashing this does.
+ *
+ * Matched case-insensitively. A compound absent from the DB is skipped; an
+ * atomic target absent from the DB is created. Re-running is a near no-op: once
+ * a compound is gone its brands already carry the atomic rows.
+ */
+const COMPOUND_SPLITS: Record<string, string[]> = {
+  "Windows & Doors": ["Windows", "Doors"],
+  "Furniture & Cabinetry": ["Furniture", "Cabinetry"],
+  "Hardware, Lighting & Furniture": ["Hardware", "Lighting", "Furniture"],
+  "Fabrics, Wallpapers, & Trims": ["Fabrics", "Wallcoverings"],
+  "Wallpaper & Fabrics": ["Wallcoverings", "Fabrics"],
+  "Paint & Wallpaper": ["Paint", "Wallcoverings"],
+  "Paint & Wallpapers": ["Paint", "Wallcoverings"],
+  "Paint & Plaster": ["Paint", "Plaster"],
+  "Wood finishes & Lacquer": ["Wood Finishes"],
+  "Woodcare & Stains": ["Wood Finishes"],
+};
+
 export interface ConsolidationReport {
-  merges: Array<{ survivor: string; absorbed: string; remapped: number; collisionsDropped: number }>;
+  merges: Array<{
+    survivor: string;
+    absorbed: string;
+    remapped: number;
+    collisionsDropped: number;
+  }>;
+  splits: Array<{ compound: string; into: string[]; brands: number; mappingsAdded: number }>;
   typesBefore: number;
   typesAfter: number;
   primariesSet: number;
@@ -110,6 +147,64 @@ async function mergeType(
   return { remapped: remapped.length, collisionsDropped };
 }
 
+/** Resolve a type by name, creating it if absent. Returns its id. */
+async function ensureType(db: ReturnType<typeof drizzle>, name: string): Promise<number> {
+  const [existing] = await db
+    .select({ id: brandTypesDef.id })
+    .from(brandTypesDef)
+    .where(sql`lower(${brandTypesDef.name}) = ${name.toLowerCase()}`)
+    .limit(1);
+  if (existing) return existing.id;
+
+  const [created] = await db
+    .insert(brandTypesDef)
+    .values({ name })
+    .returning({ id: brandTypesDef.id });
+  return created.id;
+}
+
+/**
+ * Split one compound type into its atomic parts. Every brand carrying the
+ * compound gains a mapping to each atomic type, then the compound is deleted.
+ *
+ * Cascade-safe by construction: the atomic rows are written FIRST, so when the
+ * compound's own mappings are cascade-deleted with it, every brand still keeps
+ * the atomic coverage. `onConflictDoNothing` absorbs the case where the brand
+ * already carried an atomic type independently. No-op if the compound is absent.
+ */
+async function splitType(
+  db: ReturnType<typeof drizzle>,
+  compoundId: number,
+  atomicIds: number[],
+): Promise<{ brands: number; mappingsAdded: number }> {
+  const brandRows = await db
+    .selectDistinct({ brandId: brandTypeMappings.brandId })
+    .from(brandTypeMappings)
+    .where(eq(brandTypeMappings.typeId, compoundId));
+  const brandIds = brandRows.map((r) => r.brandId);
+
+  if (brandIds.length > 0) {
+    const rows = brandIds.flatMap((brandId) => atomicIds.map((typeId) => ({ brandId, typeId })));
+    // Chunk at 20 rows: D1 caps a statement at 100 bound params and each row
+    // binds 2 columns, so 20 rows = 40 params stays well clear.
+    let added = 0;
+    for (let i = 0; i < rows.length; i += 20) {
+      const inserted = await db
+        .insert(brandTypeMappings)
+        .values(rows.slice(i, i + 20))
+        .onConflictDoNothing()
+        .returning({ id: brandTypeMappings.id });
+      added += inserted.length;
+    }
+    // Compound gone → its own mappings cascade away; atomic rows already stand.
+    await db.delete(brandTypesDef).where(eq(brandTypesDef.id, compoundId));
+    return { brands: brandIds.length, mappingsAdded: added };
+  }
+
+  await db.delete(brandTypesDef).where(eq(brandTypesDef.id, compoundId));
+  return { brands: 0, mappingsAdded: 0 };
+}
+
 const DescribedTypeSchema = z.object({
   types: z.array(
     z.object({
@@ -131,6 +226,7 @@ export async function consolidateBrandTypes(env: Env): Promise<ConsolidationRepo
   const db = drizzle(env.DB);
   const report: ConsolidationReport = {
     merges: [],
+    splits: [],
     typesBefore: 0,
     typesAfter: 0,
     primariesSet: 0,
@@ -170,6 +266,24 @@ export async function consolidateBrandTypes(env: Env): Promise<ConsolidationRepo
         collisionsDropped,
       });
     }
+  }
+
+  // ── 1b. Split compound types into their atomic parts ─────────────────────
+  // After the merges so a split target (e.g. Cabinetry) is already the canonical
+  // survivor, and BEFORE primary flagging so a brand that a split turns into a
+  // multi-type brand is correctly left unweighted rather than mis-badged.
+  for (const [compoundName, atomicNames] of Object.entries(COMPOUND_SPLITS)) {
+    const compound = before.byName.get(compoundName.toLowerCase());
+    if (!compound) continue;
+
+    const atomicIds: number[] = [];
+    for (const atomicName of atomicNames) {
+      atomicIds.push(await ensureType(db, atomicName));
+    }
+
+    const { brands, mappingsAdded } = await splitType(db, compound.id, atomicIds);
+    before.byName.delete(compoundName.toLowerCase());
+    report.splits.push({ compound: compoundName, into: atomicNames, brands, mappingsAdded });
   }
 
   // ── 2. Flag the unambiguous primary ──────────────────────────────────────
@@ -232,6 +346,9 @@ Return every type you were given, keyed by its exact name.`;
           temperature: 0,
         });
       } catch (err) {
+        // See assign-primary-type: a spend block applies to every remaining
+        // batch, so continuing only repeats the same refusal.
+        if (err instanceof SpendBlockedError) throw err;
         console.error(
           `[type-consolidation] description backfill failed for batch ${i / DESCRIBE_CHUNK}:`,
           err,
@@ -239,9 +356,7 @@ Return every type you were given, keyed by its exact name.`;
         continue;
       }
 
-      const byName = new Map(
-        described.types.map((t) => [t.name.trim().toLowerCase(), t]),
-      );
+      const byName = new Map(described.types.map((t) => [t.name.trim().toLowerCase(), t]));
       for (const t of batch) {
         const d = byName.get(t.name.trim().toLowerCase());
         if (!d?.description) continue; // skip rather than store an empty string

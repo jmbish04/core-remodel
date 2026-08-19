@@ -1,0 +1,98 @@
+{
+  "slug": "showroom-branch-collapse",
+  "title": "Collapse chain branches into one business (Tier 2)",
+  "tasks": [
+    {
+      "taskKey": "P1-schema",
+      "phase": "P1 — Schema",
+      "workstream": "database",
+      "changeType": "migration",
+      "title": "showroom_merge_candidates + showroom_merge_candidate_members",
+      "detail": "showroom_merge_candidates + showroom_merge_candidate_members + showroom_merge_exclusions. group_key UNIQUE (sorted ACTIVE member store ids). Members relate by store_id FK — no denormalized names. role = KEEPER|BRANCH|EXCLUDED; members carry a collapse_state (PENDING|LOCATION_CREATED|CHILDREN_REMAPPED|RETIRED|SKIPPED_NO_ADDRESS) + resulting_location_id for resumable collapse. Exclusions persist an ordered (store_id_lo, store_id_hi) pair so a human exclude decision survives across scans. db:generate then migrate:remote, then verify on remote.",
+      "dependsOn": [],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P1-unit-column",
+      "phase": "P1 — Schema",
+      "workstream": "database",
+      "changeType": "migration",
+      "title": "Add unit/suite column to showroom_store_locations",
+      "detail": "The locations table cannot express a suite, so any address rebuilt from street_number + street_name is BUILDING-level — that is what nearly merged Leandro Quintal (#64A) into Marblus Granite (#40C) in PR #356, and why locations were reduced to contributing place_id only. After 0047 most branch addresses live ONLY on location rows, so they must be unit-qualifiable before address matching can safely use them again. Add the column, backfill from the parsed store location_address where possible, then re-enable the location address signal in dedup with the unit included.",
+      "dependsOn": [
+        "P1-schema"
+      ],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P2-scan",
+      "phase": "P2 — Scan",
+      "workstream": "backend",
+      "changeType": "added",
+      "title": "scan_showroom_merge_candidates — upsert candidates from 0046 detection",
+      "detail": "Reuses groupBySignals + the isReal>=2 classification; does NOT reimplement detection. FILTERS showroom_stores to is_active=1 before grouping (a retired branch must never re-enter detection). SKIPS any edge whose endpoints are a persisted excluded pair. Idempotent by group_key; a changed active membership becomes a NEW candidate and the old goes STALE.",
+      "dependsOn": [
+        "P1-schema"
+      ],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P3-collapse-service",
+      "phase": "P3 — Collapse",
+      "workstream": "backend",
+      "changeType": "added",
+      "title": "services/showroom/collapse-branches.ts",
+      "detail": "Per branch, a state machine on collapse_state, each transition its own committed write: PENDING -> LOCATION_CREATED (insert location, set resulting_location_id) -> CHILDREN_REMAPPED (reuse 0046 SIMPLE_MOVE/DEDUP_MOVE) -> RETIRED (soft-delete store), or terminal SKIPPED_NO_ADDRESS. RESUME FROM collapse_state, not from resulting_location_id — a crash after the location insert but before children moved must not skip the branch (would orphan children). The location INSERT is idempotent (guard on collapse_state + place_id/unit check) and is NEVER compensating-deleted: it holds the address, so a partial failure leaves a live store + saved location, recoverable. Re-verify at APPLY that every member is active and matches group_key; abort STALE. Candidate reaches APPLIED only when every branch is RETIRED or SKIPPED_NO_ADDRESS. Chunk column-aware at floor(100/cols-per-row). Exclusions persisted precisely: exclude X -> write (X,keeper) as (min,max); reject-whole -> every pairwise (min,max).",
+      "dependsOn": [
+        "P1-schema"
+      ],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P4-mcp-tools",
+      "phase": "P4 — MCP",
+      "workstream": "mcp",
+      "changeType": "added",
+      "title": "list / get / resolve / apply_merge_candidate",
+      "detail": "One file per tool. READ_ONLY, READ_ONLY, WRITE, DESTRUCTIVE. Hand-written Zod v4 inputShape validates every id; a keeper/exclude must belong to the named candidate. apply_merge_candidate REFUSES a candidate that is not APPROVED and re-runs the active/group_key re-verify before writing. Registry writes are OAuth/bearer-gated — no unauthenticated path. Gives chat parity with the UI per the ambiguous-parent doctrine.",
+      "dependsOn": [
+        "P2-scan",
+        "P3-collapse-service"
+      ],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P5-review-ui",
+      "phase": "P5 — Review UI",
+      "workstream": "frontend",
+      "changeType": "added",
+      "title": "/admin/shopping/showrooms/merge-review",
+      "detail": "Thin Astro shell (class not className, container mx-auto px-4 py-8 pb-12, header block with a 24px lucide icon) + one React island. Per group: switchable keeper, each member with address/phone/site + matched evidence, per-member keep/exclude, approve/reject.",
+      "dependsOn": [
+        "P2-scan"
+      ],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P6-qc",
+      "phase": "P6 — QC + deploy",
+      "workstream": "qc",
+      "changeType": "added",
+      "title": "scripts/qc/pr_<n>.mjs — preview + prod",
+      "detail": "Collapse exercised on a throwaway store pair the test creates and removes — never live rows. Asserts: address carried across, children remapped, a SIMULATED mid-collapse crash (state left at LOCATION_CREATED) RESUMES without duplicating the location or orphaning children, EXCLUDED member untouched + only (X,keeper) persisted + not re-proposed, apply refuses a non-APPROVED candidate, re-scan yields no new candidate, and 0046 no-runaway-component still passes.",
+      "dependsOn": [
+        "P4-mcp-tools",
+        "P5-review-ui"
+      ],
+      "status": "pending"
+    }
+  ],
+  "successCriteria": [
+    "Every 0046 branchCandidate appears as a reviewable candidate row",
+    "Approving collapses N stores into 1 business + N locations with no address lost",
+    "A member marked EXCLUDED is left completely untouched",
+    "Re-running the scan after an apply produces no new candidate for that group",
+    "dedup_showroom_stores still reports 0 runaway components",
+    "QC green on preview and prod"
+  ]
+}

@@ -21,18 +21,62 @@ export * from "./contracts/contracts";
 
 export * from "./home/floors";
 export * from "./home/rooms";
+
+// 0041 Phase 0 — homeowner experience foundation.
+export * from "./home/projects";
+export * from "./home/room_stop_state";
+export * from "./home/spec_definitions";
+export * from "./home/room_spec_fields";
+export * from "./home/decisions";
+export * from "./home/decision_reopenings";
+export * from "./impacts/impact_definitions";
+export * from "./impacts/impacts";
+export * from "./impacts/impact_targets";
+export * from "./impacts/impact_blocks";
+export * from "./impacts/impact_evidence";
+export * from "./impacts/ripple_rules";
+
+// 0043 Phase 0 — room-model definition tables.
+export * from "./home/room_note_type_def";
+export * from "./home/room_problem_type_def";
+export * from "./home/room_problem_fix_def";
+export * from "./home/room_problem_document_type_def";
+export * from "./home/room_use_def";
+export * from "./home/room_type_def";
+export * from "./home/room_intent_type_def";
+export * from "./materials/material_type_def";
+
+// 0043 Phase 1 — walls and measurements graph.
+export * from "./home/walls";
+export * from "./home/room_measurements";
+
+// 0043 Phase 2-3 — notes, intents, problems.
+export * from "./home/room_notes";
+export * from "./home/room_intents";
+export * from "./home/room_problems";
+
+// 0043 Phase 4 — surfaces: assemblies, fixtures, requirements.
+export * from "./home/surfaces";
+
+// 0043 Phase 5 — coordination: trade assignments, permit mapping, timeline.
+export * from "./home/room_coordination";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
 export * from "./home/room_action_items";
 export * from "./home/budget_tracker_items";
 export * from "./home/budget_item_material_mappings";
+export * from "./home/budget_phases";
+export * from "./home/budget_plan_schedule";
 export * from "./home/truth_table_activities";
 export * from "./home/shopping_journal";
 export * from "./home/room_ai_summaries";
 export * from "./home/homeowner_messages";
 export * from "./home/visitor_sessions";
 export * from "./home/visitor_events";
+
+export * from "./guests/guest_contacts";
 export * from "./home/planning_participants";
 export * from "./home/planning_epics";
 export * from "./home/planning_tasks";
@@ -74,6 +118,9 @@ export * from "./images/image_tag_mappings";
 export * from "./images/image_review_highlights";
 export * from "./images/render_sessions";
 export * from "./images/render_canvases";
+export * from "./images/render_campaigns";
+export * from "./images/render_campaign_angles";
+export * from "./images/render_campaign_sessions";
 export * from "./images/canvas_inspiration_references";
 export * from "./images/mood_board_generations";
 export * from "./images/photo_viewer_notes";
@@ -82,6 +129,7 @@ export * from "./images/workstation_boards";
 export * from "./images/board_nodes";
 export * from "./images/photo_collections";
 export * from "./images/sample_clippings";
+export * from "./images/furnishing_items";
 
 export * from "./home/questionnaire";
 
@@ -105,6 +153,7 @@ export * from "./system/gemini-usage";
 // gemini_usage_log to compute what a call actually cost.
 export * from "./system/pricing";
 export * from "./system/device-location";
+export * from "./system/park-sessions";
 
 export * from "./dialer/prospects";
 export * from "./dialer/state";
@@ -127,9 +176,14 @@ export * from "./services/index";
 export * from "./gmail/gmail_threads";
 export * from "./gmail/gmail_messages";
 export * from "./gmail/gmail_message_participants";
+export * from "./gmail/gmail_message_attachments";
+export * from "./gmail/gmail_message_images";
 
 // worker emails (Cloudflare Email Routing inbound)
 export * from "./emails/index";
+
+// Vendor-email context layer (2026-08-11): the reusable instructions doc.
+export * from "./email/index";
 
 // MCP ops/observability (0017) + artifact studio (0016)
 export * from "./mcp/index";
@@ -149,3 +203,16 @@ export * from "./changelog/index";
 // Agent run ledger — one agent-agnostic record of every agent execution, its
 // steps and its tool calls. Powers /admin/agents and informed (non-blind) retries.
 export * from "./agents/index";
+
+// Pascal ⇄ Core-Remodel rendering integration (0043) — durable scene store for the
+// Vercel floorplan editor: projects → studies → variants (each variant = one Pascal
+// scene), plus snapshots and an append-only scene-event log.
+export * from "./pascal/pascal_projects";
+export * from "./pascal/pascal_studies";
+export * from "./pascal/pascal_variants";
+export * from "./pascal/pascal_snapshots";
+export * from "./pascal/pascal_scene_events";
+
+// Google Drive ingestion (PR 1) — roots, folders, documents. NOTE: distinct
+// from ./drives/index, which is DRIVING routes (Tesla drive lists).
+export * from "./google-drive/index";

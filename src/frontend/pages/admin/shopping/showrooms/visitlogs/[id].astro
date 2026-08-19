@@ -1,0 +1,39 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { VisitLogDetailApp } from "@/components/visits/VisitLogDetailApp";
+
+const { id } = Astro.params;
+const visitId = id ? Number.parseInt(id, 10) : NaN;
+if (!Number.isFinite(visitId)) {
+  return Astro.redirect("/admin/shopping/showrooms/visitlogs");
+}
+---
+
+<BaseLayout title="Visit log — The Monolith" description="Finalize a showroom visit.">
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <rect width="8" height="4" x="8" y="2" rx="1" ry="1"></rect>
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+          <path d="m9 14 2 2 4-4"></path>
+        </svg>
+        Finalize visit
+      </h1>
+      <p class="text-muted-foreground">Review the location evidence, then rate and add your notes.</p>
+    </div>
+    <VisitLogDetailApp client:only="react" id={visitId} />
+  </main>
+</BaseLayout>

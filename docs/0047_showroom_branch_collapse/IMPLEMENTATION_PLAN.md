@@ -1,0 +1,285 @@
+# 0047 — Collapse chain branches into one business (Tier 2)
+
+> **Slug:** `showroom-branch-collapse`
+> **Depends on:** 0045 (locations exist + `add_showroom_location`), 0046 (detection + `branchCandidates`)
+> **Decision on file:** Tier 2 **proposes, never auto-merges** — human confirms every collapse.
+
+---
+
+## 1. Where this starts
+
+0046 made the detector honest. It now finds groups where **two or more REAL rows**
+(each with its own zip/place_id) belong to one business — and deliberately refuses to
+touch them, returning them as `branchCandidates`. There is currently **no way to act on
+one**, so the backlog just gets re-reported every run.
+
+Live on prod today, 12 candidates covering ~30 store rows. The big ones:
+
+| Business | Rows | Linked by |
+|---|---|---|
+| Studio Belmont | 5 | website |
+| Homewise Appliance | 5 | website, name |
+| All Natural Stone | 4 | website, name |
+| Daltile Stone & Slab | 4 | website, name |
+| Porcelanosa | 3 | address, website, name |
+| Lema, Bedrosians, Aquabella, Topcret, KOHLER, Saratoga/Los Gatos Plumbing, UnitedPorte/Italdoors | 2 each | — |
+
+Each is one business filed as N stores. Under 0045 it should be **one store row with N
+location rows**.
+
+```mermaid
+flowchart LR
+  subgraph now["TODAY"]
+    A[(store 6<br/>Studio Belmont Flagship)]
+    B[(store 7<br/>Studio Belmont SF)]
+    C[(store 23<br/>San Jose)]
+    D[(store 26<br/>Walnut Creek)]
+    E[(store 31<br/>Novato)]
+  end
+  subgraph after["AFTER 0047"]
+    K[(store 6 — Studio Belmont<br/>the BUSINESS)]
+    K --> L1[location: Flagship]
+    K --> L2[location: SF]
+    K --> L3[location: San Jose]
+    K --> L4[location: Walnut Creek]
+    K --> L5[location: Novato]
+  end
+  now -->|human-confirmed collapse| after
+  classDef bad fill:#4d1f1f,stroke:#f87171
+  classDef ok fill:#1f4d2e,stroke:#4ade80
+  class A,B,C,D,E bad
+  class K,L1,L2,L3,L4,L5 ok
+```
+
+## 2. Why this is not just "run the merge tool"
+
+`dedup_showroom_stores` **discards** the loser's address — correct when the loser is a
+duplicate stub, catastrophic when it is a real branch. Collapsing must **carry each
+loser's site across** as a location row (address parts, coords, place_id, phone, hours)
+before soft-deleting the store row. That is a different operation, and it is why 0046
+refuses to do it.
+
+It is also the first operation in this repo that is **destructive to real, distinct
+data** if the grouping is wrong — and 0046 already proved the grouping can be wrong in
+non-obvious ways (the SF Design Center blob; Leandro Quintal riding a suite-less address
+edge into Marblus). Hence: propose, show evidence, human confirms, then apply.
+
+---
+
+## 3. Model
+
+```mermaid
+erDiagram
+    showroom_merge_candidates ||--o{ showroom_merge_candidate_members : "candidate_id"
+    showroom_merge_candidate_members }o--|| showroom_stores : "store_id"
+    showroom_merge_candidates }o--o| showroom_stores : "proposed_keeper_store_id"
+    showroom_merge_exclusions }o--|| showroom_stores : "store_id_lo / store_id_hi"
+
+    showroom_merge_candidates {
+        int id PK
+        text group_key UK "stable — sorted ACTIVE member store ids"
+        int proposed_keeper_store_id FK
+        text status "TBD|APPROVED|REJECTED|APPLIED|STALE"
+        text signals_json "which signals linked it"
+        text evidence_json "the matched values"
+        text decided_by_note
+        int detected_at
+        int decided_at
+        int applied_at
+    }
+    showroom_merge_candidate_members {
+        int id PK
+        int candidate_id FK "cascade"
+        int store_id FK
+        text role "KEEPER|BRANCH|EXCLUDED"
+        text collapse_state "PENDING|LOCATION_CREATED|CHILDREN_REMAPPED|RETIRED|SKIPPED_NO_ADDRESS"
+        int resulting_location_id FK "set at LOCATION_CREATED"
+    }
+    showroom_merge_exclusions {
+        int id PK
+        int store_id_lo FK "the smaller store id"
+        int store_id_hi FK "the larger store id"
+        text reason
+        int created_at
+    }
+```
+
+- **`group_key` is derived, stable and unique**: the sorted **active** member store ids joined.
+  Re-running the scan upserts rather than duplicating, and a group whose membership changes
+  becomes a NEW candidate while the old one goes `STALE` — never silently mutated under a
+  pending decision. Because a collapsed branch is soft-deleted, it drops out of the next
+  scan's input (see P2), so the same group is not re-proposed after an apply.
+- **No denormalized names anywhere.** Members relate by `store_id`; display names JOIN.
+- **`role = EXCLUDED`** is how a human says "these four are one business, but that fifth row
+  is a different company" — the Leandro Quintal case, resolved per-member instead of
+  rejecting the whole group. An exclude decision is **persisted** in `showroom_merge_exclusions`,
+  and P2's scan **skips any edge whose two endpoints are an excluded pair**. Without this the
+  detector would re-propose the same pairing on the very next run and the "no new candidate
+  after apply" criterion would be unmet (codra).
+
+  **Exactly which pairs are written (codra — no ambiguity):**
+  - **Exclude one member** `X` from an otherwise-approved group: write `(X, keeper)` only. Every
+    non-excluded branch collapses INTO the keeper, so after apply the keeper is the sole
+    surviving identity `X` could re-link to — `(X, keeper)` is necessary and sufficient. Each
+    pair is stored ordered as `(min, max)` so the lookup is direction-free and the
+    `(store_id_lo, store_id_hi)` unique index dedupes.
+  - **Reject the whole candidate:** write **every pairwise combination** of its members, since
+    none of them merge and any sub-pair could otherwise regroup next scan.
+
+---
+
+## 4. Phases
+
+```mermaid
+flowchart TD
+  P1[P1 — schema<br/>candidates + members] --> P2[P2 — scan<br/>reuse 0046 detection, upsert candidates]
+  P2 --> P3[P3 — collapse service<br/>carry site across, THEN soft-delete]
+  P3 --> P4[P4 — MCP<br/>list / get / resolve / apply]
+  P2 --> P5[P5 — review UI<br/>/admin/shopping/showrooms/merge-review]
+  P4 --> P6[P6 — QC + deploy]
+  P5 --> P6
+  classDef risk fill:#4d1f1f,stroke:#f87171
+  class P3 risk
+```
+
+### P1 — schema
+Three tables above (candidates, members, exclusions) plus a **`unit` column on
+`showroom_store_locations`** — the locations table cannot express a suite today, which is
+exactly what let a suite-less street nearly merge Leandro Quintal (#64A) into Marblus (#40C)
+in #356. After 0047 most branch addresses live only on location rows, so they must be
+unit-qualifiable before address matching can safely use them again. `pnpm run db:generate`,
+apply with `pnpm run migrate:remote` (a defined package script → `node scripts/d1-migrate.mjs
+--remote`), then **verify each table/column exists on remote**.
+
+### P2 — scan (`scan_showroom_merge_candidates`)
+Runs 0046's `groupBySignals` + the `isReal >= 2` classification and upserts a candidate per
+branch group. Never writes to `showroom_stores`.
+- **Filters `showroom_stores` to `is_active = 1` before grouping.** A soft-deleted branch must
+  never re-enter detection, or an applied group would be re-proposed from its retired members
+  (codra).
+- **Skips any edge whose endpoints are a persisted excluded pair** (`showroom_merge_exclusions`),
+  so a human's exclude decision survives across scans.
+- Idempotent by `group_key`. A group whose active membership changed becomes a NEW candidate;
+  the stale one is marked `STALE`, never mutated under a pending decision.
+
+### P3 — the collapse service (the dangerous part)
+```mermaid
+sequenceDiagram
+    participant H as human (UI or chat)
+    participant S as collapse service
+    participant D as D1
+    H->>S: approve candidate 7, keeper = store 6, exclude store 31
+    S->>D: re-verify membership still matches group_key
+    Note over S,D: STALE if the group changed since detection — abort, re-scan
+    loop each BRANCH member (resume from its collapse_state)
+        alt state = PENDING
+            S->>D: INSERT showroom_store_locations (address + coords + place_id + unit)
+            S->>D: SET resulting_location_id, collapse_state = LOCATION_CREATED
+        end
+        alt state <= LOCATION_CREATED
+            S->>D: remap child rows onto the keeper (0046 SIMPLE_MOVE / DEDUP_MOVE)
+            S->>D: collapse_state = CHILDREN_REMAPPED
+        end
+        alt state <= CHILDREN_REMAPPED
+            S->>D: UPDATE showroom_stores SET is_active = 0
+            S->>D: collapse_state = RETIRED
+        end
+        Note over S,D: the location is NEVER deleted on failure — it holds the address
+    end
+    opt every BRANCH member RETIRED or SKIPPED_NO_ADDRESS
+        S->>D: candidate status = APPLIED, applied_at set
+    end
+    S-->>H: per-member receipt — each member's collapse_state
+```
+- **Per-member state machine, not a single flag (codra).** Each BRANCH member advances through
+  `PENDING → LOCATION_CREATED → CHILDREN_REMAPPED → RETIRED` (or terminal `SKIPPED_NO_ADDRESS`),
+  and every transition is committed as its own D1 write. A retry **resumes from the recorded
+  state** — not from "has a `resulting_location_id`", which was the flaw: a crash after the
+  location insert but before the children moved would have marked the branch done, orphaning
+  child rows and leaving the store active. The candidate reaches `APPLIED` only when every
+  BRANCH member is `RETIRED` or `SKIPPED_NO_ADDRESS`; otherwise it stays `TBD` with a receipt
+  of each member's state.
+- **The location row is the durable checkpoint — never compensating-deleted (codra).** The
+  earlier "create-then-compensating-delete" was self-contradictory: deleting the location on
+  failure would destroy the very address it was meant to preserve. Instead the location INSERT
+  is the FIRST and idempotent step (guarded by `collapse_state` + a `place_id`/unit uniqueness
+  check so a retry does not double-insert), and once written it is kept no matter what fails
+  downstream. The store is soft-deleted only at the final `RETIRED` transition, so a partial
+  failure leaves a live store plus a saved location — recoverable, never lost. `db.batch()`
+  cannot feed a generated id into the next statement, so the steps are sequential by necessity.
+- **Re-verify at apply, not just at detect.** Before touching anything, re-confirm every member
+  still exists and is `is_active = 1` and the active membership still matches `group_key`; abort
+  `STALE` and re-scan if it moved.
+- Reuse 0046's child-table move maps rather than re-listing 25 FK tables.
+- A branch with no usable address is reported and skipped, never collapsed to nothing.
+- `role = EXCLUDED` members are left completely untouched, and their pair is written to
+  `showroom_merge_exclusions`.
+
+### P4 — MCP (chat parity, per the ambiguous-parent doctrine)
+`list_merge_candidates` (READ_ONLY), `get_merge_candidate` (READ_ONLY, full evidence),
+`resolve_merge_candidate` (WRITE — approve/reject/set keeper/exclude a member),
+`apply_merge_candidate` (DESTRUCTIVE).
+- **Every tool validates its input with hand-written Zod v4** (`inputShape`); never
+  drizzle-zod. Ids are `z.number().int().positive()`; a keeper/exclude must be a member of the
+  named candidate or the call `toolError`s.
+- **`apply_merge_candidate` refuses unless the candidate is `APPROVED`** — you cannot apply a
+  `TBD`/`REJECTED`/`APPLIED`/`STALE` row — and it re-runs the P3 active/`group_key` re-verify
+  before writing. It carries the `DESTRUCTIVE` annotation, and (like every registry write) is
+  reachable only through the OAuth-gated connector or the `WORKER_API_KEY` bearer — there is no
+  unauthenticated path (codra).
+
+### P5 — review UI
+`/admin/shopping/showrooms/merge-review`, thin Astro shell + one React island, per the page
+shell rules. Per group: proposed keeper (switchable), each member with address/phone/site,
+the matched evidence, per-member keep/exclude, approve/reject.
+
+### P6 — QC + deploy
+`scripts/qc/pr_<n>.mjs` against preview AND prod. Collapse is exercised on a **throwaway
+pair created by the test and removed after**, never on live rows.
+
+---
+
+## 5. Risks
+
+```mermaid
+flowchart LR
+  R1[Wrong group collapses a real business] -->|human confirm + per-member EXCLUDE| M1[no auto-apply, ever]
+  R2[Address lost on mid-collapse failure] -->|location is the durable checkpoint, NEVER deleted;<br/>store retired only at the end| M2[address never lost]
+  R6[Retry skips unremapped children] -->|per-member collapse_state machine,<br/>resume from recorded stage| M6[no orphans]
+  R3[Group changed since detection] -->|re-verify group_key on apply| M3[STALE, abort + re-scan]
+  R4[Branch has no address] -->|report + skip that member| M4[never collapsed to nothing]
+  R5[D1 100-param cap on child remaps] -->|chunk by floor 100 / cols-per-row| M5[bounded]
+  classDef done fill:#1f4d2e,stroke:#4ade80
+  class M1,M2,M3,M4,M5,M6 done
+```
+
+**D1 chunking is column-aware, not a fixed 20 (codra).** The cap is 100 *bound parameters* per
+statement, so the safe row count is `floor(100 / columns_written_per_row)`, not a constant. A
+child remap is a single-column FK update (`SET storeId = ?` … `WHERE storeId IN (?, …)`) — a
+handful of columns, so ~90 ids is safe. A location INSERT writes ~12 columns per row, so its
+chunk is `floor(100/12) ≈ 8`. Use the parameter-budget helper, not `20`, and reuse 0046's
+existing `chunk()` sizing where the shape matches.
+
+## 6. Compliance scan
+
+| Data point | Currency? | Multi-select? | Verdict |
+|---|---|---|---|
+| `status`, `role` | — | single-select, small fixed vocab | TEXT enum, consistent with `user_decision` on the park-find queue. Not a user-managed vocabulary, so no config page. |
+| `signals_json` / `evidence_json` | — | — | Point-in-time detection artifact, not a duplicate of another table. Legitimate JSON, same as `proximity_scan_json`. |
+
+No currency fields. No comma-separated multi-values.
+
+## 7. Success criteria
+
+- Every `branchCandidate` from 0046 appears as a reviewable candidate row.
+- Approving one collapses N stores into 1 business + N locations, with **no address lost**
+  and every child row remapped.
+- A member marked `EXCLUDED` is left completely untouched, its pair persisted, and it is
+  **not re-proposed** with the same keeper on the next scan.
+- Re-running the scan after an apply produces no new candidate for that group (the retired
+  branches are filtered out as `is_active = 0`).
+- A collapse interrupted partway resumes on retry with no duplicated locations and no error on
+  an already-retired store; the candidate reaches `APPLIED` only when every branch completed.
+- `apply_merge_candidate` refuses a candidate that is not `APPROVED`.
+- `dedup_showroom_stores` still reports 0 runaway components (0046 regression).
+- QC green on preview and prod.

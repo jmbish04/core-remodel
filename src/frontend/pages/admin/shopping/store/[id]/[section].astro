@@ -2,7 +2,7 @@
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { StoreViewportApp } from "@/components/showroom/StoreViewportApp";
 
-const VALID_SECTIONS = ["brands-products", "notes", "photos"] as const;
+const VALID_SECTIONS = ["brands-products", "contacts", "notes", "photos", "visits"] as const;
 type SectionKey = (typeof VALID_SECTIONS)[number];
 
 const { id, section } = Astro.params;

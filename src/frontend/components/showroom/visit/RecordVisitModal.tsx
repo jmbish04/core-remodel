@@ -31,11 +31,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Check,
   CreditCard,
   Loader2,
   ScanLine,
   Star,
   Upload,
+  UserPlus,
   UserRound,
   X,
 } from "lucide-react";
@@ -93,6 +95,20 @@ interface ExtractCardResponse {
   businessCardFrontUrl?: string | null;
   businessCardBackUrl?: string | null;
   extracted?: Partial<ContactForm> | null;
+}
+
+/** An existing point of contact on the showroom (from GET /:id/pocs). */
+interface PocOption {
+  id: number;
+  fullName: string | null;
+  title: string | null;
+  company: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
+function pocSubtitle(p: PocOption): string {
+  return [p.title, p.company].filter(Boolean).join(" · ");
 }
 
 type YesNo = "yes" | "no" | null;
@@ -362,6 +378,11 @@ export function RecordVisitModal({
 
   // Step 2 — contact branch.
   const [metContact, setMetContact] = useState<YesNo>(null);
+  // Existing points of contact on this showroom (for the "select who you met" step).
+  const [existingPocs, setExistingPocs] = useState<PocOption[]>([]);
+  const [pocsLoaded, setPocsLoaded] = useState(false);
+  const [selectedPocId, setSelectedPocId] = useState<number | null>(null);
+  const [addingNew, setAddingNew] = useState(false);
   const [gotCard, setGotCard] = useState<YesNo>(null);
   const [frontImage, setFrontImage] = useState<string | null>(null);
   const [backImage, setBackImage] = useState<string | null>(null);
@@ -383,6 +404,10 @@ export function RecordVisitModal({
       setRating(0);
       setRatingNote({ html: "", markdown: "" });
       setMetContact(null);
+      setExistingPocs([]);
+      setPocsLoaded(false);
+      setSelectedPocId(null);
+      setAddingNew(false);
       setGotCard(null);
       setFrontImage(null);
       setBackImage(null);
@@ -394,6 +419,30 @@ export function RecordVisitModal({
       setSaving(false);
     }
   }, [open]);
+
+  // Load the showroom's existing points of contact so the user can pick who they
+  // met instead of always creating a new (possibly duplicate) contact.
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/showroom-stores/${showroomId}/pocs`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { pocs?: PocOption[] };
+        if (active) setExistingPocs(data.pocs ?? []);
+      } catch {
+        /* non-fatal — the modal still works with manual/new entry */
+      } finally {
+        // Mark loaded either way so an empty list is treated as "add new" only
+        // AFTER the fetch settles — avoids flashing the new-contact form first.
+        if (active) setPocsLoaded(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [open, showroomId]);
 
   const updateContact = useCallback((patch: Partial<ContactForm>) => {
     setContact((c) => ({ ...c, ...patch }));
@@ -459,7 +508,9 @@ export function RecordVisitModal({
 
   // ── Save ────────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
-    const willSaveContact = metContact === "yes" && hasAnyContact(contact);
+    // Only create a NEW poc when the user is entering someone new. Picking an
+    // existing contact records who was met without inserting a duplicate.
+    const willSaveContact = metContact === "yes" && selectedPocId == null && hasAnyContact(contact);
     setSaving(true);
     try {
       // 1) Visit rating (only if a rating was chosen).
@@ -519,6 +570,7 @@ export function RecordVisitModal({
     }
   }, [
     metContact,
+    selectedPocId,
     contact,
     rating,
     ratingNote,
@@ -531,10 +583,15 @@ export function RecordVisitModal({
   ]);
 
   // ── Step navigation guards ──────────────────────────────────────────────────
+  // "Adding new" = the showroom has no known contacts, or the user explicitly
+  // chose to enter someone new instead of picking an existing contact.
+  const isAddingNew =
+    metContact === "yes" && (addingNew || (pocsLoaded && existingPocs.length === 0));
+  const selectedPoc = existingPocs.find((p) => p.id === selectedPocId) ?? null;
   const canLeaveStep2 =
     metContact === "no" ||
-    (metContact === "yes" && gotCard === "no") ||
-    (metContact === "yes" && gotCard === "yes");
+    (metContact === "yes" && selectedPocId != null) ||
+    (isAddingNew && gotCard !== null);
 
   const goNext = () => {
     if (step === 1) setStep(2);
@@ -614,7 +671,70 @@ export function RecordVisitModal({
               />
             </div>
 
-            {metContact === "yes" && (
+            {/* Pick an existing contact, or start a new one. */}
+            {metContact === "yes" && existingPocs.length > 0 && selectedPocId == null && !addingNew && (
+              <div className="space-y-2">
+                <Label className="mb-0 block">Which contact did you meet?</Label>
+                <div className="grid gap-2">
+                  {existingPocs.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedPocId(p.id);
+                        setAddingNew(false);
+                        setGotCard(null);
+                      }}
+                      className="flex items-center gap-3 rounded-lg bg-card p-3 text-left ring-1 ring-border/40 transition hover:ring-sky-400"
+                    >
+                      <UserRound className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{p.fullName || "Unnamed contact"}</div>
+                        {pocSubtitle(p) ? (
+                          <div className="truncate text-xs text-muted-foreground">{pocSubtitle(p)}</div>
+                        ) : null}
+                      </div>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddingNew(true);
+                      setSelectedPocId(null);
+                    }}
+                    className="flex items-center gap-3 rounded-lg border border-dashed border-border/60 p-3 text-left text-sm text-muted-foreground transition hover:border-sky-400 hover:text-foreground"
+                  >
+                    <UserPlus className="size-4 shrink-0" /> Someone new
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* A known contact was chosen. */}
+            {metContact === "yes" && selectedPoc && (
+              <div className="flex items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-sky-500/40">
+                <Check className="size-4 shrink-0 text-emerald-400" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{selectedPoc.fullName || "Unnamed contact"}</div>
+                  {pocSubtitle(selectedPoc) ? (
+                    <div className="truncate text-xs text-muted-foreground">{pocSubtitle(selectedPoc)}</div>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedPocId(null);
+                    setAddingNew(false);
+                  }}
+                >
+                  Change
+                </Button>
+              </div>
+            )}
+
+            {metContact === "yes" && isAddingNew && (
               <div className="flex flex-col gap-3 rounded-lg bg-card p-3 ring-1 ring-border/40 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
                   <CreditCard className="size-4 text-muted-foreground" />
@@ -625,7 +745,7 @@ export function RecordVisitModal({
             )}
 
             {/* Card branch: upload + extract */}
-            {metContact === "yes" && gotCard === "yes" && (
+            {metContact === "yes" && isAddingNew && gotCard === "yes" && (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <CardUpload
@@ -671,7 +791,7 @@ export function RecordVisitModal({
             )}
 
             {/* Manual branch */}
-            {metContact === "yes" && gotCard === "no" && (
+            {metContact === "yes" && isAddingNew && gotCard === "no" && (
               <ContactFields value={contact} onChange={updateContact} />
             )}
           </StepperContent>
@@ -707,7 +827,15 @@ export function RecordVisitModal({
                 <div className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Contact
                 </div>
-                {metContact === "yes" && hasAnyContact(contact) ? (
+                {metContact === "yes" && selectedPoc ? (
+                  <div className="space-y-0.5 text-sm">
+                    <div className="font-medium">{selectedPoc.fullName || "Unnamed contact"}</div>
+                    {pocSubtitle(selectedPoc) ? (
+                      <div className="text-muted-foreground">{pocSubtitle(selectedPoc)}</div>
+                    ) : null}
+                    <div className="mt-1 text-xs text-muted-foreground/70">Existing contact — met on this visit.</div>
+                  </div>
+                ) : metContact === "yes" && hasAnyContact(contact) ? (
                   <div className="space-y-0.5 text-sm">
                     {contact.fullName && <div className="font-medium">{contact.fullName}</div>}
                     {(contact.title || contact.company) && (

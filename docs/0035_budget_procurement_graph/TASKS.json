@@ -1,0 +1,66 @@
+{
+  "slug": "budget-procurement-graph",
+  "title": "Budget & Procurement: Time-phased Grid + Workbench",
+  "confirms": [
+    "companies vs estimate_companies unification (Finding B) — gates contractor links",
+    "expense category: keep free-text vs promote to budget_categories def table (Phase 5)"
+  ],
+  "phases": [
+    { "ordinal": 0, "key": "S", "title": "Substrate FK links (original 0035)" },
+    { "ordinal": 1, "key": "F", "title": "Time-phasing foundations" },
+    { "ordinal": 2, "key": "GA", "title": "Grid API + MCP" },
+    { "ordinal": 3, "key": "GU", "title": "Grid UI (impeccable)" },
+    { "ordinal": 4, "key": "RC", "title": "Estimate reconciliation HITL" },
+    { "ordinal": 5, "key": "IN", "title": "Decision inbox + room finances" },
+    { "ordinal": 6, "key": "SV", "title": "Savings & reallocation" },
+    { "ordinal": 7, "key": "SL", "title": "Services / labor / trade-terms" },
+    { "ordinal": 8, "key": "VZ", "title": "Bid visibility + sync ledger" },
+    { "ordinal": 9, "key": "WB", "title": "Workbench shell" }
+  ],
+  "tasks": [
+    { "taskKey": "S-DECIDE", "phase": 0, "workstream": "db", "changeType": "investigate", "dependsOn": [], "title": "DECIDE companies vs estimate_companies (Finding B) — gates contractor FKs", "description": "One canonical contractor table chosen + documented; blocks only contractor links." },
+    { "taskKey": "S-BACKUP", "phase": 0, "workstream": "ops", "changeType": "keep", "dependsOn": [], "title": "Back up remote D1 before FK rebuilds", "description": "backups/DB-<UTC>.sql captured." },
+    { "taskKey": "S-INV-ROOM", "phase": 0, "workstream": "db", "changeType": "update", "dependsOn": ["S-BACKUP"], "title": "worker_email_invoices.room_id -> rooms (no floor_id)", "description": "room_id FK; floor derived via JOIN rooms.floor_id; no denormalized floor_id." },
+    { "taskKey": "S-LINE-MILE", "phase": 0, "workstream": "db", "changeType": "update", "dependsOn": ["S-BACKUP"], "title": "worker_email_invoice_line_items.contract_payment_milestone_id -> milestones", "description": "FK to contract_payment_milestones.id (stable)." },
+    { "taskKey": "S-EXP-LINKS", "phase": 0, "workstream": "db", "changeType": "update", "dependsOn": ["S-BACKUP"], "title": "budget_expense_entries: room_id + invoice_id FKs + budget_item_track_id TEXT", "description": "room_id->rooms, invoice_id->invoices, budget_item_track_id TEXT no FK (revisioned id); backfill confident, flag rest. Load-bearing for grid actuals." },
+    { "taskKey": "S-PRIMARY-SVC", "phase": 0, "workstream": "db", "changeType": "update", "dependsOn": ["S-BACKUP"], "title": "budget_tracker_items.primary_service_id -> services", "description": "On-row FK, re-copied per revision." },
+    { "taskKey": "S-TRADE-TERMS", "phase": 0, "workstream": "db", "changeType": "new", "dependsOn": ["S-DECIDE", "S-BACKUP"], "title": "contractor_showroom_trade_terms table (bps + text/cents)", "description": "contractor FK per Finding B, showroom_id->showroom_stores, *_bps INTEGER, min_spend_text+cents, UNIQUE(contractor,showroom)." },
+    { "taskKey": "S-QC", "phase": 0, "workstream": "qc", "changeType": "new", "dependsOn": ["S-INV-ROOM", "S-LINE-MILE", "S-EXP-LINKS", "S-PRIMARY-SVC", "S-TRADE-TERMS"], "title": "QC pr-S + changelog + ERD", "description": "Each link orphan-validated, rows preserved, readers 200; changelog with ERD." },
+
+    { "taskKey": "F-PHASES", "phase": 1, "workstream": "db", "changeType": "new", "dependsOn": ["S-QC"], "title": "budget_phases def table + config page + budget_tracker_items.phase_id", "targetRoute": "/admin/config/budget/phases", "description": "Vocabulary def table (id,name,description,sort_order,tone,is_active) + ConfigShell config page; single-select phase_id FK on items." },
+    { "taskKey": "F-SCHEDULE", "phase": 1, "workstream": "db", "changeType": "new", "dependsOn": ["S-QC"], "title": "budget_plan_schedule table (track_id TEXT, period, planned_cents+text)", "description": "UNIQUE(track_id,period); no FK to revisioned id; currency = cents+text." },
+    { "taskKey": "F-VNOTE", "phase": 1, "workstream": "db", "changeType": "update", "dependsOn": ["S-QC"], "title": "budget_tracker_items variance note (markdown+html)", "description": "Optional authored variance note; PlateJS md+html, sanitize html." },
+    { "taskKey": "F-SEED", "phase": 1, "workstream": "api", "changeType": "new", "dependsOn": ["F-SCHEDULE", "S-EXP-LINKS"], "title": "Idempotent seed: spread estimate -> monthly plan; attribute expenses -> items", "description": "Seed plan from real estimates (source=seed_spread); attribute existing expenses by confident match, flag ambiguous. No fabricated data; chunk inserts at 20." },
+
+    { "taskKey": "GA-GRID", "phase": 2, "workstream": "api", "changeType": "new", "dependsOn": ["F-PHASES", "F-SCHEDULE", "F-SEED"], "title": "GET /api/budget/grid (exact UI shape)", "targetRoute": "/api/budget/grid", "description": "params view/from/to/phase/q; phases[] w/ progress + monthly cells; footer rollups; scorecards. Mirrors support.js math." },
+    { "taskKey": "GA-PLAN-PATCH", "phase": 2, "workstream": "api", "changeType": "new", "dependsOn": ["F-SCHEDULE"], "title": "PATCH /api/budget/plan-schedule (inline plan edit)", "targetRoute": "/api/budget/plan-schedule", "description": "{trackId, period, plannedCents, plannedText}; upsert by (track_id,period); realtime broadcast." },
+    { "taskKey": "GA-MCP", "phase": 2, "workstream": "api", "changeType": "new", "dependsOn": ["GA-GRID"], "title": "MCP get_budget_grid read tool", "description": "One file per tool; READ_ONLY; example; auto-doc card verified." },
+    { "taskKey": "GA-QC", "phase": 2, "workstream": "qc", "changeType": "new", "dependsOn": ["GA-GRID", "GA-PLAN-PATCH"], "title": "QC pr-GA vs hand-computed fixture", "description": "Estimate/Actuals/Variance + rollups match fixture on preview AND prod." },
+
+    { "taskKey": "GU-PAGE", "phase": 3, "workstream": "frontend", "changeType": "new", "dependsOn": ["GA-GRID"], "title": "/admin/budget/grid shell + BudgetGridApp island", "targetRoute": "/admin/budget/grid", "description": "studio.astro shell; rebuild RemodelBudgetGrid.dc.html w/ repo primitives. Load impeccable skill." },
+    { "taskKey": "GU-INTERACT", "phase": 3, "workstream": "frontend", "changeType": "new", "dependsOn": ["GU-PAGE", "GA-PLAN-PATCH"], "title": "Grid interactions: tabs, filters, expand, inline plan edit, Log-expense, realtime", "description": "CurrencyInput inline edit; Log-expense dialog writes line-linked expense; existing realtime feed." },
+    { "taskKey": "GU-QC", "phase": 3, "workstream": "qc", "changeType": "new", "dependsOn": ["GU-INTERACT"], "title": "Grid UI QC + browser verify + changelog", "description": "Preview browser verify (console clean, views compute); changelog + screenshot." },
+
+    { "taskKey": "RC-SCHEMA", "phase": 4, "workstream": "db", "changeType": "update", "dependsOn": ["S-QC"], "title": "estimate_line_items: room_id, budget_item_track_id, mapping_status, ai_suggested_*, confidence", "description": "HITL mapping columns; match invoice-line precedent (match_status)." },
+    { "taskKey": "RC-API", "phase": 4, "workstream": "api", "changeType": "new", "dependsOn": ["RC-SCHEMA"], "title": "Reconcile route + AI suggest (structured output, ids)", "description": "Suggest room+category as validated ids w/ confidence; confirm writes mapping; consider mounting unwired csv-ingestion.ts." },
+    { "taskKey": "RC-UI", "phase": 4, "workstream": "frontend", "changeType": "new", "dependsOn": ["RC-API"], "title": "Estimate reconciliation staging/HITL UI + MCP confirm", "targetRoute": "/admin/budget/reconciliation", "description": "Ranked candidates w/ elimination evidence; nothing enters a budget item unconfirmed (ambiguous-parent doctrine)." },
+    { "taskKey": "RC-QC", "phase": 4, "workstream": "qc", "changeType": "new", "dependsOn": ["RC-UI"], "title": "QC pr-RC + changelog", "description": "A mapping round-trips through confirm; AI returns valid ids only." },
+
+    { "taskKey": "IN-INBOX", "phase": 5, "workstream": "api", "changeType": "new", "dependsOn": ["GA-GRID", "RC-API"], "title": "GET /api/budget/inbox (derived alerts)", "targetRoute": "/api/budget/inbox", "description": "Ranked alerts (unmapped_estimate, over_range, contingency, product_over_target, low_confidence, room_drift, shareability) w/ entity+action+target." },
+    { "taskKey": "IN-ROOMS", "phase": 5, "workstream": "api", "changeType": "new", "dependsOn": ["S-EXP-LINKS"], "title": "Per-room finance rollup (committed/spent/risk/blocker)", "description": "Now that actuals link to items+rooms." },
+    { "taskKey": "IN-UI", "phase": 5, "workstream": "frontend", "changeType": "new", "dependsOn": ["IN-INBOX", "IN-ROOMS"], "title": "Decision inbox + room finances UI", "description": "Alert cards route to mutation target; room drill-in." },
+
+    { "taskKey": "SV-SCHEMA", "phase": 6, "workstream": "db", "changeType": "new", "dependsOn": ["S-QC"], "title": "budget_savings_entries (money text+cents, note md+html)", "description": "item, room_id FK, budgeted/paid/saved cents+text, note." },
+    { "taskKey": "SV-API", "phase": 6, "workstream": "api", "changeType": "new", "dependsOn": ["SV-SCHEMA"], "title": "Savings CRUD + apply reallocation as funding movement", "description": "Reuse get_reallocation_options; persist applied decision (contingency top-up / room offset)." },
+    { "taskKey": "SV-UI", "phase": 6, "workstream": "frontend", "changeType": "new", "dependsOn": ["SV-API"], "title": "Savings & reallocation UI", "description": "Savings ledger + reallocation options panel." },
+
+    { "taskKey": "SL-SERVICES", "phase": 7, "workstream": "frontend", "changeType": "new", "dependsOn": ["GA-GRID"], "title": "Services tab (item_type=professional_service, phased)", "description": "Fee type/quoted/paid/status; reuse budget items, no new table." },
+    { "taskKey": "SL-LABOR", "phase": 7, "workstream": "api", "changeType": "new", "dependsOn": ["S-EXP-LINKS", "S-PRIMARY-SVC"], "title": "Labor/trade rollup compute endpoint", "description": "committed/spent by trade+contractor from expenses+estimate lines x services." },
+    { "taskKey": "SL-TRADE", "phase": 7, "workstream": "frontend", "changeType": "new", "dependsOn": ["S-TRADE-TERMS"], "title": "Surface contractor_showroom_trade_terms + passthrough calc", "description": "Trade-discount economics + homeowner passthrough calculator." },
+
+    { "taskKey": "VZ-VIS", "phase": 8, "workstream": "frontend", "changeType": "update", "dependsOn": ["IN-ROOMS"], "title": "Bid visibility matrix (public/conditional/private) + completeness", "description": "Map bid_portfolios booleans + show_budget_ranges; completeness % + blockers. Never expose committed/spent/contingency/AI flags." },
+    { "taskKey": "VZ-SYNC", "phase": 8, "workstream": "frontend", "changeType": "new", "dependsOn": [], "title": "Read-only sync ledger panel", "description": "google_sheet_sync_events rows; conflict rows highlighted." },
+
+    { "taskKey": "WB-SHELL", "phase": 9, "workstream": "frontend", "changeType": "new", "dependsOn": ["GU-QC", "IN-UI", "RC-UI", "SV-UI", "SL-TRADE", "VZ-VIS"], "title": "/admin/budget/workbench command center", "targetRoute": "/admin/budget/workbench", "description": "Assemble tabs (Grid, Inbox, Estimates, Rooms, Materials, Savings, Visibility, Sync) matching BudgetWorkbench.dc.html." }
+  ]
+}

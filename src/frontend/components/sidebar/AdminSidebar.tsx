@@ -1,4 +1,12 @@
-import { ArrowLeft, Home, LogOut, Menu, Settings } from "lucide-react";
+import {
+  ArrowLeft,
+  Home,
+  LogOut,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { HealthStatusBadge } from "@/components/health/HealthStatusBadge";
 import { Icons } from "@/components/Icons";
@@ -11,23 +19,105 @@ import { cn } from "@/lib/utils";
 import { ADMIN_NAV_GROUPS } from "./nav-groups";
 import {
   DocsTree,
+  isGroupActive,
   type NavGroupDef,
   NavLink,
   RenderGroup,
+  type SidebarItem,
   useCurrentHash,
   useCurrentPath,
   useOpenNavGroups,
 } from "./shared";
 
+/** First reachable href in an item subtree — the rail's per-section landing. */
+function firstHref(items: SidebarItem[]): string | undefined {
+  for (const item of items) {
+    if (item.href) return item.href;
+    const nested = firstHref(item.children ?? []);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+/** Writes the collapse cookie + the `<html>` data attribute that drives the
+ * `--sidebar-w` CSS var (so the fixed aside AND the content padding reflow
+ * together, matching the SSR value BaseLayout seeded from the same cookie). */
+function persistCollapsed(collapsed: boolean) {
+  document.cookie = `remodel_sidebar_collapsed=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
+  document.documentElement.dataset.sidebarCollapsed = collapsed ? "1" : "0";
+}
+
+/** The collapsed icon rail: one button per admin section (navigates to its
+ * landing + re-expands), plus expand / home / config affordances. */
+function AdminRail({ currentPath, onExpand }: { currentPath: string; onExpand: () => void }) {
+  return (
+    <div className="flex h-full flex-col items-center gap-1 py-3">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Expand sidebar"
+        title="Expand sidebar"
+        onClick={onExpand}
+      >
+        <PanelLeftOpen className="size-4" />
+      </Button>
+      <a
+        href="/admin"
+        title="Mission Control"
+        aria-label="Mission Control"
+        className={cn(buttonVariants({ variant: currentPath === "/" ? "secondary" : "ghost", size: "icon-sm" }))}
+      >
+        <Home className="size-4" />
+      </a>
+      <Separator className="my-1 w-8" />
+      <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-contain">
+        {ADMIN_NAV_GROUPS.map((group) => {
+          const Icon = group.icon ?? Home;
+          const href = firstHref(group.items) ?? "/admin";
+          const active = isGroupActive(currentPath, group);
+          return (
+            <a
+              key={group.id}
+              href={href}
+              title={group.label}
+              aria-label={group.label}
+              onClick={onExpand}
+              className={cn(
+                buttonVariants({ variant: active ? "secondary" : "ghost", size: "icon-sm" }),
+              )}
+            >
+              <Icon className="size-4" />
+            </a>
+          );
+        })}
+      </div>
+      <Separator className="my-1 w-8" />
+      <a
+        href="/admin/config"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Configuration"
+        aria-label="Configuration"
+        className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+      >
+        <Settings className="size-4" />
+      </a>
+    </div>
+  );
+}
+
 function AdminSidebarLinks({
   currentPath,
   currentHash,
   uploadsPendingCount,
+  parkFindsPendingCount,
   onNavigate,
 }: {
   currentPath: string;
   currentHash: string;
   uploadsPendingCount: number;
+  parkFindsPendingCount: number;
   onNavigate?: () => void;
 }) {
   const { openNavGroups, toggleNavGroup } = useOpenNavGroups(ADMIN_NAV_GROUPS, currentPath);
@@ -45,17 +135,34 @@ function AdminSidebarLinks({
 
       {ADMIN_NAV_GROUPS.map((group) => {
         // Photos surfaces the pending-uploads badge on the Uploads item.
-        const resolved: NavGroupDef =
-          group.id === "photos"
-            ? {
-                ...group,
-                items: group.items.map((item) =>
-                  item.href === "/admin/prepare/uploads"
-                    ? { ...item, badgeCount: uploadsPendingCount }
-                    : item,
-                ),
-              }
-            : group;
+        let resolved: NavGroupDef = group;
+        if (group.id === "photos") {
+          resolved = {
+            ...group,
+            items: group.items.map((item) =>
+              item.href === "/admin/prepare/uploads"
+                ? { ...item, badgeCount: uploadsPendingCount }
+                : item,
+            ),
+          };
+        } else if (group.id === "shopping" && parkFindsPendingCount > 0) {
+          // Park-Finds sits under Showrooms → children — surface the TBD count there.
+          resolved = {
+            ...group,
+            items: group.items.map((item) =>
+              item.href === "/admin/shopping/showrooms" && item.children
+                ? {
+                    ...item,
+                    children: item.children.map((child) =>
+                      child.href === "/admin/shopping/showrooms/hitl"
+                        ? { ...child, badgeCount: parkFindsPendingCount }
+                        : child,
+                    ),
+                  }
+                : item,
+            ),
+          };
+        }
         return (
           <RenderGroup
             key={resolved.id}
@@ -77,24 +184,41 @@ function AdminSidebarContent({
   currentPath,
   currentHash,
   uploadsPendingCount,
+  parkFindsPendingCount,
   loggingOut,
   onLogout,
   onNavigate,
+  onCollapse,
 }: {
   currentPath: string;
   currentHash: string;
   uploadsPendingCount: number;
+  parkFindsPendingCount: number;
   loggingOut: boolean;
   onLogout: () => void;
   onNavigate?: () => void;
+  onCollapse?: () => void;
 }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 px-3 py-3">
-        <Home className="size-4 text-muted-foreground" />
+        <Home className="size-4 shrink-0 text-muted-foreground" />
         <a href="/admin" className="truncate text-sm font-semibold" onClick={onNavigate}>
           {siteConfig.name}
         </a>
+        {onCollapse ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+            onClick={onCollapse}
+            className="ml-auto shrink-0"
+          >
+            <PanelLeftClose className="size-4" />
+          </Button>
+        ) : null}
       </div>
 
       <Separator />
@@ -107,6 +231,7 @@ function AdminSidebarContent({
           currentPath={currentPath}
           currentHash={currentHash}
           uploadsPendingCount={uploadsPendingCount}
+          parkFindsPendingCount={parkFindsPendingCount}
           onNavigate={onNavigate}
         />
       </div>
@@ -165,12 +290,22 @@ function AdminSidebarContent({
   );
 }
 
-export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: string } = {}) {
+export function AdminSidebar({
+  currentPath: currentPathProp,
+  collapsed: collapsedProp = false,
+}: { currentPath?: string; collapsed?: boolean } = {}) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(collapsedProp);
   const [uploadsPendingCount, setUploadsPendingCount] = useState(0);
+  const [parkFindsPendingCount, setParkFindsPendingCount] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   const currentPath = useCurrentPath(currentPathProp);
   const currentHash = useCurrentHash();
+
+  const setCollapsedPersisted = (next: boolean) => {
+    setCollapsed(next);
+    persistCollapsed(next);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -206,6 +341,29 @@ export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: s
     };
   }, []);
 
+  // Park-Finds TBD count — the discovery review inbox badge (0032 D1b).
+  useEffect(() => {
+    let mounted = true;
+    const fetchParkFinds = async () => {
+      try {
+        const response = await fetch("/api/showroom-hitl-queue?decision=TBD", {
+          credentials: "include",
+        });
+        const payload = (await response.json()) as { pending?: number };
+        if (mounted && response.ok) setParkFindsPendingCount(payload.pending ?? 0);
+      } catch {
+        // Keep the sidebar resilient; no-op on badge fetch failures.
+      }
+    };
+    const onUpdated = () => void fetchParkFinds();
+    void fetchParkFinds();
+    window.addEventListener("park-finds-updated", onUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener("park-finds-updated", onUpdated);
+    };
+  }, []);
+
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
@@ -220,14 +378,20 @@ export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: s
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-border/40 bg-background/90 backdrop-blur md:block">
-        <AdminSidebarContent
-          currentPath={currentPath}
-          currentHash={currentHash}
-          uploadsPendingCount={uploadsPendingCount}
-          loggingOut={loggingOut}
-          onLogout={handleLogout}
-        />
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-border/40 bg-background/90 backdrop-blur transition-[width] duration-200 md:block md:[width:var(--sidebar-w)]">
+        {collapsed ? (
+          <AdminRail currentPath={currentPath} onExpand={() => setCollapsedPersisted(false)} />
+        ) : (
+          <AdminSidebarContent
+            currentPath={currentPath}
+            currentHash={currentHash}
+            uploadsPendingCount={uploadsPendingCount}
+            parkFindsPendingCount={parkFindsPendingCount}
+            loggingOut={loggingOut}
+            onLogout={handleLogout}
+            onCollapse={() => setCollapsedPersisted(true)}
+          />
+        )}
       </aside>
 
       <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border/40 bg-background/90 px-3 backdrop-blur md:hidden">
@@ -276,6 +440,7 @@ export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: s
               currentPath={currentPath}
               currentHash={currentHash}
               uploadsPendingCount={uploadsPendingCount}
+              parkFindsPendingCount={parkFindsPendingCount}
               loggingOut={loggingOut}
               onLogout={handleLogout}
               onNavigate={() => setMobileOpen(false)}

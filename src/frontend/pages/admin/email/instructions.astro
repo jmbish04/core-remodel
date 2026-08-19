@@ -1,0 +1,43 @@
+---
+/**
+ * @fileoverview Admin editor for the vendor-email context/instructions doc
+ * (`GET`/`PUT /api/email/instructions`, Task 3). Thin shell mounting
+ * `<EmailInstructionsEditor />`; see that island for the fetch/save wiring.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { EmailInstructionsEditor } from "@/components/email/EmailInstructionsEditor";
+---
+
+<BaseLayout
+  title="Email Instructions - 126 Colby - Remodel Mission Control"
+  description="Edit the shared context doc vendor-email replies are drafted against."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path>
+          <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+        </svg>
+        Email Instructions
+      </h1>
+      <p class="text-muted-foreground">
+        The shared context doc vendor-email replies are drafted against.
+      </p>
+    </div>
+
+    <EmailInstructionsEditor client:only="react" />
+  </main>
+</BaseLayout>
