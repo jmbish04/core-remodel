@@ -142,6 +142,310 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "budget-command-center": {
+    slug: "budget-command-center",
+    subtitle: "/admin/budget rebuilt as one workbench, every tab on a real API",
+    branch: "orca/budget-ux-overhaul",
+    prNumber: 412,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/412",
+    problem: `The budget lived across four unrelated admin pages, each with its own island and
+its own idea of what a number meant. The grid could not show a month-phased plan against
+actuals, there was nowhere to see which decision was costing the most money, estimate lines
+had no reviewable path to a room, and there was no compliance surface at all — so nothing
+checked that a payment was legal before it moved.
+
+Underneath, several endpoints did the expensive thing: pulling rows out of D1 and reducing,
+sorting or paginating them in JavaScript. On D1 that is not a style problem. **Row reads are
+the billed and limited unit**, and they count rows *scanned*, not rows returned — so a
+sort-in-JS over a growing table is a bill and a latency cliff waiting to arrive.`,
+    approach: `The design canvas was split per screen so each agent read only its own screen,
+and **two documents were written before any code**, because a dozen agents working in parallel
+need one standard rather than a dozen judgement calls.
+
+**\`D1-DRIZZLE-RULES.md\`** was researched against the live Cloudflare and Drizzle docs, every
+claim carrying the URL it came from. Its rules: index every WHERE / JOIN ON / ORDER BY column;
+one \`db.batch\` round trip per screen; aggregate with SUM and CASE WHEN in SQL, never in JS;
+paginate in SQL, never \`.slice()\`; chunk anything that could exceed D1's 100 bound-parameter
+cap; \`db.transaction()\` is dead on D1 — it rejects SQL BEGIN with error 7500 and drizzle's
+driver throws on the first statement, so the callback body never runs; money as integer cents.
+
+**\`API-CONTRACT.md\`** pinned every endpoint shape up front, which is what let the backend
+routes and the frontend tabs be built at the same time instead of one waiting on the other.
+Its rule zero: **no SQL in frontend code, ever** — an island calls the typed client, the client
+calls Hono, Hono runs the Drizzle query.
+
+One modelling decision was got wrong and corrected mid-build. The reallocation ledger
+originally reserved a null/null pair to mean "contingency", which made it structurally
+incapable of recording money *leaving* contingency — so it could not render the design's own
+first ledger row, "Contingency to Primary Bath". Contingency is now an ordinary funding
+account, and money flows both ways through it like any other.`,
+    apiChanges: [
+      "GET /api/budget/workbench-summary — new; the whole shell header in one db.batch of 12 SELECTs",
+      "GET /api/budget/inbox — reshaped; ranked by financial exposure in SQL, not sorted in JS",
+      "GET /api/budget/rooms-finance — reshaped; one grouped query with JOINed aggregates plus separate totals",
+      "GET /api/budget/grid — reshaped; month-phased cells, flat grouped query pivoted in the Worker",
+      "PATCH /api/budget/plan-schedule — single-cell shape added alongside the existing bulk shape",
+      "GET /api/budget/reconciliation-queue — new; unmapped estimate lines with ranked candidate rooms and reasoning",
+      "POST /api/budget/reconciliation/:lineItemId/confirm and /reject — new",
+      "GET and POST /api/budget/reallocations — new; keyset-paginated ledger",
+      "GET /api/budget/contingency — new; opening reserve, current balance, percent remaining",
+      "GET /api/budget/compliance — new; contracts joined to their payment gates, CSLB cap evaluated server-side",
+      "GET /api/budget-tracker/financial-accounts — new; accounts plus their SUM computed in SQL",
+      "PUT /api/budget-tracker/financial-accounts — fixed; one db.batch instead of a round trip per account",
+    ],
+    filesTouched: [
+      "src/backend/api/routes/budget-workbench.ts",
+      "src/backend/api/routes/budget-grid.ts",
+      "src/backend/api/routes/budget-grid-math.ts",
+      "src/backend/api/routes/budget-tracker.ts",
+      "src/backend/api/routes/budget-reconciliation.ts",
+      "src/backend/api/routes/budget-reallocations.ts",
+      "src/backend/api/routes/budget-compliance.ts",
+      "src/backend/api/index.ts",
+      "src/backend/db/schema/estimates/estimate_line_room_candidates.ts",
+      "src/backend/db/schema/home/budget_reallocation_ledger.ts",
+      "src/backend/db/schema/contracts/contract_compliance_gates.ts",
+      "src/frontend/lib/budget-api.ts",
+      "src/frontend/components/budget/BudgetWorkbench.tsx",
+      "src/frontend/components/budget/GridTab.tsx",
+      "src/frontend/components/budget/InboxTab.tsx",
+      "src/frontend/components/budget/EstimatesTab.tsx",
+      "src/frontend/components/budget/RoomsTab.tsx",
+      "src/frontend/components/budget/SavingsTab.tsx",
+      "src/frontend/components/budget/ComplianceTab.tsx",
+      "src/frontend/components/budget/LogExpenseDialog.tsx",
+      "src/frontend/pages/admin/budget/index.astro",
+      "src/frontend/pages/admin/budget/grid.astro",
+      "src/frontend/pages/admin/budget/inbox.astro",
+      "docs/plans/budget-command-center/D1-DRIZZLE-RULES.md",
+      "docs/plans/budget-command-center/API-CONTRACT.md",
+      "docs/decisions/2026-09-03-budget-command-center-schema-gaps.md",
+      "scripts/qc/pr_budget_command_center.mjs",
+      "scripts/tests/test_budget_grid_pivot.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0184_talented_wendell_vaughn",
+        sql: `CREATE TABLE estimate_line_room_candidates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+  estimate_line_item_id INTEGER NOT NULL REFERENCES estimate_line_items(id) ON DELETE CASCADE,
+  room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  rank INTEGER NOT NULL,
+  verdict TEXT NOT NULL,               -- likely | possible | eliminated
+  reasoning_markdown TEXT, reasoning_html TEXT,
+  evidence_json TEXT, confidence REAL,
+  datetime_created INTEGER DEFAULT (unixepoch()) NOT NULL
+);
+CREATE TABLE contract_compliance_gates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+  contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+  gate_type TEXT NOT NULL,             -- down_payment_cap | signed_change_order | lien_release | license_active
+  state TEXT NOT NULL,                 -- pass | fail | warn | na
+  evidence_markdown TEXT, evidence_html TEXT,
+  evaluated_at INTEGER, expires_at INTEGER, source_ref TEXT,
+  datetime_created INTEGER DEFAULT (unixepoch()) NOT NULL,
+  datetime_updated INTEGER DEFAULT (unixepoch()) NOT NULL
+);
+CREATE TABLE budget_reallocation_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+  occurred_at INTEGER NOT NULL,
+  event_title TEXT NOT NULL, event_detail TEXT,
+  from_account_id INTEGER REFERENCES budget_funding_accounts(id) ON DELETE SET NULL,
+  to_account_id   INTEGER REFERENCES budget_funding_accounts(id) ON DELETE SET NULL,
+  from_room_id    INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  to_room_id      INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  amount_cents INTEGER NOT NULL, amount_text TEXT,
+  reference_type TEXT, reference_id TEXT, created_by TEXT,
+  datetime_created INTEGER DEFAULT (unixepoch()) NOT NULL
+);
+ALTER TABLE estimate_companies ADD license_expires_at INTEGER;
+-- plus the unique and covering indexes for all three tables`,
+      },
+      {
+        tag: "0185_magical_rage",
+        sql: `CREATE INDEX idx_estimate_line_items_mapping_status_id ON estimate_line_items (mapping_status, id);
+CREATE INDEX idx_contracts_is_active ON contracts (is_active);
+CREATE INDEX idx_contracts_estimate_company_id ON contracts (estimate_company_id);
+CREATE INDEX idx_contracts_linked_estimate_id ON contracts (linked_estimate_id);
+CREATE INDEX idx_bee_active_track_date ON budget_expense_entries (is_active, budget_item_track_id, date_incurred);
+CREATE INDEX idx_bee_active_room ON budget_expense_entries (is_active, room_id);
+CREATE INDEX idx_btir_room ON budget_tracker_item_rooms (room_id);
+CREATE INDEX idx_bti_active_phase ON budget_tracker_items (is_active, phase_id);
+CREATE INDEX idx_budget_reallocation_ledger_occurred_at_id ON budget_reallocation_ledger (occurred_at, id);
+CREATE INDEX idx_budget_phases_active_sort ON budget_phases (is_active, sort_order);
+CREATE INDEX idx_budget_plan_schedule_period ON budget_plan_schedule (period);`,
+      },
+    ],
+    code: [
+      {
+        title: "The whole shell header in one D1 round trip",
+        lang: "ts",
+        code: `// 12 independent SELECTs, one batch, one round trip. Pulling the rows and
+// totalling them in JS would scan the same tables, bill the same reads, and
+// add a network hop per query on top.
+const [funding, spent, burn, committed, project, ...counts] = await db.batch([
+  fundingSumQuery, spentSumQuery, trailingBurnQuery, committedQuery,
+  projectInfoQuery, ...tabCountQueries,
+]);
+
+// Never Infinity: a project with no trailing burn has no runway to state.
+const runwayMonths = burnPerMonth > 0 ? remainingCents / burnPerMonth : null;`,
+      },
+      {
+        title: "The monthly pivot happens in the Worker, deliberately",
+        lang: "ts",
+        code: `// A conditional-SUM pivot in SQL scans EXACTLY the same rows as a flat
+// GROUP BY, so it buys zero row reads — and costs dynamic SQL that breaks
+// whenever the month range changes. Group flat, reshape here.
+const flat = await db
+  .select({
+    trackId: items.trackId,
+    yearMonth: sql\`strftime('%Y-%m', datetime(date_incurred, 'unixepoch'))\`,
+    totalCents: sql\`sum(amount_cents)\`,
+  })
+  .from(entries)
+  .groupBy(items.trackId, sql\`strftime('%Y-%m', datetime(date_incurred, 'unixepoch'))\`);
+
+return pivotBudgetGrid(flat, months); // self-checked in budget-grid-math.ts`,
+      },
+      {
+        title: "The bug that made an expense look saved",
+        lang: "ts",
+        code: `// Before: anything that was not a string returned null, so the numeric
+// dateIncurred the contract sends was dropped. The insert succeeded with
+// date_incurred unset, and the UI showed a saved expense with no date.
+//
+//   if (typeof input !== "string") return null;
+//
+// After: seconds, milliseconds, a numeric string, or a date string.
+if (typeof input === "number") {
+  if (!Number.isFinite(input) || input <= 0) return null;
+  const ms = input > 1e11 ? input : input * 1000; // magnitude, not a guess
+  const parsed = new Date(ms);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+// An all-digit string is a timestamp, not a date: new Date("0") is the year 2000.
+if (/^[0-9]+$/.test(trimmed)) return parseTimestamp(Number(trimmed));`,
+      },
+      {
+        title: "An unknown is not a pass",
+        lang: "ts",
+        code: `// Bus. & Prof. Code section 7159.5 — California's down-payment cap is the
+// LESSER of $1,000 or 10% of the contract price. Integer cents, floored, so
+// the cap only ever rounds down.
+export function capForContractCents(contractValueCents: number): number {
+  return Math.min(100_000, Math.floor(contractValueCents / 10));
+}
+
+// A contract with no recorded down payment is "na", never "pass". And all four
+// gates are always returned — an omitted gate row reads as all-clear, which is
+// the worst possible failure mode on a compliance surface.`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "One workbench, one client, one query layer",
+        title: "Where the data comes from — and where SQL is not allowed",
+        description: `The dashed boundary is the rule the whole rebuild is organised around.
+Nothing to the left of it may contain SQL or touch D1; every tab reaches its data through
+the typed client and a Hono route.`,
+        code: `flowchart LR
+  subgraph FE["Frontend - no SQL, ever"]
+    SHELL["BudgetWorkbench<br/>KPI header + 6 tabs"]
+    TABS["GridTab · InboxTab · EstimatesTab<br/>RoomsTab · SavingsTab · ComplianceTab"]
+    API["budget-api.ts<br/>typed client · AbortController per query"]
+    SHELL --> API
+    TABS --> API
+  end
+  API -.HTTP.-> HONO["Hono routes<br/>hand-written Zod v4"]
+  subgraph BE["Backend"]
+    HONO --> DRIZZLE["Drizzle<br/>SUM / CASE WHEN / JOIN in SQL"]
+    DRIZZLE --> BATCH["db.batch - one round trip per screen"]
+  end
+  BATCH --> D1[("D1")]`,
+      },
+      {
+        caption: "The three new tables and what they hang off",
+        title: "Schema added by migration 0184",
+        description: `Foreign keys only. No denormalized name columns — a display label is
+obtained by JOIN, so it cannot drift when the parent is renamed.`,
+        code: `erDiagram
+  estimate_line_items ||--o{ estimate_line_room_candidates : "ranked candidates"
+  rooms ||--o{ estimate_line_room_candidates : "candidate room"
+  contracts ||--o{ contract_compliance_gates : "payment gates"
+  budget_funding_accounts ||--o{ budget_reallocation_ledger : "from / to account"
+  rooms ||--o{ budget_reallocation_ledger : "from / to room"
+  estimate_line_room_candidates {
+    int rank
+    text verdict
+    text reasoning_markdown
+    real confidence
+  }
+  contract_compliance_gates {
+    text gate_type
+    text state
+    text evidence_markdown
+    int expires_at
+  }
+  budget_reallocation_ledger {
+    int occurred_at
+    text event_title
+    int amount_cents
+    text reference_id
+  }`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_budget_command_center.mjs",
+      command: "node scripts/qc/pr_budget_command_center.mjs --preview   # then again bare, against production",
+      ranAt: "2026-09-03",
+      output: `$ node scripts/qc/pr_budget_command_center.mjs --preview
+QC · Budget Command Center -> https://wcrp-orca-budget-ux-overhaul.hacolby.workers.dev (preview)
+  ok workbench-summary   runwayMonths finite-or-null, tabCounts complete
+  ok grid                months/phases/footer, per-cell planned/actual/isEditable
+  ok inbox               items arrive sorted by exposure descending
+  ok rooms-finance       19 rooms, committed 69725000 cents, spent 510533 cents
+  ok reconciliation-queue  limit honoured by SQL, not sliced in JS
+  ok financial-accounts  totalCents equals the sum of the rows
+  ok reallocations       limit honoured by SQL
+  ok contingency         pctRemaining finite (never NaN/Infinity)
+  ok compliance          all four gates present, {markdown, html} evidence
+  ok regression guard    7 pre-existing budget endpoints still 200
+  ok pages               workbench renders; legacy /grid and /inbox land on it
+
+82 passed, 0 failed
+
+$ node scripts/qc/pr_budget_command_center.mjs        # production
+17 passed, 0 failed
+12 endpoint(s) PENDING merge/deploy on this target
+  (6 new routes 404 here; 3 reshaped routes correctly still serve the
+   pre-merge shape; 3 pages not deployed yet)
+
+$ NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit
+186 errors repo-wide - all pre-existing. Zero in any file this PR touches.
+
+Not verified: the six tabs have not been looked at in a browser (the Chrome
+extension was not connected). The API contract is proven and the page shells
+render; visual parity against the comps still wants a human pass.`,
+      migrations: [
+        {
+          tag: "0184_talented_wendell_vaughn",
+          appliedRemote: true,
+          note: "Applied via pnpm run migrate:remote. Verified on production D1: all 3 tables present. Purely additive — 3 CREATE TABLE plus 1 ADD COLUMN, no drops and no table rebuilds, so no data was at risk.",
+        },
+        {
+          tag: "0185_magical_rage",
+          appliedRemote: true,
+          note: "Applied via pnpm run migrate:remote. Verified on production D1: all 11 indexes present.",
+        },
+      ],
+      previewWorker: {
+        name: "wcrp-orca-budget-ux-overhaul",
+        status: "deployed",
+        note: "Live at https://wcrp-orca-budget-ux-overhaul.hacolby.workers.dev for review. Torn down with `pnpm run preview:delete` in the same turn as the merge.",
+      },
+    },
+  },
   "health-probe-truth-and-spend-breaker": {
     slug: "health-probe-truth-and-spend-breaker",
     subtitle:
