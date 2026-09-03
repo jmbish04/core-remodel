@@ -27,9 +27,10 @@
  *                                 still experimental.
  *
  * Code Mode never replaces the tools: both surfaces are built from the same
- * `getAllTools()` registry in the same pass, and every call — code-mode or
- * direct — runs through `callTool()`, so the invocation ledger sees them
- * identically.
+ * `getAllTools()` registry in the same pass, every registry call runs through
+ * `callTool()`, and `code` / `describe_tools` log themselves — so
+ * `mcp_tool_invocations` answers both "which tool ran?" and "was Code Mode
+ * used, and did the script work?".
  *
  * Auth props (`this.props`) come either from the OAuth grant (set by
  * workers-oauth-provider from `completeAuthorization`) or from the API-key path
@@ -89,10 +90,10 @@ Rules:
 - Call \`describe_tools\` FIRST for any method whose arguments you are not sure of — this list gives names, not parameter types.
 - The code runs in an isolated Worker with NO outbound network access. It can reach these methods and nothing else.
 
-Example:
+Example — list tools return a paginated envelope, so read \`.items\`:
 async () => {
-  const rooms = await codemode.list_rooms({});
-  const baths = rooms.rooms.filter((r) => r.name.toLowerCase().includes("bath"));
+  const { items } = await codemode.list_rooms({});
+  const baths = items.filter((r) => r.roomName.toLowerCase().includes("bath"));
   return Promise.all(baths.map((r) => codemode.get_room({ id: r.id })));
 }
 
@@ -102,6 +103,9 @@ Available methods, by category:
 
 /** Longest one-line summary kept per tool in the catalog. */
 const CATALOG_SUMMARY_CHARS = 110;
+
+/** Longest sandbox script kept verbatim in the invocation ledger. */
+const CODE_LOG_CHARS = 4000;
 
 /**
  * First sentence of a tool description, capped — enough to pick a tool from a
@@ -173,9 +177,10 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
    * context` (the package imports the Workers-safe
    * `CfWorkerJsonSchemaValidator` but only passes it in `openApiMcpServer`).
    * Going straight to the registry skips the client, the Ajv compile and the
-   * in-memory transport entirely, and every call still flows through
-   * `callTool()` — so Code Mode invocations land in `mcp_tool_invocations` the
-   * same as a direct call.
+   * in-memory transport entirely. Every tool the sandbox reaches still runs
+   * through `callTool()`, and the outer `code` / `describe_tools` calls log
+   * themselves — so a Code Mode session is legible in `mcp_tool_invocations`
+   * both as the script that ran and as the tools it touched.
    */
   private registerCodeTool(server: McpServer): void {
     const descriptors: JsonSchemaToolDescriptors = {};
@@ -231,6 +236,7 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
         },
       },
       async ({ names }: { names: string[] }) => {
+        const startedAt = Date.now();
         const wanted: JsonSchemaToolDescriptors = {};
         const unknownNames: string[] = [];
         for (const name of names) {
@@ -245,6 +251,15 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
             `Not a method on this server: ${unknownNames.join(", ")}. Check the catalog in the \`code\` tool description.`,
           );
         }
+        // Log the names asked for and which were unknown, never the generated
+        // TypeScript — it is large, and it is derivable from the names anyway.
+        this.log({
+          toolName: "describe_tools",
+          args: { names },
+          ok: true,
+          result: { described: Object.keys(wanted), unknown: unknownNames },
+          durationMs: Date.now() - startedAt,
+        });
         return { content: [{ type: "text" as const, text: parts.join("\n\n") }] };
       },
     );
@@ -272,8 +287,19 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
         },
       },
       async ({ code }: { code: string }) => {
+        const startedAt = Date.now();
+        // The script is the whole story of a Code Mode call, so keep it — but
+        // bounded, since a model can send an arbitrarily long one.
+        const loggedArgs = { code: code.slice(0, CODE_LOG_CHARS) };
         const outcome = await executor.execute(code, [{ name: "codemode", fns }]);
         if (outcome.error) {
+          this.log({
+            toolName: "code",
+            args: loggedArgs,
+            ok: false,
+            error: outcome.error,
+            durationMs: Date.now() - startedAt,
+          });
           return {
             isError: true,
             content: [{ type: "text" as const, text: `Error: ${outcome.error}` }],
@@ -281,22 +307,33 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
         }
         const value = truncateResult(outcome.result);
         const text = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? "null");
+        this.log({
+          toolName: "code",
+          args: loggedArgs,
+          ok: true,
+          result: value,
+          durationMs: Date.now() - startedAt,
+        });
         return { content: [{ type: "text" as const, text }] };
       },
     );
   }
 
   /**
-   * Runs one registry tool and writes the invocation ledger row. Shared by both
-   * surfaces, so a Code Mode call is logged exactly like a direct one. Throws on
-   * handler failure (after logging it) — the caller decides how to surface it.
+   * Writes one row to the invocation ledger, fire-and-forget so it never blocks
+   * the reply. Every MCP tool this agent serves goes through here — the registry
+   * tools via `callTool()`, and Code Mode's own `code` / `describe_tools` — so
+   * "was Code Mode used, and did it work?" is answerable from
+   * `mcp_tool_invocations` alone, not just from the inner calls it made.
    */
-  private async callTool(
-    tool: ReturnType<typeof getAllTools>[number],
-    input: Record<string, unknown>,
-  ): Promise<unknown> {
-    const props = this.props ?? DEFAULT_PROPS;
-    const ctx: ToolCtx = { env: this.env, db: drizzle(this.env.DB), props };
+  private log(entry: {
+    toolName: string;
+    args: Record<string, unknown>;
+    ok: boolean;
+    result?: unknown;
+    error?: string;
+    durationMs: number;
+  }): void {
     // Resolve the session id defensively — getSessionId() depends on the
     // transport naming scheme and can throw before a session is bound.
     let sessionId: string;
@@ -316,37 +353,46 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
     } catch {
       transport = "streamable";
     }
+    this.ctx.waitUntil(
+      logInvocation(this.env, {
+        sessionId,
+        transport,
+        principal: principalLabel(this.props ?? DEFAULT_PROPS),
+        ...entry,
+      }),
+    );
+  }
+
+  /**
+   * Runs one registry tool and writes the invocation ledger row. Shared by both
+   * surfaces, so a Code Mode call is logged exactly like a direct one. Throws on
+   * handler failure (after logging it) — the caller decides how to surface it.
+   */
+  private async callTool(
+    tool: ReturnType<typeof getAllTools>[number],
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const props = this.props ?? DEFAULT_PROPS;
+    const ctx: ToolCtx = { env: this.env, db: drizzle(this.env.DB), props };
     const startedAt = Date.now();
     try {
       const result = await tool.handler(ctx, input);
-      // Fire-and-forget the transcript write so it never blocks the reply.
-      this.ctx.waitUntil(
-        logInvocation(this.env, {
-          sessionId,
-          transport,
-          principal: principalLabel(props),
-          toolName: tool.name,
-          args: input,
-          ok: true,
-          result,
-          durationMs: Date.now() - startedAt,
-        }),
-      );
+      this.log({
+        toolName: tool.name,
+        args: input,
+        ok: true,
+        result,
+        durationMs: Date.now() - startedAt,
+      });
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.ctx.waitUntil(
-        logInvocation(this.env, {
-          sessionId,
-          transport,
-          principal: principalLabel(props),
-          toolName: tool.name,
-          args: input,
-          ok: false,
-          error: message,
-          durationMs: Date.now() - startedAt,
-        }),
-      );
+      this.log({
+        toolName: tool.name,
+        args: input,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - startedAt,
+      });
       throw err;
     }
   }
