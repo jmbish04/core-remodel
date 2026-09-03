@@ -1,16 +1,19 @@
 /**
  * @fileoverview Health probes for the MCP module (the claude.ai connector).
  *
- * Five things can silently break the connector without any endpoint 500ing:
- * a malformed tool literal, a missing OAUTH_KV, a missing Durable Object
- * namespace, tool-call logging that stopped writing, and an unworked agent-issue
- * backlog. Each gets a probe here.
+ * Six things can silently break the connector without any endpoint 500ing:
+ * a malformed tool literal, a tool schema with no JSON Schema representation
+ * (which blanks the WHOLE tools/list for every client), a missing OAUTH_KV, a
+ * missing Durable Object namespace, tool-call logging that stopped writing, and
+ * an unworked agent-issue backlog. Each gets a probe here.
  *
  * Cost discipline: the registry check is pure in-process code, the KV check is a
  * single `get` of one key, the DO check is a binding-presence + id derivation
  * (no `fetch` — that would spin the object up and bill it), and the D1 checks are
  * bounded `COUNT(*)` aggregates over indexed columns.
  */
+import type { ZodType } from "zod";
+
 import {
   defineProbe,
   degraded,
@@ -114,6 +117,74 @@ export const HEALTH_PROBES: HealthProbe[] = [
     },
   }),
 
+  defineProbe({
+    name: "mcp_tool_schema_serializable",
+    displayName: "MCP tool schemas serialize to JSON Schema",
+    description:
+      "Converts every registry tool's inputShape and outputShape to JSON Schema with Zod's " +
+      "z.toJSONSchema() — the exact conversion the MCP SDK performs when it answers tools/list.",
+    healthTsFilepath: FILE,
+    bindingTypesTested: [],
+    whatSuccessMeans:
+      "Every registered Zod shape has a JSON Schema representation, so the MCP SDK can serialize the " +
+      "whole tool list in one pass and connected clients see the full catalog.",
+    whatFailureMeans:
+      "At least one tool declares a Zod type with no JSON Schema equivalent — z.date() is the usual " +
+      "culprit. This is NOT a per-tool fault: the SDK serializes every tool in a single pass for " +
+      "tools/list, so one bad field fails the whole response and EVERY client shows ZERO tools while " +
+      'OAuth and the handshake still look perfectly healthy. That exact failure ("Date cannot be ' +
+      "represented in JSON Schema\", JSON-RPC -32603) took the connector's entire 170+ tool surface " +
+      "down while mcp_tool_registry_integrity stayed green, because the registry itself was fine.",
+    troubleshootingSteps:
+      "1. Read the details string — it names each offending tool and which shape (input or output). " +
+      "2. Open that tool file and replace the unrepresentable type. z.date() -> z.string() carrying an " +
+      "ISO-8601 timestamp, and serialize at the boundary in the handler (`d ? d.toISOString() : null`); " +
+      "a bare z.any()/z.custom() with no JSON Schema override is the other common cause. " +
+      "3. Grep for more of the same across the whole tool tree: `grep -rn 'z\\.date()' src/backend/mcp/tools/`. " +
+      "4. Re-run this probe, then confirm end to end against the deployed worker: authenticate and POST " +
+      "a tools/list JSON-RPC call to /mcp and assert result.tools.length matches /api/mcp-docs toolCount.",
+    devOpsPlaybook:
+      "Code defect — no binding or migration fixes it. RemodelMcpAgent.init() degrades gracefully " +
+      "(it skips an unserializable tool rather than blanking the list), so the connector stays up, but " +
+      "the named tool is missing or has lost its structured output until the shape is fixed. Patch the " +
+      "tool file, merge, and deploy from main with the `Deploy (manual)` Action.",
+    isBillingRisk: false,
+    severity: "HIGH",
+    run: async () => {
+      let getAllTools: typeof import("./registry").getAllTools;
+      try {
+        ({ getAllTools } = await import("./registry"));
+      } catch (e) {
+        return failure(
+          `MCP registry failed to load: ${e instanceof Error ? e.message : String(e)}.`,
+        );
+      }
+      const { z } = await import("zod");
+      const problems: string[] = [];
+      let checked = 0;
+      for (const tool of getAllTools()) {
+        for (const [label, shape] of [
+          ["inputShape", tool.inputShape],
+          ["outputShape", tool.outputShape],
+        ] as const) {
+          if (!shape) continue;
+          checked += 1;
+          try {
+            z.toJSONSchema(z.object(shape as Record<string, ZodType>));
+          } catch (e) {
+            problems.push(`${tool.name}.${label}: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+      if (problems.length > 0) {
+        return failure(
+          `${problems.length} of ${checked} MCP tool schemas cannot be serialized to JSON Schema — ` +
+            `tools/list would fail for EVERY client. ${problems.join("; ")}`,
+        );
+      }
+      return ok(`All ${checked} MCP tool schemas serialize to JSON Schema cleanly.`);
+    },
+  }),
   defineProbe({
     name: "mcp_oauth_kv_readable",
     displayName: "MCP OAuth KV readable",
@@ -272,7 +343,9 @@ export const HEALTH_PROBES: HealthProbe[] = [
         `${recent} tool call(s) in the last 7 days across ${sessionsText}; ` +
         `${recentFailures} returned an error (${total} row(s) all-time).`;
       // A high error ratio is worth surfacing even while logging is clearly alive.
-      return recentFailures > recent / 2 ? degraded(`${details} Over half of recent calls FAILED.`) : ok(details);
+      return recentFailures > recent / 2
+        ? degraded(`${details} Over half of recent calls FAILED.`)
+        : ok(details);
     },
   }),
 

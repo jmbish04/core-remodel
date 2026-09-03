@@ -13,7 +13,7 @@ import { app as honoApp } from "./backend/api/index";
 import { withAbsoluteRegistrationUri } from "./backend/mcp/absolute-registration-uri";
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
-import { withSseHeartbeat } from "./backend/mcp/sse-heartbeat";
+import { withSseHeartbeat, type FetchHandler } from "./backend/mcp/sse-heartbeat";
 import { pruneAgentRuns, sweepAbandonedRuns } from "./backend/services/agent-run-retention.js";
 import { startRun } from "./backend/services/agent-runs";
 import { runPermitSync } from "./backend/services/dbi/permits-sync.js";
@@ -542,14 +542,100 @@ const legacyHandler: ExportedHandler<Env> = {
 /** Every MCP OAuth lifetime (access, refresh, client registration). */
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
 
+/**
+ * Pin `props.codeMode` for this request before the McpAgent sees it, so the DO
+ * knows which surface to build (see RemodelMcpAgent.init). OAuthProvider has
+ * already populated `ctx.props` from the grant by the time an apiHandler runs,
+ * so this merges rather than replaces.
+ */
+function withCodeMode(handler: FetchHandler, codeMode: boolean): FetchHandler {
+  return {
+    fetch(request, env, ctx) {
+      const withProps = ctx as ExecutionContext & { props?: Record<string, unknown> };
+      withProps.props = { ...(withProps.props ?? {}), codeMode };
+      return handler.fetch(request, env, ctx);
+    },
+  };
+}
+
+/**
+ * Every MCP transport, shared by BOTH auth paths below — the OAuthProvider
+ * (claude.ai and any other OAuth client) and the direct API-key path. Declared
+ * once so the two can never drift apart.
+ *
+ * TWO SURFACES: `/mcp` serves Code Mode (a single `code` tool carrying typed
+ * declarations for the whole registry — 170+ tool schemas would otherwise cost
+ * a fortune in context on every connection), `/mcp/direct` serves the classic
+ * one-tool-per-tool shape as the fallback while Code Mode is experimental.
+ * Both are built from the same fully-populated server.
+ *
+ * ORDER IS LOAD-BEARING. OAuthProvider matches an apiHandler with
+ * `pathname.startsWith(route)` and takes the FIRST hit in insertion order, so
+ * a bare `/mcp` listed first would swallow `/mcp/sse` and `/mcp/direct`
+ * outright. Longest paths first, always.
+ *
+ * Each is wrapped with the SSE keepalive (0032 K1) so a `: ping` frame every
+ * 15s holds the long-lived voice-session socket open. Non-SSE (normal
+ * text-chat JSON) responses pass through untouched.
+ */
+const MCP_HANDLERS: Record<string, FetchHandler> = {
+  "/mcp/direct/sse": withCodeMode(
+    withSseHeartbeat(RemodelMcpAgent.serveSSE("/mcp/direct/sse", { binding: "REMODEL_MCP" })),
+    false,
+  ),
+  "/mcp/direct": withCodeMode(
+    withSseHeartbeat(RemodelMcpAgent.serve("/mcp/direct", { binding: "REMODEL_MCP" })),
+    false,
+  ),
+  "/mcp/sse": withCodeMode(
+    withSseHeartbeat(RemodelMcpAgent.serveSSE("/mcp/sse", { binding: "REMODEL_MCP" })),
+    true,
+  ),
+  "/mcp": withCodeMode(
+    withSseHeartbeat(RemodelMcpAgent.serve("/mcp", { binding: "REMODEL_MCP" })),
+    true,
+  ),
+};
+
+/**
+ * Direct (non-OAuth) access to the MCP transports for callers that hold the
+ * shared operator key: `Authorization: Bearer <WORKER_API_KEY>`, the equivalent
+ * `x-worker-api-key` header, or an already-authenticated browser session via
+ * the `remodel_access` cookie — exactly the identities `isRequestAuthenticated`
+ * already trusts everywhere else in the app.
+ *
+ * WHY: OAuthProvider owns the whole `/mcp` prefix and rejects anything that is
+ * not one of its own minted access tokens, so a plain bearer key got a flat 401
+ * and scripts/CLIs had no way onto the full tool surface — only the 21-tool
+ * legacy `/api/mcp` shim. Checking here, ahead of the provider, adds the key
+ * path without weakening OAuth: an OAuth bearer is not the worker key, so those
+ * requests fail this check and fall through to the provider unchanged.
+ *
+ * Returns `null` when this request is not a key-authenticated MCP call, which
+ * is the caller's signal to hand it to OAuthProvider.
+ */
+async function handleApiKeyMcpRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response | null> {
+  const handler = MCP_HANDLERS[new URL(request.url).pathname];
+  if (!handler) return null;
+  if (!(await isRequestAuthenticated(request, env))) return null;
+  // McpAgent reads the caller identity off ctx.props (normally populated by
+  // OAuthProvider from the grant). Stamp the key principal so tool handlers and
+  // the mcp_tool_invocations ledger record "worker:justin", not the oauth
+  // fallback — otherwise every key-authed call is mislabelled as an OAuth grant.
+  (ctx as ExecutionContext & { props?: unknown }).props = {
+    userId: "justin",
+    scope: "remodel",
+    kind: "worker",
+  };
+  return handler.fetch(request, env, ctx);
+}
+
 const oauthProvider = new OAuthProvider({
-  apiHandlers: {
-    // Wrap both MCP transports with the SSE keepalive (0032 K1) so a `: ping`
-    // frame every 15s holds the long-lived voice-session socket open. Non-SSE
-    // (normal text-chat JSON) responses pass through untouched.
-    "/mcp": withSseHeartbeat(RemodelMcpAgent.serve("/mcp", { binding: "REMODEL_MCP" })),
-    "/mcp/sse": withSseHeartbeat(RemodelMcpAgent.serveSSE("/mcp/sse", { binding: "REMODEL_MCP" })),
-  },
+  apiHandlers: MCP_HANDLERS,
   defaultHandler: legacyHandler,
   authorizeEndpoint: "/oauth/authorize",
   tokenEndpoint: "/oauth/token",
@@ -571,7 +657,12 @@ const handler: ExportedHandler<Env> = {
   // provider's DCR response — a relative `registration_client_uri`, which is
   // what makes claude.ai report "Couldn't register with core-remodel's sign-in
   // service" even though the registration succeeded server-side.
-  fetch: withAbsoluteRegistrationUri((request, env, ctx) => oauthProvider.fetch(request, env, ctx)),
+  fetch: withAbsoluteRegistrationUri(async (request, env, ctx) => {
+    // API-key callers skip the OAuth dance entirely; everyone else (including
+    // every claude.ai connector) goes through the provider exactly as before.
+    const direct = await handleApiKeyMcpRequest(request, env, ctx);
+    return direct ?? oauthProvider.fetch(request, env, ctx);
+  }),
   scheduled: (event, env, ctx) => legacyHandler.scheduled!(event, env, ctx),
   email: (message, env, ctx) => legacyHandler.email!(message, env, ctx),
 };

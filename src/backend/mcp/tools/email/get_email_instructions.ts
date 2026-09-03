@@ -14,10 +14,16 @@ export const getEmailInstructionsTool = defineTool({
   outputShape: {
     markdown: z.string(),
     html: z.string(),
-    updatedAt: z.date().nullable(),
+    // ISO-8601 string, NOT z.date(). Zod has no JSON-Schema representation for
+    // a Date, so a `z.date()` anywhere in a registered shape makes the MCP
+    // SDK throw "Date cannot be represented in JSON Schema" while serialising
+    // `tools/list` — which zeroes the ENTIRE tool list for every client, not
+    // just this tool. Serialise Dates at the boundary instead.
+    updatedAt: z.string().nullable().describe("ISO-8601 timestamp of the last edit, or null"),
   },
   examples: [{ title: "Read the current instructions doc", args: {} }],
   handler: async ({ db }) => {
-    return getInstructions(db);
+    const { markdown, html, updatedAt } = await getInstructions(db);
+    return { markdown, html, updatedAt: updatedAt ? updatedAt.toISOString() : null };
   },
 });
