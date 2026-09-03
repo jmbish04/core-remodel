@@ -552,7 +552,7 @@ function withCodeMode(handler: FetchHandler, codeMode: boolean): FetchHandler {
   return {
     fetch(request, env, ctx) {
       const withProps = ctx as ExecutionContext & { props?: Record<string, unknown> };
-      withProps.props = { ...(withProps.props ?? {}), codeMode };
+      withProps.props = { ...withProps.props, codeMode };
       return handler.fetch(request, env, ctx);
     },
   };
