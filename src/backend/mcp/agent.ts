@@ -92,8 +92,8 @@ Rules:
 
 Example — list tools return a paginated envelope, so read \`.items\`:
 async () => {
-  const { items } = await codemode.list_rooms({});
-  const baths = items.filter((r) => r.roomName.toLowerCase().includes("bath"));
+  const { items } = await codemode.list_rooms({ limit: 200 });
+  const baths = items.filter((r) => (r.roomName ?? "").toLowerCase().includes("bath"));
   return Promise.all(baths.map((r) => codemode.get_room({ id: r.id })));
 }
 
