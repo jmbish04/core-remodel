@@ -424,6 +424,31 @@ $ node scripts/qc/pr_budget_command_center.mjs        # production
 $ NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit
 186 errors repo-wide - all pre-existing. Zero in any file this PR touches.
 
+$ npx wrangler d1 execute DB --remote --command "EXPLAIN QUERY PLAN ..."
+# Every driving query for the new endpoints, measured against production D1.
+# None falls back to SCAN TABLE.
+  rooms-finance, expenses by room
+    SEARCH budget_expense_entries USING INDEX idx_bee_active_room (is_active=?)
+  rooms-finance, item-to-room mapping
+    SEARCH budget_tracker_item_rooms USING INDEX idx_btir_room (room_id=?)
+  reconciliation queue, unmapped lines
+    SEARCH estimate_line_items USING COVERING INDEX
+      idx_estimate_line_items_mapping_status_id (mapping_status=?)
+    USE TEMP B-TREE FOR ORDER BY
+      <- the IN(...) on mapping_status stops SQLite using the index's own id
+         order, so it sorts. Fine at queue size; noted rather than glossed.
+  reallocations, newest-first keyset
+    SCAN budget_reallocation_ledger USING COVERING INDEX
+      idx_budget_reallocation_ledger_occurred_at
+      <- scanning the INDEX, not the table, which is the right plan for an
+         ORDER BY + LIMIT. This makes the sibling ..._occurred_at_id index
+         redundant in practice; harmless, left rather than spend a migration.
+  compliance, gates for a contract
+    SEARCH contract_compliance_gates USING INDEX
+      idx_contract_compliance_gates_contract_state (contract_id=?)
+  compliance, active contracts
+    SEARCH contracts USING COVERING INDEX idx_contracts_is_active (is_active=?)
+
 Not verified: the six tabs have not been looked at in a browser (the Chrome
 extension was not connected). The API contract is proven and the page shells
 render; visual parity against the comps still wants a human pass.`,
