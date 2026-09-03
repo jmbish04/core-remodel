@@ -1,22 +1,20 @@
 /**
- * @fileoverview LocationSwitcher — the hero control that scopes the whole V2
+ * @fileoverview LocationSwitcher — the hero control that scopes the whole
  * viewport to one physical site (location-centric routing).
  *
- * Renders a pill per location, each a link to `/admin/shopping/store/:storeId/v2/:locationId`
- * (the primary site links to the bare `/v2` so the default URL stays clean). The
- * active site is highlighted; the primary carries a Crown. Below `2` locations it
- * renders nothing (a single-site store needs no switcher).
- *
- * Temporary V2 component; on promotion the hrefs drop the `/v2` segment.
+ * Renders a pill per location, each a link to `/admin/shopping/store/:storeId/:locationId`
+ * (the primary site links to the bare `/admin/shopping/store/:storeId` so the
+ * default URL stays clean). The active site is starred; the primary carries a
+ * Crown. Below 2 locations it renders nothing (a single-site store needs none).
  */
 import { Crown, Star } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { StoreLocation } from "../locations/LocationsModal";
 
-/** Href for a location: primary → bare /v2, others → /v2/:id. */
+/** Href for a location: primary → bare /store/:id, others → /store/:id/:id. */
 function locationHref(storeId: number, loc: StoreLocation): string {
-  const base = `/admin/shopping/store/${storeId}/v2`;
+  const base = `/admin/shopping/store/${storeId}`;
   return loc.isPrimary ? base : `${base}/${loc.id}`;
 }
 

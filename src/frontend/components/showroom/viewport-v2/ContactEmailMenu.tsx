@@ -57,7 +57,7 @@ export function ContactEmailMenu({
 }) {
   const [copied, setCopied] = useState(false);
   // The V2 inbox page owns the composer; a ?compose= intent pre-fills To:.
-  const composeHref = `/admin/shopping/store/${storeId}/inbox-v2?compose=${encodeURIComponent(email)}`;
+  const composeHref = `/admin/shopping/store/${storeId}/inbox?compose=${encodeURIComponent(email)}`;
 
   return (
     <DropdownMenu>
