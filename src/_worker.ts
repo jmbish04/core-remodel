@@ -597,7 +597,6 @@ const MCP_HANDLERS: Record<string, FetchHandler> = {
   ),
 };
 
-/**
  * Direct (non-OAuth) access to the MCP transports for callers that hold the
  * shared operator key: `Authorization: Bearer <WORKER_API_KEY>`, the equivalent
  * `x-worker-api-key` header, or an already-authenticated browser session via
