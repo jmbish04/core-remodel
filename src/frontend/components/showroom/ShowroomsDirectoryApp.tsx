@@ -118,11 +118,18 @@ interface Store {
   locationCount?: number;
   locationCities?: string[];
   hubRoute: string | null;
+  /** Distinct region hubs across ALL of the brand's locations (backend #5). A
+      multi-region brand must appear in every region tab it has a site in, not
+      just its primary hub. Falls back to `[hubRoute]` when absent. */
+  hubRoutes?: string[] | null;
   hubName: string | null;
   /** Captured coordinates — power the individual map markers when zoomed in. */
   latitude: number | null;
   longitude: number | null;
   categories: string[];
+  /** The store's single primary category (backend #409). Falls back to
+      categories[0] (feed orders is_primary first) — the one directory group. */
+  primaryCategory?: string | null;
   /** Business-model type (joined from showroom_store_type); null = untyped. */
   typeId: number | null;
   typeName: string | null;
@@ -387,8 +394,16 @@ function CategoryTags({ categories, max = 3 }: { categories: string[]; max?: num
   const overflow = categories.length - max;
   return (
     <div className="flex flex-wrap gap-1">
-      {shown.map((c) => (
-        <Badge key={c} variant="secondary" className="px-1.5 py-0 text-[9px] font-normal">
+      {shown.map((c, i) => (
+        // categories[0] is the PRIMARY (feed orders is_primary first) — tint it
+        // so the primary category reads distinctly from the secondary badges.
+        <Badge
+          key={c}
+          variant="secondary"
+          className={`px-1.5 py-0 text-[9px] font-normal${
+            i === 0 ? " bg-primary/15 text-primary" : ""
+          }`}
+        >
           {c}
         </Badge>
       ))}
@@ -1236,8 +1251,13 @@ function groupStores(stores: Store[], groupBy: GroupBy, pst: PstNow): [string, S
 
   if (groupBy === "category") {
     for (const s of stores) {
+      // A store appears ONCE, under its PRIMARY category only. The list feed
+      // orders `categories` with the is_primary category first (backend #395/#396),
+      // so categories[0] is the primary. All categories still show as badges on
+      // the card — so Argo Tile & Stone lists once under Tile but badges Tile +
+      // Flooring. (Was: pushed into every category group → duplicate rows.)
       if (s.categories.length === 0) push("Uncategorized", s);
-      else for (const c of s.categories) push(c, s);
+      else push(s.primaryCategory ?? s.categories[0], s);
     }
     return Array.from(map.entries()).sort((a, b) => {
       if ((a[0] === "Uncategorized") !== (b[0] === "Uncategorized"))
@@ -1442,11 +1462,13 @@ function StoreDetailModal({
               )}
               {s.categories.length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {s.categories.map((c) => (
+                  {s.categories.map((c, i) => (
                     <Badge
                       key={c}
                       variant="secondary"
-                      className="px-1.5 py-0 text-[10px] font-normal"
+                      className={`px-1.5 py-0 text-[10px] font-normal${
+                        i === 0 ? " bg-primary/15 text-primary" : ""
+                      }`}
                     >
                       {c}
                     </Badge>
@@ -3132,14 +3154,24 @@ export function ShowroomsDirectoryApp({ initialTab = "grouped" }: { initialTab?:
   const regionCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of filtered) {
-      if (s.hubRoute && HUBS[s.hubRoute]) m.set(s.hubRoute, (m.get(s.hubRoute) ?? 0) + 1);
+      // Set-valued: count the brand once per region it has ANY location in, so a
+      // multi-region brand keeps every region tab alive (not just its primary).
+      const hubs = s.hubRoutes?.length ? s.hubRoutes : s.hubRoute ? [s.hubRoute] : [];
+      for (const h of hubs) {
+        if (HUBS[h]) m.set(h, (m.get(h) ?? 0) + 1);
+      }
     }
     return m;
   }, [filtered]);
 
   // Region-narrowed set fed to both the grouped experience and the map.
   const regionStores = useMemo(
-    () => (region == null ? filtered : filtered.filter((s) => s.hubRoute === region)),
+    () =>
+      region == null
+        ? filtered
+        : filtered.filter((s) =>
+            s.hubRoutes?.length ? s.hubRoutes.includes(region) : s.hubRoute === region,
+          ),
     [filtered, region],
   );
 

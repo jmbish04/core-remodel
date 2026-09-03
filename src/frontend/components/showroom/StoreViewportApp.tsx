@@ -1,4 +1,10 @@
 /**
+ * V2 (WORK IN PROGRESS) — parallel copy of StoreViewportApp for the viewport
+ * overhaul. The showroom store viewport (location-centric). Sections route in-app; a
+ * URLs stay untouched until this is approved and promoted. Do NOT delete the
+ * original; this file is temporary and will overwrite it on sign-off.
+ */
+/**
  * @fileoverview StoreViewportApp — single-showroom viewport.
  *
  * Two stacked surfaces:
@@ -24,21 +30,19 @@ import {
   CheckCircle2,
   ExternalLink,
   FileText,
-  Globe,
   ImagePlus,
+  Link2,
   Loader2,
   Mail,
   MapPin,
   NotebookPen,
   Package,
-  Printer,
   Pencil,
   Phone,
   RefreshCcw,
   ScanSearch,
   Sparkles,
   Star,
-  StickyNote,
   Tag,
   Trash2,
   Upload,
@@ -75,36 +79,44 @@ import { type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { VisitPhotosManager } from "./photos/VisitPhotosManager";
 import { StreetViewTour } from "./photos/StreetViewTour";
 import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
-import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
+import { ShowroomBentoV2 as ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBentoV2";
 import { ShowroomGmailPanel } from "@/components/gmail/ShowroomGmailPanel";
+import { ContactEmailMenu } from "./viewport-v2/ContactEmailMenu";
+import { PhotoStacksRow } from "./viewport-v2/PhotoStacksRow";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
 import { EditStoreModal, type EditableStore } from "./EditStoreModal";
-import { ContactCard, formatPhone as fmtPhone, telHref, type ContactRow } from "./contacts/ContactCard";
+import { formatPhone as fmtPhone, telHref, type ContactRow } from "./contacts/ContactCard";
 import {
   CategoryChipsEditor,
   EditAddressModal,
   EditHoursModal,
-  HeroLinkButtons,
   HoursContactModal,
   HoursMiniCard,
   ManageLinksModal,
-  SocialLinks,
-  SOCIAL_LINK_TYPES,
   TypeEditor,
   UploadPhotoModal,
   type StoreCategoryChip,
 } from "./hero";
-import { LocationsSpot } from "./locations/LocationsModal";
+import { type StoreLocation } from "./locations/LocationsModal";
+import { LocationSwitcher } from "./viewport-v2/LocationSwitcher";
 import { asLinkType } from "./intake/LinksField";
 import { absoluteHref } from "./hero/SocialLinks";
 import type { HoursJson } from "./intake/hours-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type SectionKey = "brands-products" | "contacts" | "notes" | "photos" | "visits";
+// V2 bento section keys. `visits-notes` merges the old `visits` + `notes`
+// ("Visits & Impressions"); `view-360` is split out of Photos into its own card.
+export type SectionKey = "brands-products" | "contacts" | "visits-notes" | "view-360" | "photos";
 
-const VALID_SECTIONS: SectionKey[] = ["brands-products", "contacts", "notes", "photos", "visits"];
+const VALID_SECTIONS: SectionKey[] = [
+  "brands-products",
+  "contacts",
+  "visits-notes",
+  "view-360",
+  "photos",
+];
 
 function isSectionKey(v: string | undefined | null): v is SectionKey {
   return v != null && (VALID_SECTIONS as string[]).includes(v);
@@ -560,9 +572,12 @@ function ScrapeBadge({
 
 export function StoreViewportApp({
   id,
+  locationId,
   initialSection = "brands-products",
 }: {
   id: number;
+  /** Selected location (V2 location-centric routing). Undefined → primary site. */
+  locationId?: number;
   initialSection?: SectionKey;
 }) {
   const [store, setStore] = useState<StoreDetail | null>(null);
@@ -591,6 +606,21 @@ export function StoreViewportApp({
   // Inbox unread badge (0040 P4). The button now opens the full-page inbox (0041);
   // the hidden panel below stays mounted only to keep this count fresh.
   const [inboxUnread, setInboxUnread] = useState(0);
+
+  // V2 item 10: average of the homeowner's own visit ratings (purple pill under
+  // the Google stars). item 7: documents panel is hidden until toggled + its badge.
+  const [avgVisitRating, setAvgVisitRating] = useState<number | null>(null);
+  const [docsCount, setDocsCount] = useState(0);
+  const [docsOpen, setDocsOpen] = useState(false);
+
+  // V2 location-centric: the store's physical sites + the selected one. Legacy
+  // POCs come back on the same payload — unioned into Contacts (they're the only
+  // contact source for some stores until Phase-L migrates pocs → contacts).
+  const [locations, setLocations] = useState<StoreLocation[]>([]);
+  const [storeRatingSummary, setStoreRatingSummary] = useState<{
+    count: number;
+    avg: number;
+  } | null>(null);
 
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
@@ -773,6 +803,72 @@ export function StoreViewportApp({
     loadSales,
     loadPendingQuotes,
   ]);
+
+  // V2 item 10 + 7: average of the homeowner's visit ratings, and the count of
+  // documents linked to this showroom (for the hero Documents badge). Both are
+  // read-only summaries; failures degrade silently to "none".
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/showroom-visit-logs?storeId=${id}`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as
+          | { visits?: Array<{ rating?: number | null }> }
+          | Array<{ rating?: number | null }>;
+        const list = Array.isArray(data) ? data : (data.visits ?? []);
+        const rated = list
+          .map((v) => v.rating)
+          .filter((r): r is number => typeof r === "number" && r > 0);
+        if (!cancelled) {
+          setAvgVisitRating(
+            rated.length > 0
+              ? rated.reduce((a: number, b: number) => a + b, 0) / rated.length
+              : null,
+          );
+        }
+      } catch {
+        /* leave null */
+      }
+    })();
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/supporting-documents/by-entity?entityType=showroom&entityId=${id}`,
+          { credentials: "include" },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { documents?: unknown[] } | unknown[];
+        const docs = Array.isArray(data) ? data : (data.documents ?? []);
+        if (!cancelled) setDocsCount(docs.length);
+      } catch {
+        /* leave 0 */
+      }
+    })();
+    void (async () => {
+      try {
+        const res = await fetch(`/api/showroom-stores/${id}/locations`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          locations?: StoreLocation[];
+          storeRatingSummary?: { count: number; avg: number } | null;
+        };
+        if (!cancelled) {
+          setLocations(data.locations ?? []);
+          setStoreRatingSummary(data.storeRatingSummary ?? null);
+        }
+      } catch {
+        /* leave empty — degrade to a single store-level view */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
   //
@@ -1054,6 +1150,25 @@ export function StoreViewportApp({
 
   // ── Bento sections ──────────────────────────────────────────────────────────
 
+  // V2 location-centric: the selected physical site drives the site-varying hero
+  // widgets (address / map / navigate / 360 / call / hours). Falls back to the
+  // primary, then the first, then null (single store-level view when no rows).
+  const activeLoc = useMemo(() => {
+    if (locations.length === 0) return null;
+    return (
+      (locationId != null ? locations.find((l) => l.id === locationId) : undefined) ??
+      locations.find((l) => l.isPrimary) ??
+      locations[0]
+    );
+  }, [locations, locationId]);
+
+  // location_id → city, for badging merged records (contacts today; notes/photos
+  // once their reads expose location_id).
+  const locationCityById = useMemo(
+    () => new Map(locations.map((l) => [l.id, l.city ?? "Location"])),
+    [locations],
+  );
+
   // The store's 360° walkthrough (Matterport or other), if a SHOWROOM_TOUR link
   // exists. Surfaced in the Photos section and flagged on its bento tile.
   const tourUrl = useMemo(
@@ -1080,23 +1195,27 @@ export function StoreViewportApp({
         icon: <Users className="size-5" />,
       },
       {
-        key: "notes",
-        title: "Showroom notes",
-        description: `${notes.length} note${notes.length === 1 ? "" : "s"}`,
-        icon: <StickyNote className="size-5" />,
+        // V2: Visits + Notes merged into one "Visits & Impressions" card.
+        key: "visits-notes",
+        title: "Visits & Impressions",
+        description: `${notes.length} note${notes.length === 1 ? "" : "s"} · visits, ratings & impressions`,
+        icon: <MapPin className="size-5" />,
       },
       {
-        key: "visits",
-        title: "Visits",
-        description: "Arrivals, dwell & your visit notes",
-        icon: <MapPin className="size-5" />,
+        // V2: 360 View split out of Photos — Street View + interior tour toggle.
+        key: "view-360",
+        title: "360 View",
+        description: tourUrl
+          ? "Interior 360° tour + Street View"
+          : "Google Street View walkthrough",
+        icon: <View className="size-5" />,
       },
       {
         key: "photos",
         title: "Showroom photos",
         description: `${galleryPhotos.length + photos.length} photo${
           galleryPhotos.length + photos.length === 1 ? "" : "s"
-        } · Places + your visits${tourUrl ? " · 360° tour" : ""}`,
+        } · Places + your visits`,
         icon: <ImagePlus className="size-5" />,
         preview:
           galleryPhotos.length > 0 || photos.length > 0 ? (
@@ -1143,6 +1262,19 @@ export function StoreViewportApp({
 
   // Prefer the polled status; fall back to the store row's value on first paint.
   const effectiveScrapeStatus: ScrapeStatus = scrapeStatus ?? store.scrapeStatus ?? "idle";
+
+  // Call ALWAYS dials the store's main advertised line (Google/website front
+  // desk) — never a per-location general contact. Per-rep numbers live in the
+  // Contacts section; the main line + extension is the right default here.
+  const callPhone = store.phoneNumber;
+
+  // Reviews: the selected site's rating (backend #9) when it has its own, else
+  // the store-wide roll-up, else the flat store field. Whether the number is
+  // per-site or brand-wide is surfaced in the label below.
+  const ratingSum = activeLoc?.ratingSummary ?? storeRatingSummary;
+  const effRating = ratingSum?.avg ?? store.googleRating;
+  const effRatingCount = ratingSum?.count ?? store.userRatingCount;
+  const ratingIsPerLocation = activeLoc?.ratingSummary != null;
 
   return (
     <main className="w-full px-4 py-10 md:px-8">
@@ -1197,28 +1329,61 @@ export function StoreViewportApp({
               />
             </div>
 
-            {(store.cityName || store.hubName) ? (
+            {(activeLoc?.city || store.cityName || store.hubName) ? (
               <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
                 <MapPin className="size-3.5" />
-                {[store.cityName, store.hubName].filter(Boolean).join(" · ")}
+                {[activeLoc?.city ?? store.cityName, activeLoc?.hubName ?? store.hubName]
+                  .filter(Boolean)
+                  .join(" · ")}
               </div>
             ) : null}
 
-            {/* Google rating — always shown when Places supplied one, regardless
-                of whether the homeowner has visited/rated the showroom. */}
-            {store.googleRating != null ? (
+            {/* V2 location-centric: switch the whole page between physical sites.
+                Renders nothing for a single-location store. */}
+            <LocationSwitcher
+              storeId={store.id}
+              locations={locations}
+              activeId={activeLoc?.id ?? null}
+            />
+
+            {/* Google rating — the selected site's when it has its own reviews
+                (backend #9), else the brand-wide roll-up (labelled "all
+                locations" so a shared number isn't mistaken for this site's). */}
+            {effRating != null ? (
               <div className="mt-2 flex items-center gap-1.5 text-sm">
-                <GoogleStars rating={store.googleRating} />
-                <span className="font-medium tabular-nums">
-                  {store.googleRating.toFixed(1)}
-                </span>
-                {store.userRatingCount != null ? (
+                <GoogleStars rating={effRating} />
+                <span className="font-medium tabular-nums">{effRating.toFixed(1)}</span>
+                {effRatingCount != null ? (
                   <span className="text-muted-foreground">
-                    ({store.userRatingCount} Google review
-                    {store.userRatingCount === 1 ? "" : "s"})
+                    ({effRatingCount} Google review{effRatingCount === 1 ? "" : "s"}
+                    {locations.length > 1 && !ratingIsPerLocation ? " · all locations" : ""})
                   </span>
                 ) : null}
               </div>
+            ) : null}
+
+            {/* V2 item 10: average of the homeowner's own visit ratings, purple,
+                clickable → jumps to Visits & Impressions and scrolls to it. */}
+            {avgVisitRating != null ? (
+              <button
+                type="button"
+                onClick={() => {
+                  selectSection("visits-notes");
+                  setTimeout(
+                    () =>
+                      document
+                        .getElementById("v2-visit-rating")
+                        ?.scrollIntoView({ behavior: "smooth" }),
+                    60,
+                  );
+                }}
+                className="mt-1.5 inline-flex items-center gap-1.5 text-sm text-purple-400 hover:text-purple-300"
+                title="Your average rating across recorded visits — view your impressions"
+              >
+                <VisitStars rating={Math.round(avgVisitRating)} />
+                <span className="font-medium tabular-nums">{avgVisitRating.toFixed(1)}</span>
+                <span className="text-purple-400/70">your rating</span>
+              </button>
             ) : null}
 
             {/* Dedicated category section — AI-assigned, user-correctable. */}
@@ -1241,89 +1406,73 @@ export function StoreViewportApp({
               <p className="mt-2 text-sm text-muted-foreground">{store.description}</p>
             ) : null}
 
-            {/* AI-summarized read of the Google reviews. */}
-            {store.reviewSummary ? (
-              <div className="mt-3 rounded-lg bg-muted/40 p-3">
-                <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  <Sparkles className="size-3" /> AI review summary
-                </p>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                  {store.reviewSummary}
-                </p>
-              </div>
-            ) : null}
-
-            {/* Clearance alert — only when the sweep found live discounts. */}
-            <ClearanceAlert sales={sales} />
-
-            {/* Contact row — click-to-call. */}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
-              {store.phoneNumber ? (
-                <a
-                  href={`tel:${store.phoneNumber.replace(/[^\d+]/g, "")}`}
-                  className="inline-flex items-center gap-1.5 font-medium text-sky-400 hover:text-sky-300"
+            {/* V2 item 5 + location-centric: equal-size hero buttons — Linked
+                Pages (opens the links modal), Navigate (Tesla, to the SELECTED
+                location's coords), Call. Same height/shape, flex evenly. The
+                phone text line was dropped — the Call button covers it. */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                className="h-12 min-w-40 flex-1 gap-2"
+                onClick={() => setManageLinksOpen(true)}
+              >
+                <Link2 className="size-4" /> Linked Pages
+              </Button>
+              {(activeLoc?.latitude ?? store.latitude) != null &&
+              (activeLoc?.longitude ?? store.longitude) != null ? (
+                <NavigateTeslaButton
+                  latitude={(activeLoc?.latitude ?? store.latitude) as number}
+                  longitude={(activeLoc?.longitude ?? store.longitude) as number}
+                  className="h-12 min-w-40 flex-1 gap-2"
+                />
+              ) : null}
+              {callPhone ? (
+                <Button
+                  variant="outline"
+                  className="h-12 min-w-40 flex-1 gap-2"
+                  render={
+                    <a
+                      href={`tel:${callPhone.replace(/[^\d+]/g, "")}`}
+                      aria-label="Call showroom"
+                    />
+                  }
                 >
-                  <Phone className="size-3.5" />
-                  {formatPhone(store.phoneNumber)}
-                </a>
+                  <Phone className="size-4" /> Call
+                </Button>
               ) : null}
             </div>
-
-            {/* Large tap targets for the website + every registered link type,
-                then the "Links" modal. Replaces the old text hyperlinks, which
-                were unhittable from a car touchscreen. */}
-            <HeroLinkButtons
-              links={store.links}
-              onOpenLinks={() => setManageLinksOpen(true)}
-            />
-            {store.latitude != null && store.longitude != null ? (
-              <div className="mt-2">
-                <NavigateTeslaButton
-                  latitude={store.latitude}
-                  longitude={store.longitude}
-                  className="h-12 gap-2"
-                />
-              </div>
-            ) : null}
           </div>
 
           {/* Office-hours mini-card — click for full hours + contact + map, plus
               the Call / Copy address / Navigate actions and the hours + address
               edit affordances (all now live inside that modal). */}
           <div className="shrink-0 space-y-2 sm:w-60">
+            {/* Per-location hours when the site carries them (backend #8), else
+                the store-level hours. Flips automatically when #8 ships. */}
             <HoursMiniCard
-              hoursJson={store.hoursJson}
+              hoursJson={(activeLoc?.hoursJson as HoursJson | null | undefined) ?? store.hoursJson}
               onClick={() => setHoursModalOpen(true)}
             />
           </div>
           </div>
 
-        {/* Locations spot — count + city chips, opens the locations modal (0045/0047). */}
-        <div className="mt-4">
-          <LocationsSpot
-            storeId={store.id}
-            storeName={store.name}
-            locationCount={store.locationCount ?? 0}
-            locationCities={store.locationCities ?? []}
-          />
-        </div>
-
-        {/* Visit rating + context note. */}
-        {store.rating !== null || store.ratingContextHtml ? (
-          <div className="mt-5 rounded-lg bg-muted/40 p-4">
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Visit notes
-              </span>
-              {store.rating !== null ? <VisitStars rating={store.rating} /> : null}
-            </div>
-            <NoteBody
-              className="mt-2"
-              markdown={store.ratingContextMarkdown}
-              html={store.ratingContextHtml}
-            />
+        {/* V2 item 11: AI review summary stretched to the FULL hero width. */}
+        {store.reviewSummary ? (
+          <div className="mt-5 rounded-lg bg-muted/40 p-3">
+            <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              <Sparkles className="size-3" /> AI review summary
+              {locations.length > 1 ? " · all locations" : ""}
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              {store.reviewSummary}
+            </p>
           </div>
         ) : null}
+
+        {/* Clearance alert — only when the sweep found live discounts. */}
+        <div className="mt-4">
+          <ClearanceAlert sales={sales} />
+        </div>
 
         {/* Action bar. */}
         <div className="mt-5 flex flex-wrap gap-2">
@@ -1363,12 +1512,35 @@ export function StoreViewportApp({
           >
             <Package className="size-3.5" /> Associate products
           </Button>
+          {/* V2 item 7: Documents toggle — reveals the (hidden-by-default) panel
+              at the top; badge = number of linked documents. */}
+          <Button
+            size="sm"
+            variant={docsOpen ? "default" : "outline"}
+            className="relative gap-1.5"
+            aria-pressed={docsOpen}
+            aria-label={`Documents${docsCount > 0 ? ` (${docsCount})` : ""}`}
+            onClick={() => setDocsOpen((v) => !v)}
+          >
+            <FileText className="size-3.5" /> Documents
+            {docsCount > 0 ? (
+              <span className="ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-sky-500 px-1.5 text-[11px] font-semibold text-white">
+                {docsCount}
+              </span>
+            ) : null}
+          </Button>
+          {/* V2 item 8: Inbox with unread badge → V2 full-page inbox. */}
           <Button
             size="sm"
             variant="outline"
             className="relative gap-1.5"
             aria-label={`Inbox${inboxUnread > 0 ? ` (${inboxUnread} unread)` : ""}`}
-            render={<a href={`/admin/shopping/store/${id}/inbox`} />}
+            render={
+              <a
+                href={`/admin/shopping/store/${id}/inbox`}
+                aria-label={`Inbox${inboxUnread > 0 ? ` (${inboxUnread} unread)` : ""}`}
+              />
+            }
           >
             <Mail className="size-3.5" /> Inbox
             {inboxUnread > 0 ? (
@@ -1391,6 +1563,14 @@ export function StoreViewportApp({
 
         </div>
       </section>
+
+      {/* V2 item 7: documents moved up here (below the header, above the bento),
+          hidden by default and revealed by the hero Documents button. */}
+      {docsOpen ? (
+        <div className="mt-6">
+          <EntityDocumentsPanel entityType="showroom" entityId={String(id)} />
+        </div>
+      ) : null}
 
       {/* ── URL-routed bento ──────────────────────────────────────────────────── */}
       <div className="mt-8">
@@ -1425,25 +1605,39 @@ export function StoreViewportApp({
         ) : section === "contacts" ? (
           <ContactsSection
             contacts={contacts}
-            websiteUrl={store.websiteUrl}
-            links={store.links ?? []}
+            storeId={id}
+            locationCityById={locationCityById}
           />
-        ) : section === "notes" ? (
-          <NotesSection
-            notes={notes}
-            onAddNote={openCreateNote}
-            onEditNote={openEditNote}
-            onDeleteNote={setDeleteNoteTarget}
+        ) : section === "visits-notes" ? (
+          // V2 item 1 + 10: Visits + Notes merged; the visit-rating block that
+          // used to sit in the hero now lives at the top of this section.
+          <div className="space-y-6">
+            <VisitRatingCard
+              rating={store.rating}
+              ratingContextMarkdown={store.ratingContextMarkdown}
+              ratingContextHtml={store.ratingContextHtml}
+            />
+            <StoreVisitsSection storeId={id} />
+            <NotesSection
+              notes={notes}
+              onAddNote={openCreateNote}
+              onEditNote={openEditNote}
+              onDeleteNote={setDeleteNoteTarget}
+              locationCityById={locationCityById}
+            />
+          </div>
+        ) : section === "view-360" ? (
+          <View360Section
+            tourUrl={tourUrl}
+            storeId={id}
+            placeId={activeLoc?.placeId ?? store.placeId}
+            lat={activeLoc?.latitude ?? store.latitude}
+            lng={activeLoc?.longitude ?? store.longitude}
           />
-        ) : section === "visits" ? (
-          <StoreVisitsSection storeId={id} />
         ) : (
           <PhotosSection
             storeId={id}
-            tourUrl={tourUrl}
-            placeId={store.placeId}
-            lat={store.latitude}
-            lng={store.longitude}
+            locationCityById={locationCityById}
             galleryPhotos={galleryPhotos}
             photos={photos}
             uploading={uploading}
@@ -1460,10 +1654,6 @@ export function StoreViewportApp({
         )}
       </div>
 
-      {/* Documents linked to this showroom */}
-      <div className="mt-8">
-        <EntityDocumentsPanel entityType="showroom" entityId={String(id)} />
-      </div>
 
       {/* ── Modals ────────────────────────────────────────────────────────────── */}
       <RecordVisitModal
@@ -2231,128 +2421,180 @@ function BrandsProductsSection({
  * then the store's website + any other links. Replaces the old inline
  * ManagePocsSection.
  */
+/**
+ * Contacts tab (V2 item 3 + location-centric) — one flat "Contacts" list unioned
+ * from BOTH the newer showroom_store_contacts and the legacy showroom_pocs (some
+ * stores only have pocs until Phase-L migrates them; reading one source showed 0).
+ * Dedupes by email. Each contact: tel: auto-dial, a clickable-email action menu,
+ * and an unread-email badge that opens the store inbox.
+ */
+interface Person {
+  key: string;
+  name: string;
+  typeLabel: string;
+  office: string | null;
+  ext: string | null;
+  mobile: string | null;
+  email: string | null;
+  /** City of the location this contact belongs to (merged-record badge). */
+  locationCity: string | null;
+}
+
 function ContactsSection({
   contacts,
-  websiteUrl,
-  links,
+  storeId,
+  locationCityById,
 }: {
   contacts: ContactRow[];
-  websiteUrl: string | null;
-  links: Array<{ id: number; url: string; type: string; urlNotes: string | null }>;
+  storeId: number;
+  locationCityById: Map<number, string>;
 }) {
-  const general = contacts.find((c) => c.type === "GENERAL_CONTACT") ?? null;
-  const people = contacts.filter((c) => c.type !== "GENERAL_CONTACT");
-  // Socials render as branded @handle icons via SocialLinks; the website gets
-  // its own row. Everything left (OTHER, sale pages) falls through to the
-  // generic Globe list below.
-  const extraLinks = links.filter(
-    (l) =>
-      l.url &&
-      l.url !== websiteUrl &&
-      !(SOCIAL_LINK_TYPES as readonly string[]).includes(l.type),
+  // Per-contact unread: match each contact's email against the store's
+  // domain-matched Gmail threads (by `fromRecipient`) and tally unread per addr.
+  const [unreadByEmail, setUnreadByEmail] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/gmail/showrooms/${storeId}/threads-by-domain?folder=inbox`, {
+      credentials: "include",
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((raw) => {
+        const data = raw as {
+          threads?: Array<{ fromRecipient?: string; unread?: number }>;
+        } | null;
+        if (cancelled || !data?.threads) return;
+        const m = new Map<string, number>();
+        for (const t of data.threads) {
+          if (!t.unread || !t.fromRecipient) continue;
+          const email = emailFromAddress(t.fromRecipient);
+          if (email) m.set(email, (m.get(email) ?? 0) + t.unread);
+        }
+        setUnreadByEmail(m);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [storeId]);
+
+  // Single source: showroom_store_contacts (the pocs→contacts migration ran in
+  // PR #398, so /api/showroom-contacts is authoritative; the legacy pocs rows
+  // still exist and would double every person if unioned).
+  const people = useMemo<Person[]>(
+    () =>
+      contacts.map((c) => {
+        const locId = (c as ContactRow & { locationId?: number | null }).locationId;
+        return {
+          key: `c${c.id}`,
+          name:
+            [c.firstName, c.lastName].filter(Boolean).join(" ").trim() ||
+            (c.type === "GENERAL_CONTACT" ? "Store contact" : "Contact"),
+          typeLabel: c.type.replace(/_/g, " ").toLowerCase(),
+          office: c.officePhoneNumber,
+          ext: c.officePhoneExtension,
+          mobile: c.mobilePhoneNumber,
+          email: c.emailAddress,
+          locationCity: locId != null ? (locationCityById.get(locId) ?? null) : null,
+        };
+      }),
+    [contacts, locationCityById],
   );
 
   return (
-    <div className="space-y-6">
-      {/* General store contact — prominent. */}
-      <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
-        <h2 className="text-base font-semibold">Store contact</h2>
-        {general ? (
-          <div className="mt-3 flex flex-col gap-2 text-sm">
-            {general.officePhoneNumber ? (
-              <a
-                href={`tel:${telHref(general.officePhoneNumber, general.officePhoneExtension)}`}
-                className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
-              >
-                <Phone className="size-4" />
-                <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Office
-                </span>
-                <span className="tabular-nums">
-                  {fmtPhone(general.officePhoneNumber)}
-                  {general.officePhoneExtension ? ` ext. ${general.officePhoneExtension}` : ""}
-                </span>
-              </a>
-            ) : null}
-            {general.faxPhoneNumber ? (
-              <a
-                href={`tel:${telHref(general.faxPhoneNumber)}`}
-                className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
-              >
-                <Printer className="size-4" />
-                <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Fax
-                </span>
-                <span className="tabular-nums">{fmtPhone(general.faxPhoneNumber)}</span>
-              </a>
-            ) : null}
-            {general.emailAddress ? (
-              <a
-                href={`mailto:${general.emailAddress}`}
-                className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground"
-              >
-                <Mail className="size-4" />
-                {general.emailAddress}
-              </a>
-            ) : null}
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No general store line recorded yet.
-          </p>
-        )}
+    <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+      <div className="flex items-center gap-2">
+        <Users className="size-4 text-muted-foreground" />
+        <h2 className="text-base font-semibold">Contacts ({people.length})</h2>
+      </div>
+      {people.length === 0 ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          No contacts yet. Add reps from the{" "}
+          <a href="/admin/shopping/contacts" className="text-sky-400 hover:text-sky-300">
+            Contacts phonebook
+          </a>
+          .
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {people.map((p) => (
+            <ContactCardV2
+              key={p.key}
+              person={p}
+              storeId={storeId}
+              unread={p.email ? (unreadByEmail.get(p.email.toLowerCase()) ?? 0) : 0}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-        {/* Website + social profiles + any other links. */}
-        {(websiteUrl || links.length > 0) ? (
-          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border/30 pt-3 text-[13px]">
-            {websiteUrl ? (
-              <a
-                href={websiteUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-              >
-                <Globe className="size-3.5" /> Website
-              </a>
-            ) : null}
-            <SocialLinks links={links} iconClassName="size-3.5" />
-            {extraLinks.map((l) => (
-              <a
-                key={l.id}
-                href={l.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-                title={l.urlNotes ?? undefined}
-              >
-                <Globe className="size-3.5" /> {l.urlNotes?.trim() || l.type || "Link"}
-              </a>
-            ))}
-          </div>
+/** Pull a lowercased address out of a `Name <addr>` or bare-address string. */
+function emailFromAddress(raw: string): string | null {
+  const angle = raw.match(/<([^>]+)>/);
+  const candidate = (angle ? angle[1] : raw).trim().toLowerCase();
+  return candidate.includes("@") ? candidate : null;
+}
+
+/** One contact: name + type, tel: dials, email action menu, unread badge. */
+function ContactCardV2({
+  person,
+  storeId,
+  unread,
+}: {
+  person: Person;
+  storeId: number;
+  unread: number;
+}) {
+  return (
+    <div className="rounded-lg bg-muted/40 p-4 ring-1 ring-border/40">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{person.name}</p>
+          <p className="truncate font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            {person.typeLabel}
+          </p>
+          {person.locationCity ? (
+            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <MapPin className="size-2.5" /> {person.locationCity}
+            </span>
+          ) : null}
+        </div>
+        {unread > 0 ? (
+          <a
+            href={`/admin/shopping/store/${storeId}/inbox`}
+            className="inline-flex min-w-5 items-center justify-center gap-1 rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-semibold text-white hover:bg-sky-400"
+            title={`${unread} unread email${unread === 1 ? "" : "s"} — open inbox`}
+          >
+            <Mail className="size-3" />
+            {unread}
+          </a>
         ) : null}
       </div>
-
-      {/* People. */}
-      <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
-        <div className="flex items-center gap-2">
-          <Users className="size-4 text-muted-foreground" />
-          <h2 className="text-base font-semibold">Reps &amp; people ({people.length})</h2>
-        </div>
-        {people.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No named contacts yet. Add reps from the{" "}
-            <a href="/admin/shopping/contacts" className="text-sky-400 hover:text-sky-300">
-              Contacts phonebook
-            </a>
-            .
-          </p>
-        ) : (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {people.map((c) => (
-              <ContactCard key={c.id} contact={c} showStoreLink={false} />
-            ))}
-          </div>
-        )}
+      <div className="mt-2 flex flex-col gap-1.5 text-sm">
+        {person.office ? (
+          <a
+            href={`tel:${telHref(person.office, person.ext ?? undefined)}`}
+            className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
+          >
+            <Phone className="size-4" />
+            <span className="tabular-nums">
+              {fmtPhone(person.office)}
+              {person.ext ? ` ext. ${person.ext}` : ""}
+            </span>
+          </a>
+        ) : null}
+        {person.mobile ? (
+          <a
+            href={`tel:${telHref(person.mobile)}`}
+            className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
+          >
+            <Phone className="size-4" />
+            <span className="tabular-nums">{fmtPhone(person.mobile)}</span>
+          </a>
+        ) : null}
+        {person.email ? <ContactEmailMenu email={person.email} storeId={storeId} /> : null}
       </div>
     </div>
   );
@@ -2365,11 +2607,13 @@ function NotesSection({
   onAddNote,
   onEditNote,
   onDeleteNote,
+  locationCityById,
 }: {
   notes: NoteRow[];
   onAddNote: () => void;
   onEditNote: (note: NoteRow) => void;
   onDeleteNote: (note: NoteRow) => void;
+  locationCityById: Map<number, string>;
 }) {
   return (
     <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
@@ -2386,7 +2630,10 @@ function NotesSection({
         </p>
       ) : (
         <ul className="mt-4 space-y-3">
-          {notes.map((note) => (
+          {notes.map((note) => {
+            const noteLocId = (note as NoteRow & { locationId?: number | null }).locationId;
+            const noteCity = noteLocId != null ? locationCityById.get(noteLocId) : null;
+            return (
             <li key={note.id} className="group relative">
               <button
                 type="button"
@@ -2397,11 +2644,18 @@ function NotesSection({
                   <span className="truncate text-sm font-medium">
                     {note.title?.trim() || "Untitled note"}
                   </span>
-                  {note.timestamp ? (
-                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      {new Date(note.timestamp).toLocaleDateString()}
-                    </span>
-                  ) : null}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {noteCity ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <MapPin className="size-2.5" /> {noteCity}
+                      </span>
+                    ) : null}
+                    {note.timestamp ? (
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        {new Date(note.timestamp).toLocaleDateString()}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 {note.contentMarkdown?.trim() || note.contentHtml?.trim() ? (
                   <NoteBody
@@ -2441,7 +2695,8 @@ function NotesSection({
                 <Trash2 className="size-3.5" />
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>
@@ -2546,10 +2801,7 @@ function TourCard({ url }: { url: string }) {
  */
 function PhotosSection({
   storeId,
-  tourUrl,
-  placeId,
-  lat,
-  lng,
+  locationCityById,
   galleryPhotos,
   photos,
   uploading,
@@ -2561,12 +2813,7 @@ function PhotosSection({
   onDeleteGalleryPhoto,
 }: {
   storeId: number;
-  /** Absolute URL of the store's 360° tour (SHOWROOM_TOUR link), if any. */
-  tourUrl?: string | null;
-  /** Google Place id + coords — power the free Street View fallback tour. */
-  placeId: string | null;
-  lat: number | null;
-  lng: number | null;
+  locationCityById: Map<number, string>;
   galleryPhotos: GalleryPhoto[];
   photos: ShowroomPhoto[];
   uploading: boolean;
@@ -2579,12 +2826,16 @@ function PhotosSection({
 }) {
   return (
     <div className="space-y-6">
-      {/* ── 360° walkthrough: manual link wins; else free Street View probe ── */}
-      {tourUrl ? (
-        <TourCard url={tourUrl} />
-      ) : (
-        <StreetViewTour storeId={storeId} placeId={placeId} lat={lat} lng={lng} />
-      )}
+      {/* ── Stack index: Places + user uploads/folders (V2 item 6) ── */}
+      <PhotoStacksRow
+        storeId={storeId}
+        placesImages={galleryPhotos.map((p) => p.cfImagesPhotoUrl)}
+        uploadImages={photos.map((p) => p.deliveryUrl)}
+        onOpenPlaces={() => onOpenGallery(0)}
+        onOpenUploads={() =>
+          document.getElementById("v2-visit-photos")?.scrollIntoView({ behavior: "smooth" })
+        }
+      />
 
       {/* ── Collection: Google Places stock photos ── */}
       <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
@@ -2611,19 +2862,28 @@ function PhotosSection({
         ) : (
           <>
             <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-              {galleryPhotos.map((p, i) => (
-                <div key={p.id} className="group/gthumb relative">
-                  <GalleryThumb photo={p} index={i} onOpen={onOpenGallery} />
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onDeleteGalleryPhoto(p.id); }}
-                    className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/gthumb:opacity-100"
-                    title="Delete photo"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                </div>
-              ))}
+              {galleryPhotos.map((p, i) => {
+                const locId = (p as GalleryPhoto & { locationId?: number | null }).locationId;
+                const city = locId != null ? locationCityById.get(locId) : null;
+                return (
+                  <div key={p.id} className="group/gthumb relative">
+                    <GalleryThumb photo={p} index={i} onOpen={onOpenGallery} />
+                    {city ? (
+                      <span className="pointer-events-none absolute bottom-1 left-1 z-10 inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        <MapPin className="size-2.5" /> {city}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onDeleteGalleryPhoto(p.id); }}
+                      className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/gthumb:opacity-100"
+                      title="Delete photo"
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
             <p className="mt-3 text-[11px] text-muted-foreground/60">
               Photos courtesy of the business &amp; Google Maps contributors.
@@ -2633,7 +2893,7 @@ function PhotosSection({
       </div>
 
       {/* ── Collection: homeowner visit photos ── */}
-      <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+      <div id="v2-visit-photos" className="scroll-mt-24 rounded-xl bg-card p-5 ring-1 ring-border/40">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold">Your visit photos ({photos.length})</h2>
           <div className="flex items-center gap-2">
@@ -2670,6 +2930,107 @@ function PhotosSection({
   );
 }
 
+// ─── Section: 360 View (V2 item 2) ──────────────────────────────────────────────
+
+/**
+ * 360 View — split out of Photos into its own bento card. Toggles between the
+ * store's own interior 360° tour (SHOWROOM_TOUR link) and Google Street View,
+ * defaulting to the interior tour when present. The toggle shows only when BOTH
+ * exist; otherwise whichever single one is available renders on its own.
+ */
+function View360Section({
+  tourUrl,
+  storeId,
+  placeId,
+  lat,
+  lng,
+}: {
+  tourUrl?: string | null;
+  storeId: number;
+  placeId: string | null;
+  lat: number | null;
+  lng: number | null;
+}) {
+  const hasTour = Boolean(tourUrl);
+  const hasCoords = lat != null && lng != null;
+  const [mode, setMode] = useState<"tour" | "street">(hasTour ? "tour" : "street");
+
+  if (!hasTour && !hasCoords) {
+    return (
+      <div className="rounded-xl bg-card p-5 text-sm text-muted-foreground ring-1 ring-border/40">
+        No 360° view yet — add a showroom tour link, or link this showroom to its
+        Google listing to enable Street View.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {hasTour && hasCoords ? (
+        <div className="inline-flex rounded-lg bg-muted/40 p-1 ring-1 ring-border/40">
+          <button
+            type="button"
+            onClick={() => setMode("tour")}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              mode === "tour"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Interior tour
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("street")}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              mode === "street"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Street View
+          </button>
+        </div>
+      ) : null}
+      {mode === "tour" && tourUrl ? (
+        <TourCard url={tourUrl} />
+      ) : (
+        <StreetViewTour storeId={storeId} placeId={placeId} lat={lat} lng={lng} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Visit rating + context note, moved out of the hero (V2 item 10) into the top
+ * of the Visits & Impressions section. Renders nothing when there's no rating
+ * and no context note.
+ */
+function VisitRatingCard({
+  rating,
+  ratingContextMarkdown,
+  ratingContextHtml,
+}: {
+  rating: number | null;
+  ratingContextMarkdown: string | null;
+  ratingContextHtml: string | null;
+}) {
+  if (rating == null && !ratingContextHtml && !ratingContextMarkdown) return null;
+  return (
+    <div id="v2-visit-rating" className="scroll-mt-24 rounded-xl bg-muted/40 p-4 ring-1 ring-border/40">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Your impression
+        </span>
+        {rating != null ? <VisitStars rating={rating} /> : null}
+      </div>
+      <NoteBody className="mt-2" markdown={ratingContextMarkdown} html={ratingContextHtml} />
+    </div>
+  );
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
@@ -2677,10 +3038,3 @@ function PhotosSection({
  * card). Any string that doesn't reduce to exactly 10 digits is returned
  * unchanged (still valid for a tel: link).
  */
-function formatPhone(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const digits = raw.replace(/\D/g, "");
-  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
-  if (ten.length !== 10) return raw;
-  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)} - ${ten.slice(6)}`;
-}

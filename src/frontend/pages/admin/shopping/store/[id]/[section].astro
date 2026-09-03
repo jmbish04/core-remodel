@@ -1,24 +1,56 @@
 ---
+/**
+ * /admin/shopping/store/:id/:seg — one dynamic segment, two meanings:
+ *   - numeric  → a location id (location-centric viewport scoped to that site)
+ *   - a word   → a bento section deep-link (brands-products, contacts, …)
+ *
+ * Location ids are autoincrement integers and no section key is numeric, so the
+ * two never collide. The bare /store/:id renders the primary location; the app
+ * routes sections in-app (pushState) from there.
+ */
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { StoreViewportApp } from "@/components/showroom/StoreViewportApp";
 
-const VALID_SECTIONS = ["brands-products", "contacts", "notes", "photos", "visits"] as const;
+const VALID_SECTIONS = [
+  "brands-products",
+  "contacts",
+  "visits-notes",
+  "view-360",
+  "photos",
+] as const;
 type SectionKey = (typeof VALID_SECTIONS)[number];
 
-const { id, section } = Astro.params;
+// Legacy deep-links (the note editor + notes adapter still emit these) → the
+// merged section they became.
+const SECTION_ALIAS: Record<string, SectionKey> = {
+  notes: "visits-notes",
+  visits: "visits-notes",
+};
+
+const { id, section: seg } = Astro.params;
 const storeId = id ? Number.parseInt(id, 10) : NaN;
 if (!Number.isFinite(storeId)) {
   return Astro.redirect("/admin/shopping/showrooms");
 }
 
-const initialSection: SectionKey = VALID_SECTIONS.includes(section as SectionKey)
-  ? (section as SectionKey)
-  : "brands-products";
+// Numeric segment = location id; otherwise treat it as a section deep-link.
+const locId = seg ? Number.parseInt(seg, 10) : NaN;
+const locationId = Number.isFinite(locId) ? locId : undefined;
+const segKey = seg ? (SECTION_ALIAS[seg] ?? seg) : undefined;
+const initialSection: SectionKey =
+  locationId === undefined && VALID_SECTIONS.includes(segKey as SectionKey)
+    ? (segKey as SectionKey)
+    : "brands-products";
 ---
 
 <BaseLayout
-  title={`Showroom ${storeId} — The Monolith`}
-  description="Single showroom viewport: brands, products, visit notes, and photos."
+  title="Showroom — The Monolith"
+  description="Single showroom viewport: location, hours, products carried, and research findings."
 >
-  <StoreViewportApp client:only="react" id={storeId} initialSection={initialSection} />
+  <StoreViewportApp
+    client:only="react"
+    id={storeId}
+    locationId={locationId}
+    initialSection={initialSection}
+  />
 </BaseLayout>
