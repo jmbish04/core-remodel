@@ -597,11 +597,19 @@ const MCP_HANDLERS: Record<string, FetchHandler> = {
   ),
 };
 
+/**
  * Direct (non-OAuth) access to the MCP transports for callers that hold the
- * shared operator key: `Authorization: Bearer <WORKER_API_KEY>`, the equivalent
- * `x-worker-api-key` header, or an already-authenticated browser session via
- * the `remodel_access` cookie — exactly the identities `isRequestAuthenticated`
- * already trusts everywhere else in the app.
+ * shared operator key. Three accepted forms, all resolved by
+ * `isRequestAuthenticated` and identical to what the rest of the app already
+ * trusts:
+ *
+ *   1. an `authorization` header of `Bearer` + the WORKER_API_KEY value
+ *   2. the same value in an `x-worker-api-key` header
+ *   3. an already-authenticated browser session via the `remodel_access` cookie
+ *
+ * (Written out rather than shown as a literal header line because a rendered
+ * `Bearer <KEY>` example gets redacted by secret scanners in diff views, which
+ * makes the block read as damaged.)
  *
  * WHY: OAuthProvider owns the whole `/mcp` prefix and rejects anything that is
  * not one of its own minted access tokens, so a plain bearer key got a flat 401
