@@ -560,10 +560,10 @@ export const CHANGELOG: ChangelogEntry[] = [
       },
       {
         kind: "migration",
-        text: "0184 adds estimate_line_room_candidates (ranked room candidates with reasoning), budget_reallocation_ledger, and contract_compliance_gates, plus license_expires_at on estimate_companies. 0185 adds eleven covering indexes for the new WHERE / JOIN ON / ORDER BY columns. Both are purely additive — three CREATE TABLE, one ADD COLUMN, eleven CREATE INDEX — with no drops and no table rebuilds, so no data was at risk.",
+        text: "0184 adds estimate_line_room_candidates (ranked room candidates with reasoning), budget_reallocation_ledger, and contract_compliance_gates, plus license_expires_at on estimate_companies, along with seven covering indexes (two unique) on those new tables. 0185 adds eleven more covering indexes for the WHERE / JOIN ON / ORDER BY columns the new queries hit on pre-existing tables (estimate_line_items, contracts, budget_expense_entries, budget_tracker_item_rooms, budget_tracker_items, budget_reallocation_ledger, budget_phases, budget_plan_schedule). 0186 adds two more indexes (contract_compliance_gates.state, and an is_active+date_incurred index on budget_expense_entries) that a later query needed. All three are purely additive — three CREATE TABLE, one ADD COLUMN, twenty CREATE INDEX/UNIQUE INDEX statements total — with no drops and no table rebuilds, so no data was at risk.",
       },
     ],
-    migrations: ["0184_talented_wendell_vaughn", "0185_magical_rage"],
+    migrations: ["0184_talented_wendell_vaughn", "0185_magical_rage", "0186_acoustic_rictor"],
     status: "staged",
     prNumber: 412,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/412",
@@ -628,11 +628,26 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:
       "Maps individual estimate line items to rooms with an AI-staged, human-confirmed loop — the first BudgetWorkbench phase. estimate_line_items gains room_id (FK), budget_item_track_id (TEXT no-FK), mapping_status, and ai_suggested_room_id/category + mapping_confidence (migration 0183). POST /ai-suggest calls generateStructured, feeds the model the real room id:name list, validates every returned roomId against live rooms (drops hallucinations), stages the guess and NEVER writes roomId. PATCH /reconcile is the only roomId write (validates the room exists, auto-confirms). A /admin/budget/reconcile HITL page shows the queue with the AI's ranked candidates + confidence + reasoning, a RoomSelect override, and Confirm/Reject; MCP list_reconciliation_queue + reconcile_estimate_line give chat the same confirm path. Built with the local-ai-orchestrator (claude) doing edits under per-diff review + an adversarial review pass (7/7 checks clean, 1 minor summary fix). QC 9/9 preview.",
     changes: [
-      { kind: "migration", text: "0183 (additive): estimate_line_items += room_id (FK rooms set null), budget_item_track_id (TEXT no-FK), mapping_status (default unmapped), ai_suggested_room_id/category, mapping_confidence. Applied + verified on remote." },
-      { kind: "added", text: "POST /api/estimates/line-items/:id/ai-suggest — structured-output room suggestion; validates AI roomIds against live rooms; stages ai_suggested_*, never writes roomId; no {} degrade." },
-      { kind: "added", text: "PATCH /api/estimates/line-items/:id/reconcile (the only roomId write; validates room exists; auto-confirms) + GET /api/estimates/reconcile/queue." },
-      { kind: "added", text: "/admin/budget/reconcile HITL UI — queue + AI candidates (confidence + reasoning) + RoomSelect + Confirm/Reject." },
-      { kind: "added", text: "MCP list_reconciliation_queue (READ) + reconcile_estimate_line (WRITE) — same confirm write as the UI." },
+      {
+        kind: "migration",
+        text: "0183 (additive): estimate_line_items += room_id (FK rooms set null), budget_item_track_id (TEXT no-FK), mapping_status (default unmapped), ai_suggested_room_id/category, mapping_confidence. Applied + verified on remote.",
+      },
+      {
+        kind: "added",
+        text: "POST /api/estimates/line-items/:id/ai-suggest — structured-output room suggestion; validates AI roomIds against live rooms; stages ai_suggested_*, never writes roomId; no {} degrade.",
+      },
+      {
+        kind: "added",
+        text: "PATCH /api/estimates/line-items/:id/reconcile (the only roomId write; validates room exists; auto-confirms) + GET /api/estimates/reconcile/queue.",
+      },
+      {
+        kind: "added",
+        text: "/admin/budget/reconcile HITL UI — queue + AI candidates (confidence + reasoning) + RoomSelect + Confirm/Reject.",
+      },
+      {
+        kind: "added",
+        text: "MCP list_reconciliation_queue (READ) + reconcile_estimate_line (WRITE) — same confirm write as the UI.",
+      },
     ],
     migrations: ["0183"],
     status: "staged",
@@ -647,9 +662,18 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:
       "The shipped grid launched degenerate: every line was Unphased and Total Budget was $0 with no UI to change either. This adds a compact per-line phase-select (PATCH /api/budget-tracker/items/{id} {phaseId} → refetch, line moves into its phase group) and a 'Set budget' funding editor on the Total-budget scorecard (loads /financial-status, edits label + amount per account, saves via PUT /financial-accounts). It also fixes a load-bearing correctness bug: the budget-item PATCH revision insert dropped phaseId and the variance note, so ANY edit silently wiped a line's phase — phaseId + variance md/html are now carried forward across revisions (undefined=keep, null=unassign). QC 11/11 preview; phase-assign persistence + carry-forward verified by round-trip.",
     changes: [
-      { kind: "added", text: "Per-line phase assignment on the grid: ghost phase-select → PATCH /api/budget-tracker/items/{id} {phaseId} → refetch; options from GET /api/config/budget-phases." },
-      { kind: "added", text: "Funding config: 'Set budget' dialog on the Total-budget scorecard (GET /financial-status load, PUT /financial-accounts save, add/remove rows, CurrencyInput, empty-state hint)." },
-      { kind: "fixed", text: "budget-item PATCH now carries phaseId + variance-note md/html across revisions (added phaseId to BudgetTrackerPatch) — previously any edit wiped the phase assignment." },
+      {
+        kind: "added",
+        text: "Per-line phase assignment on the grid: ghost phase-select → PATCH /api/budget-tracker/items/{id} {phaseId} → refetch; options from GET /api/config/budget-phases.",
+      },
+      {
+        kind: "added",
+        text: "Funding config: 'Set budget' dialog on the Total-budget scorecard (GET /financial-status load, PUT /financial-accounts save, add/remove rows, CurrencyInput, empty-state hint).",
+      },
+      {
+        kind: "fixed",
+        text: "budget-item PATCH now carries phaseId + variance-note md/html across revisions (added phaseId to BudgetTrackerPatch) — previously any edit wiped the phase assignment.",
+      },
     ],
     status: "staged",
   },
