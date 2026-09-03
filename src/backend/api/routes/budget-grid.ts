@@ -1,15 +1,45 @@
 /**
- * @fileoverview 0035 time-phased budget grid — read API, plan-schedule inline
- * edit, and idempotent seed.
+ * @fileoverview Budget Command Center — time-phased budget grid read API and
+ * inline plan-schedule edit, plus the pre-existing idempotent seed.
  *
- * Feeds the phase -> line-item grid the frontend rebuilds from
- * `RemodelBudgetGrid.dc.html` (monthly columns, Estimate/Actuals/Variance
- * views, scorecards, per-phase progress rings, per-line variance flags,
- * footer rollups). The heavy month-bucketing/variance math lives in the pure,
- * unit-tested `budget-grid-math.ts` sibling. `GET /grid` itself is a thin
- * wrapper over `loadBudgetGrid()` (`@backend/services/budget/grid`), which
- * does the D1 reads + shaping — extracted so the `get_budget_grid` MCP tool
- * can call the identical aggregation instead of duplicating it.
+ * `GET /grid` and `PATCH /plan-schedule` implement
+ * `docs/plans/budget-command-center/API-CONTRACT.md` §2 exactly — a frontend
+ * agent (`src/frontend/lib/budget-api.ts`, `src/frontend/components/budget/`)
+ * is already coding against that shape: `months[].key`, `phases[].rows[]`
+ * each carrying a `cells` map keyed by month, a row total + variance, a
+ * per-phase subtotal, and a `footer` of whole-project figures. All D1 access
+ * happens in this file per the task's file-ownership split; the pure
+ * pivot/aggregation math lives in the sibling `budget-grid-math.ts` so it's
+ * unit-testable without a Worker (see `pivotBudgetGrid` there, and its
+ * self-check `scripts/tests/test_budget_grid_pivot.mjs`).
+ *
+ * KNOWN GAP — vendor: the contract wants `vendorId`/`vendorLabel` from a JOIN
+ * (never a stored column), but `budget_tracker_items` (the planned line
+ * items this grid rows over) has no vendor FK at all — only
+ * `budget_expense_entries.vendorName`, a denormalized text column on the
+ * ACTUALS table, unrelated to a specific line item. Every row therefore
+ * ships `vendorId: null, vendorLabel: null` today. Fixing this needs a real
+ * `vendors` table + FK column on `budget_tracker_items`, which is schema
+ * work outside this task's two-file ownership — flagged, not silently
+ * fabricated.
+ *
+ * KNOWN INCOMPATIBILITY — GET shape vs. the already-shipped
+ * `src/frontend/components/BudgetGridApp.tsx` island: that component reads
+ * the OLD `{ grid: { months[].period, phases[].lines[].plan[]/.actual[] } }`
+ * shape (via `services/budget/grid.ts` loadBudgetGrid, still used unchanged
+ * by the `get_budget_grid` MCP tool — untouched here, out of file scope).
+ * This route now returns the NEW unwrapped `{ months, phases, footer }`
+ * shape per the contract, which `BudgetGridApp.tsx` cannot parse. The two
+ * shapes cannot coexist on one GET route; per the task brief this contract
+ * is authoritative, so `BudgetGridApp.tsx` needs to be retired/replaced by
+ * whoever owns the frontend swap to the new `components/budget/` island —
+ * not done here, frontend is out of scope for this task.
+ *
+ * PATCH, by contrast, DOES stay backward compatible (the task asked for
+ * this explicitly): it accepts both the new single-cell body
+ * `{ lineItemId, month, plannedCents }` and the old
+ * `{ trackId, period, plannedCents, plannedText }` body `BudgetGridApp.tsx`
+ * already sends — see the dual-shape parse below.
  *
  * Mounted at `/api/budget` in `src/backend/api/index.ts`, behind the same
  * `requireAccessAuth` gate as `/api/budget-tracker`.
@@ -17,49 +47,180 @@
 
 import type { BatchItem } from "drizzle-orm/batch";
 
-import { budgetExpenseEntries, budgetPlanSchedule, budgetTrackerItems } from "@backend/db";
-import { loadBudgetGrid, PERIOD_RE } from "@backend/services/budget/grid";
-import { and, eq, isNull } from "drizzle-orm";
+import {
+  budgetExpenseEntries,
+  budgetFundingAccounts,
+  budgetPhases,
+  budgetPlanSchedule,
+  budgetTrackerItems,
+} from "@backend/db";
+// Read-only dependency on the sibling grid SERVICE (out of this task's file
+// ownership — never edited): just its exported regex, so the route and the
+// still-independent `get_budget_grid` MCP tool validate 'YYYY-MM' identically.
+import { PERIOD_RE } from "@backend/services/budget/grid";
+import { and, eq, gte, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import { secondsToMonth } from "./budget-grid-math";
+import {
+  addMonths,
+  monthsBetween,
+  monthStartEpochSeconds,
+  pivotBudgetGrid,
+  secondsToMonth,
+  type FlatActualRow,
+  type FlatPlanRow,
+  type PivotLineItem,
+  type PivotPhaseDef,
+} from "./budget-grid-math";
 import { emitBudgetRealtime } from "./budget-tracker";
 
 const budgetGridRouter = new Hono<{ Bindings: Env }>();
 
-function normalizeString(input: unknown): string | null {
-  if (typeof input !== "string") return null;
-  const value = input.trim();
-  return value.length > 0 ? value : null;
-}
-
 // --- Deliverable A: GET /api/budget/grid --------------------------------
+
+const getGridQuerySchema = z.object({
+  from: z.string().regex(PERIOD_RE, "'from' must be YYYY-MM"),
+  to: z.string().regex(PERIOD_RE, "'to' must be YYYY-MM"),
+  view: z.enum(["estimate", "actuals", "variance"]),
+});
 
 budgetGridRouter.get("/grid", async (c) => {
   try {
-    const fromParam = normalizeString(c.req.query("from"));
-    const toParam = normalizeString(c.req.query("to"));
-    const phaseParam = normalizeString(c.req.query("phase"));
-    const qParam = normalizeString(c.req.query("q"));
+    const parsedQuery = getGridQuerySchema.safeParse({
+      from: c.req.query("from"),
+      to: c.req.query("to"),
+      view: c.req.query("view"),
+    });
+    if (!parsedQuery.success) {
+      return c.json({ error: "Invalid query", details: parsedQuery.error.flatten() }, 400);
+    }
+    // `view` is validated but doesn't change what's queried: every cell
+    // always carries both plannedCents and actualCents, and the three views
+    // (Estimate/Actuals/Variance) are a client-side display choice over that
+    // same data — see `BudgetGridCell` in `src/frontend/lib/budget-api.ts`.
+    const [lo, hi] =
+      parsedQuery.data.from <= parsedQuery.data.to
+        ? [parsedQuery.data.from, parsedQuery.data.to]
+        : [parsedQuery.data.to, parsedQuery.data.from];
 
-    if (fromParam && !PERIOD_RE.test(fromParam)) {
-      return c.json({ error: "Invalid 'from' — expected YYYY-MM" }, 400);
-    }
-    if (toParam && !PERIOD_RE.test(toParam)) {
-      return c.json({ error: "Invalid 'to' — expected YYYY-MM" }, 400);
-    }
+    const months = monthsBetween(lo, hi);
+    const fromEpochSeconds = monthStartEpochSeconds(lo);
+    // Half-open [start, end) on the indexed epoch-seconds column — cheaper
+    // than filtering on a computed strftime() expression, which SQLite can't
+    // use an index for.
+    const toEpochSecondsExclusive = monthStartEpochSeconds(addMonths(hi, 1));
 
     const db = drizzle(c.env.DB);
-    const grid = await loadBudgetGrid(db, {
-      from: fromParam,
-      to: toParam,
-      phase: phaseParam,
-      q: qParam,
-    });
+    const monthExpr = sql<string>`strftime('%Y-%m', ${budgetExpenseEntries.dateIncurred}, 'unixepoch')`;
 
-    return c.json({ grid });
+    // Independent SELECTs for this one screen -> one db.batch() -> one D1
+    // round trip (D1-DRIZZLE-RULES.md §2). Per §6, the monthly rollup is a
+    // flat grouped query (plan needs no GROUP BY — the unique index on
+    // (budgetItemTrackId, period) already guarantees at most one row per
+    // line+month; actual is GROUP BY trackId + strftime month, since several
+    // expense entries can land in the same line+month), pivoted to month
+    // columns by `pivotBudgetGrid` in budget-grid-math.ts.
+    const [phaseRows, itemRows, planRows, actualRows, fundingRows, spentAllTimeRows] =
+      await db.batch([
+        db
+          .select({ id: budgetPhases.id, name: budgetPhases.name, sortOrder: budgetPhases.sortOrder })
+          .from(budgetPhases)
+          .where(eq(budgetPhases.isActive, true))
+          .orderBy(budgetPhases.sortOrder),
+        db
+          .select({
+            id: budgetTrackerItems.id,
+            trackId: budgetTrackerItems.trackId,
+            title: budgetTrackerItems.title,
+            phaseId: budgetTrackerItems.phaseId,
+            note: budgetTrackerItems.varianceNoteMarkdown,
+          })
+          .from(budgetTrackerItems)
+          .where(eq(budgetTrackerItems.isActive, true)),
+        db
+          .select({
+            trackId: budgetPlanSchedule.budgetItemTrackId,
+            period: budgetPlanSchedule.period,
+            plannedCents: budgetPlanSchedule.plannedCents,
+          })
+          .from(budgetPlanSchedule)
+          .where(and(gte(budgetPlanSchedule.period, lo), lte(budgetPlanSchedule.period, hi))),
+        db
+          .select({
+            trackId: budgetExpenseEntries.budgetItemTrackId,
+            period: monthExpr,
+            actualCents: sql<number>`sum(${budgetExpenseEntries.amountCents})`,
+          })
+          .from(budgetExpenseEntries)
+          .where(
+            and(
+              eq(budgetExpenseEntries.isActive, true),
+              isNotNull(budgetExpenseEntries.budgetItemTrackId),
+              isNotNull(budgetExpenseEntries.dateIncurred),
+              gte(budgetExpenseEntries.dateIncurred, new Date(fromEpochSeconds * 1000)),
+              lt(budgetExpenseEntries.dateIncurred, new Date(toEpochSecondsExclusive * 1000)),
+            ),
+          )
+          .groupBy(budgetExpenseEntries.budgetItemTrackId, monthExpr),
+        db
+          .select({
+            totalCents: sql<number>`coalesce(sum(${budgetFundingAccounts.amountCents}), 0)`,
+          })
+          .from(budgetFundingAccounts),
+        db
+          .select({ spentCents: sql<number>`coalesce(sum(${budgetExpenseEntries.amountCents}), 0)` })
+          .from(budgetExpenseEntries)
+          .where(eq(budgetExpenseEntries.isActive, true)),
+      ]);
+
+    const pivotItems: PivotLineItem[] = itemRows.map((row) => ({
+      id: row.id,
+      trackId: row.trackId,
+      title: row.title,
+      phaseId: row.phaseId,
+      note: row.note,
+      // See the file header "KNOWN GAP — vendor": no FK exists yet.
+      vendorId: null,
+      vendorLabel: null,
+    }));
+    const pivotPhaseDefs: PivotPhaseDef[] = phaseRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      sortOrder: row.sortOrder,
+    }));
+    const flatPlanRows: FlatPlanRow[] = planRows.map((row) => ({
+      trackId: row.trackId,
+      period: row.period,
+      plannedCents: row.plannedCents,
+    }));
+    const flatActualRows: FlatActualRow[] = actualRows
+      .filter((row): row is typeof row & { trackId: string } => row.trackId !== null)
+      .map((row) => ({ trackId: row.trackId, period: row.period, actualCents: row.actualCents }));
+
+    const { months: monthsOut, phases } = pivotBudgetGrid(
+      months,
+      pivotItems,
+      pivotPhaseDefs,
+      flatPlanRows,
+      flatActualRows,
+    );
+
+    // Footer: whole-project figures, independent of the visible window (same
+    // convention the old service's `scorecards` used) — except netBurnCents,
+    // which is a rate over the visible window by definition.
+    const totalFundingCents = fundingRows[0]?.totalCents ?? 0;
+    const spentAllTimeCents = spentAllTimeRows[0]?.spentCents ?? 0;
+    const availableBudgetCents = totalFundingCents - spentAllTimeCents;
+    const spentInWindowCents = flatActualRows.reduce((sum, row) => sum + row.actualCents, 0);
+    const netBurnCents = months.length > 0 ? Math.round(spentInWindowCents / months.length) : 0;
+
+    return c.json({
+      months: monthsOut,
+      phases,
+      footer: { availableBudgetCents, netBurnCents },
+    });
   } catch (error) {
     return c.json(
       {
@@ -72,8 +233,21 @@ budgetGridRouter.get("/grid", async (c) => {
 });
 
 // --- Deliverable B: PATCH /api/budget/plan-schedule ----------------------
+//
+// Accepts two body shapes (see the file header "PATCH ... stays backward
+// compatible"):
+//   NEW  { lineItemId: number, month: string, plannedCents: number | null }
+//   OLD  { trackId: string, period: string, plannedCents: number, plannedText?: string }
+// `plannedCents: null` (new shape only) clears the cell — the column is
+// NOT NULL, so that's a delete of the row, not a write of a null.
 
-const planSchedulePatchSchema = z.object({
+const newPlanSchedulePatchSchema = z.object({
+  lineItemId: z.number().int(),
+  month: z.string().regex(PERIOD_RE, "month must be YYYY-MM"),
+  plannedCents: z.number().int().nullable(),
+});
+
+const oldPlanSchedulePatchSchema = z.object({
   trackId: z.string().min(1),
   period: z.string().regex(PERIOD_RE, "period must be YYYY-MM"),
   plannedCents: z.number().int().min(0),
@@ -82,20 +256,76 @@ const planSchedulePatchSchema = z.object({
 
 budgetGridRouter.patch("/plan-schedule", async (c) => {
   try {
-    const body = planSchedulePatchSchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!body.success) {
-      return c.json({ error: "Invalid body", details: body.error.flatten() }, 400);
-    }
-    const { trackId, period, plannedCents, plannedText } = body.data;
+    const raw: unknown = await c.req.json().catch(() => ({}));
+    const isNewShape =
+      typeof raw === "object" && raw !== null && !Array.isArray(raw) && "lineItemId" in raw;
+
     const db = drizzle(c.env.DB);
 
-    const activeItem = await db
-      .select({ trackId: budgetTrackerItems.trackId })
-      .from(budgetTrackerItems)
-      .where(and(eq(budgetTrackerItems.trackId, trackId), eq(budgetTrackerItems.isActive, true)))
-      .get();
-    if (!activeItem) {
-      return c.json({ error: "No active budget item for that trackId" }, 404);
+    let trackId: string;
+    let period: string;
+    let plannedCents: number | null;
+    let plannedText: string | null = null;
+
+    if (isNewShape) {
+      const body = newPlanSchedulePatchSchema.safeParse(raw);
+      if (!body.success) {
+        return c.json({ error: "Invalid body", details: body.error.flatten() }, 400);
+      }
+      const activeItem = await db
+        .select({ trackId: budgetTrackerItems.trackId })
+        .from(budgetTrackerItems)
+        .where(
+          and(
+            eq(budgetTrackerItems.id, body.data.lineItemId),
+            eq(budgetTrackerItems.isActive, true),
+          ),
+        )
+        .get();
+      if (!activeItem) {
+        return c.json({ error: "No active budget item for that lineItemId" }, 404);
+      }
+      trackId = activeItem.trackId;
+      period = body.data.month;
+      plannedCents = body.data.plannedCents;
+    } else {
+      const body = oldPlanSchedulePatchSchema.safeParse(raw);
+      if (!body.success) {
+        return c.json({ error: "Invalid body", details: body.error.flatten() }, 400);
+      }
+      const activeItem = await db
+        .select({ trackId: budgetTrackerItems.trackId })
+        .from(budgetTrackerItems)
+        .where(
+          and(
+            eq(budgetTrackerItems.trackId, body.data.trackId),
+            eq(budgetTrackerItems.isActive, true),
+          ),
+        )
+        .get();
+      if (!activeItem) {
+        return c.json({ error: "No active budget item for that trackId" }, 404);
+      }
+      trackId = body.data.trackId;
+      period = body.data.period;
+      plannedCents = body.data.plannedCents;
+      plannedText = body.data.plannedText ?? null;
+    }
+
+    if (plannedCents === null) {
+      await db
+        .delete(budgetPlanSchedule)
+        .where(
+          and(eq(budgetPlanSchedule.budgetItemTrackId, trackId), eq(budgetPlanSchedule.period, period)),
+        )
+        .run();
+      await emitBudgetRealtime(c.env, {
+        event: "budget.plan_schedule.updated",
+        trackId,
+        period,
+        plannedCents: null,
+      });
+      return c.json({ success: true, row: null });
     }
 
     const now = new Date();
@@ -105,7 +335,7 @@ budgetGridRouter.patch("/plan-schedule", async (c) => {
         budgetItemTrackId: trackId,
         period,
         plannedCents,
-        plannedText: plannedText ?? null,
+        plannedText,
         source: "manual",
         datetimeCreated: now,
         datetimeUpdated: now,
@@ -114,7 +344,7 @@ budgetGridRouter.patch("/plan-schedule", async (c) => {
         target: [budgetPlanSchedule.budgetItemTrackId, budgetPlanSchedule.period],
         set: {
           plannedCents,
-          plannedText: plannedText ?? null,
+          plannedText,
           source: "manual",
           datetimeUpdated: now,
         },
@@ -246,10 +476,7 @@ budgetGridRouter.post("/grid/seed", async (c) => {
       })
       .from(budgetExpenseEntries)
       .where(
-        and(
-          eq(budgetExpenseEntries.isActive, true),
-          isNull(budgetExpenseEntries.budgetItemTrackId),
-        ),
+        and(eq(budgetExpenseEntries.isActive, true), isNull(budgetExpenseEntries.budgetItemTrackId)),
       )
       .all();
 

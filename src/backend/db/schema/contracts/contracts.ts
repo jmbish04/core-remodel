@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { estimateCompanies, estimates } from "../estimates/estimates";
 import { remodelScenarios } from "../home/remodel_scenarios";
@@ -18,27 +18,37 @@ export const contractStatuses = sqliteTable("contract_statuses", {
     .default(sql`(unixepoch())`),
 });
 
-export const contracts = sqliteTable("contracts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  scenarioId: text("scenario_id").references(() => remodelScenarios.id, {
-    onDelete: "set null",
+export const contracts = sqliteTable(
+  "contracts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    scenarioId: text("scenario_id").references(() => remodelScenarios.id, {
+      onDelete: "set null",
+    }),
+    estimateCompanyId: integer("estimate_company_id").references(() => estimateCompanies.id, {
+      onDelete: "set null",
+    }),
+    linkedEstimateId: integer("linked_estimate_id").references(() => estimates.id, {
+      onDelete: "set null",
+    }),
+    currentRevisionId: integer("current_revision_id"),
+    contractRequired: integer("contract_required", { mode: "boolean" }).notNull().default(true),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    datetimeCreated: integer("datetime_created", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // Backs GET /api/budget/compliance (src/backend/api/routes/budget-compliance.ts):
+    // WHERE isActive=true, JOIN ... ON estimateCompanyId / linkedEstimateId.
+    isActiveIdx: index("idx_contracts_is_active").on(t.isActive),
+    estimateCompanyIdx: index("idx_contracts_estimate_company_id").on(t.estimateCompanyId),
+    linkedEstimateIdx: index("idx_contracts_linked_estimate_id").on(t.linkedEstimateId),
   }),
-  estimateCompanyId: integer("estimate_company_id").references(() => estimateCompanies.id, {
-    onDelete: "set null",
-  }),
-  linkedEstimateId: integer("linked_estimate_id").references(() => estimates.id, {
-    onDelete: "set null",
-  }),
-  currentRevisionId: integer("current_revision_id"),
-  contractRequired: integer("contract_required", { mode: "boolean" }).notNull().default(true),
-  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
-  datetimeCreated: integer("datetime_created", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+);
 
 export const contractRevisions = sqliteTable("contract_revisions", {
   id: integer("id").primaryKey({ autoIncrement: true }),

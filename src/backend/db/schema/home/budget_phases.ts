@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /**
  * Budget execution phases (0035 grid). The vocabulary the time-phased budget
@@ -17,7 +17,9 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
  * option) answers *whether/when* a line is in scope; a phase answers *which
  * stage of the build* it belongs to. Different axes.
  */
-export const budgetPhases = sqliteTable("budget_phases", {
+export const budgetPhases = sqliteTable(
+  "budget_phases",
+  {
   id: integer("id").primaryKey({ autoIncrement: true }),
 
   /** Stable slug, e.g. "pre_construction". What seeds and code match on. */
@@ -54,7 +56,13 @@ export const budgetPhases = sqliteTable("budget_phases", {
   datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
-});
+  },
+  (t) => ({
+    // Budget Command Center grid (GET /api/budget/grid): WHERE isActive = true
+    // ORDER BY sortOrder.
+    activeSortIdx: index("idx_budget_phases_active_sort").on(t.isActive, t.sortOrder),
+  }),
+);
 
 export type BudgetPhase = typeof budgetPhases.$inferSelect;
 export type BudgetPhaseInsert = typeof budgetPhases.$inferInsert;

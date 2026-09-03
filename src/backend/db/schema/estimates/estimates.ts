@@ -28,6 +28,7 @@ export const estimateCompanies = sqliteTable("estimate_companies", {
   phone: text("phone"),
   address: text("address"),
   cslbLicenseNumber: text("cslb_license_number"),
+  licenseExpiresAt: integer("license_expires_at", { mode: "timestamp" }),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
@@ -178,6 +179,12 @@ export const estimateLineItems = sqliteTable(
   },
   (t) => ({
     byServiceId: index("idx_estimate_line_items_service_id").on(t.serviceId),
+    // Drives GET /api/budget/reconciliation-queue (budget-reconciliation.ts):
+    // WHERE mapping_status IN (...) ORDER BY id (keyset pagination cursor).
+    byMappingStatusId: index("idx_estimate_line_items_mapping_status_id").on(
+      t.mappingStatus,
+      t.id,
+    ),
   }),
 );
 
