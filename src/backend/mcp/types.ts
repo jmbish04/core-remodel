@@ -55,6 +55,14 @@ export interface McpProps extends Record<string, unknown> {
   userId: string;
   scope: string;
   kind: "oauth" | "worker" | "cookie" | "research";
+  /**
+   * Serve this session as Code Mode (one `code` tool) instead of advertising
+   * every registry tool. Set per-path in `src/_worker.ts` — `/mcp` true,
+   * `/mcp/direct` false — and read once in `RemodelMcpAgent.init()`. Lives on
+   * props rather than a constructor arg because `McpAgent` persists props to DO
+   * storage, so the choice survives hibernation for the life of the session.
+   */
+  codeMode?: boolean;
 }
 
 /** Everything a tool handler needs: bindings, a db client, and the caller. */

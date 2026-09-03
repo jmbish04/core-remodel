@@ -142,6 +142,328 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "mcp-tool-list-auth-and-code-mode": {
+    slug: "mcp-tool-list-auth-and-code-mode",
+    subtitle: "The MCP connector — /mcp, /mcp/direct, and the OAuth + API-key doors",
+    branch: "claude/mcp-tools-auth-availability-2efca8",
+    prNumber: 413,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/413",
+
+    introduction: `The connector logged in fine and offered **nothing to do**. Claude could
+complete the OAuth flow, the handshake succeeded, \`/api/mcp-docs\` cheerfully
+reported 173 tools — and the tool list came back empty in every client.
+
+This is the account of what actually broke, why the existing health probe could
+not have caught it, and the two things fixed alongside it: signing in with the
+shared API key instead of OAuth, and cutting what the connector costs in context
+before it does any work.`,
+
+    problem: `**One field took down 173 tools.**
+
+\`get_email_instructions\` declared its response like this:
+
+    outputShape: {
+      markdown: z.string(),
+      html: z.string(),
+      updatedAt: z.date().nullable(),   // <-- this
+    }
+
+Zod has no JSON Schema representation for a \`Date\`. That would be a small
+problem if the MCP SDK serialised tools one at a time. It does not — it
+serialises **every** registered tool's schema in a single pass to answer
+\`tools/list\`. So the failure is not scoped to the offending tool:
+
+    tools/list  ->  -32603 "Date cannot be represented in JSON Schema"
+
+Not 172 of 173. **Zero**, for every connected client, permanently. And every
+signal a person would check looked healthy — the OAuth flow issued tokens, the
+handshake returned server capabilities, the public catalog endpoint listed all
+173 tools, and \`mcp_tool_registry_integrity\` was green. It was *right* to be
+green: the registry was valid. Nothing in the system was looking at whether those
+valid Zod shapes could survive the trip to JSON Schema.
+
+**Two adjacent gaps, found while in here.**
+
+\`OAuthProvider\` owns the entire \`/mcp\` prefix and rejects any bearer that is
+not one of its own minted tokens. A script holding the shared \`WORKER_API_KEY\`
+got a flat \`401 invalid_token\` and had no way onto the full tool surface — only
+the 21-tool legacy \`/api/mcp\` shim.
+
+And the registry has grown to 173 tools. Advertising all of their JSON schemas
+costs an enormous amount of context on every single connection, before the model
+has done anything at all.`,
+
+    approach: `**1. Fix the date, then remove the cliff.**
+
+The timestamp is now an ISO-8601 string, serialised in the handler
+(\`updatedAt ? updatedAt.toISOString() : null\`). But fixing the one field leaves
+the shape of the failure intact, so \`RemodelMcpAgent\` now probes each shape with
+\`z.toJSONSchema\` **before** registering it. A bad \`inputShape\` costs that one
+tool; a bad \`outputShape\` costs only its structured output. One field can never
+blank the list again.
+
+**2. Make it visible.** A new \`mcp_tool_schema_serializable\` health probe runs
+the same conversion over the whole registry and fails loudly at
+\`/admin/system/health\`, with the offending tool and shape named in the details.
+
+**3. API-key auth, ahead of OAuth.** \`handleApiKeyMcpRequest\` runs before
+\`oauthProvider.fetch\` and accepts exactly the identities the rest of the app
+already trusts. OAuth is untouched: an OAuth bearer is not the worker key, so
+those requests fail the check and fall through unchanged.
+
+**4. Code Mode on \`/mcp\`, raw tools on \`/mcp/direct\`.** \`/mcp\` now serves a
+\`code\` tool that runs model-written JavaScript against \`codemode.<tool>\` inside
+an isolated Worker with no outbound network, returning only the final value — so
+a chain of dependent calls costs one round trip. The full 173-tool surface stays
+at \`/mcp/direct\` as the fallback while Code Mode is experimental. Both are built
+from the same registry pass and both route every call through the same
+\`callTool()\`, so the invocation ledger cannot tell them apart.
+
+**Two things that did not work, and why.**
+
+\`codeMcpServer()\` from \`@cloudflare/codemode\` is the documented way to do this,
+and it cannot run on Workers as shipped. It builds its internal MCP \`Client\`
+without a \`jsonSchemaValidator\`, so the SDK falls back to \`AjvJsonSchemaValidator\`,
+which compiles validators with \`new Function\`:
+
+    Code generation from strings disallowed for this context
+
+(The package imports the Workers-safe \`CfWorkerJsonSchemaValidator\` but only
+passes it in \`openApiMcpServer\`.) Building the \`code\` tool straight from the
+registry skips the client, the Ajv compile and the in-memory transport entirely.
+
+Then the first working version inlined generated TypeScript for all 173 tools and
+produced a **197,747-byte** tool description — about 49k tokens spent on every
+connection, which is most of the problem Code Mode exists to solve. Most of that
+weight was the tools' own prose. Replacing it with a one-line-per-tool catalog
+plus a \`describe_tools\` lookup for the handful actually needed brought it to
+**20,000 bytes (~5k tokens)**.`,
+
+    apiChanges: [
+      "POST /mcp — now also accepts `Authorization: Bearer <WORKER_API_KEY>`, `x-worker-api-key`, or the `remodel_access` cookie, in addition to an OAuth grant.",
+      "POST /mcp — serves Code Mode: tools `code` (run JavaScript against `codemode.<tool>`) and `describe_tools` (exact TypeScript types for named methods).",
+      "GET/POST /mcp/sse — Code Mode over the SSE transport. Previously shadowed by the bare `/mcp` apiHandler entry.",
+      "POST /mcp/direct — NEW. The classic surface: all 173 registry tools advertised individually. Same two auth paths.",
+      "GET/POST /mcp/direct/sse — NEW. SSE transport for the raw surface.",
+      "No change to /api/mcp (the 21-tool legacy bearer shim) or /api/mcp-docs.",
+    ],
+    filesTouched: [
+      "src/backend/mcp/agent.ts",
+      "src/backend/mcp/types.ts",
+      "src/backend/mcp/health.ts",
+      "src/backend/mcp/tools/email/get_email_instructions.ts",
+      "src/_worker.ts",
+      "scripts/qc/pr_413.mjs",
+      "scripts/qc/_mcp_surface.mjs",
+      "package.json",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "The bug: one field, the whole catalog",
+        lang: "ts",
+        code: `// src/backend/mcp/tools/email/get_email_instructions.ts — BEFORE
+outputShape: {
+  markdown: z.string(),
+  html: z.string(),
+  updatedAt: z.date().nullable(),   // no JSON Schema representation
+},
+
+// AFTER — serialise at the boundary
+outputShape: {
+  markdown: z.string(),
+  html: z.string(),
+  updatedAt: z.string().nullable().describe("ISO-8601 timestamp of the last edit, or null"),
+},
+handler: async ({ db }) => {
+  const { markdown, html, updatedAt } = await getInstructions(db);
+  return { markdown, html, updatedAt: updatedAt ? updatedAt.toISOString() : null };
+},`,
+      },
+      {
+        title: "The guard: probe before registering",
+        lang: "ts",
+        code: `// src/backend/mcp/agent.ts
+function isSerializableShape(shape: Record<string, unknown>): boolean {
+  try {
+    z.toJSONSchema(z.object(shape as Record<string, z.ZodType>));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A bad inputShape costs that one tool...
+if (!isSerializableShape(tool.inputShape)) {
+  console.error(\`mcp: skipping tool "\${tool.name}" — inputShape is not serialisable\`);
+  continue;
+}
+// ...a bad outputShape costs only its structured output.
+const outputOk = outputSchema ? isSerializableShape(outputSchema) : false;`,
+      },
+      {
+        title: "API-key auth, checked ahead of OAuthProvider",
+        lang: "ts",
+        code: `// src/_worker.ts
+async function handleApiKeyMcpRequest(request, env, ctx) {
+  const handler = MCP_HANDLERS[new URL(request.url).pathname];
+  if (!handler) return null;
+  if (!(await isRequestAuthenticated(request, env))) return null;
+  // Stamp the key principal so the ledger records "worker:justin".
+  ctx.props = { userId: "justin", scope: "remodel", kind: "worker" };
+  return handler.fetch(request, env, ctx);
+}
+
+fetch: withAbsoluteRegistrationUri(async (request, env, ctx) => {
+  const direct = await handleApiKeyMcpRequest(request, env, ctx);
+  return direct ?? oauthProvider.fetch(request, env, ctx);
+}),`,
+      },
+      {
+        title: "Route order is load-bearing",
+        lang: "ts",
+        code: `// OAuthProvider matches with pathname.startsWith(route) and takes the FIRST
+// hit in insertion order, so a bare "/mcp" listed first swallows everything
+// under it — which it was already doing to "/mcp/sse".
+const MCP_HANDLERS: Record<string, FetchHandler> = {
+  "/mcp/direct/sse": withCodeMode(/* raw  */ ..., false),
+  "/mcp/direct":     withCodeMode(/* raw  */ ..., false),
+  "/mcp/sse":        withCodeMode(/* code */ ..., true),
+  "/mcp":            withCodeMode(/* code */ ..., true),
+};`,
+      },
+      {
+        title: "Code Mode, exercised against live data",
+        lang: "bash",
+        code: `# tools/call code
+async () => {
+  const r = await codemode.list_rooms({ limit: 5 });
+  return r.items.map((x) => x.roomName);
+}
+-> ["Family Room","Laundry", ...]
+
+# the sandbox has no way out
+async () => { const r = await fetch('https://example.com'); return r.status; }
+-> isError: "This worker is not permitted to access the internet via global
+   functions like fetch(). It must use capabilities (such as bindings in 'env')
+   to talk to the outside world."`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "One field, the whole list",
+        title: "Why zero tools and not 172",
+        description: `\`tools/list\` is answered by serialising every registered schema in one pass.
+There is no per-tool boundary to contain a failure, which is why a single
+\`z.date()\` presented to the user as "the connector has no tools" rather than
+"one tool is broken".`,
+        code: `flowchart TD
+  A["Client: tools/list"] --> B["MCP SDK serialises ALL 173 schemas<br/>in ONE pass"]
+  B --> C{"every shape representable<br/>in JSON Schema?"}
+  C -- "yes" --> D["173 tools returned"]
+  C -- "no (one z.date)" --> E["-32603 whole response fails"]
+  E --> F["Client shows ZERO tools"]
+  F --> G["OAuth fine · handshake fine<br/>/api/mcp-docs says 173<br/>registry probe GREEN"]
+  style E fill:#3a1417,stroke:#fca5a5,color:#fca5a5
+  style F fill:#3a1417,stroke:#fca5a5,color:#fca5a5`,
+      },
+      {
+        caption: "Two auth doors, two surfaces",
+        title: "How a request reaches the tools now",
+        description: `The API-key check runs ahead of \`OAuthProvider\` and only claims requests
+carrying the shared operator credential; everything else falls through to the
+OAuth path untouched. Whichever door a request comes through, the path chooses
+the surface, and both surfaces run every call through the same \`callTool()\` — so
+the invocation ledger sees Code Mode and direct calls identically.`,
+        code: `flowchart LR
+  R["Request to /mcp*"] --> K{"WORKER_API_KEY bearer<br/>or access cookie?"}
+  K -- "yes" --> P["props.kind = worker"]
+  K -- "no" --> O["OAuthProvider<br/>(1-year access token)"]
+  O --> P2["props from the grant"]
+  P --> S{"which path?"}
+  P2 --> S
+  S -- "/mcp · /mcp/sse" --> C["CODE MODE<br/>code + describe_tools"]
+  S -- "/mcp/direct(/sse)" --> D["RAW<br/>173 tools"]
+  C --> X["isolated Worker<br/>no outbound network"]
+  X --> T["callTool()"]
+  D --> T
+  T --> L["mcp_tool_invocations"]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_413.mjs",
+      command: "pnpm run test:pr 413 -- --preview   AND   pnpm run test:pr 413",
+      ranAt: "2026-09-03",
+      source: `// The assertion that matters is a NON-NULL tool array — the defect was the
+// whole list vanishing, not any one tool going missing.
+for (const [path, kind, token] of surfaces) {
+  const res = await listTools(BASE, path, { authorization: \`Bearer \${token}\` });
+  expect(
+    \`\${path} (\${kind}) returns a tool list\`,
+    Array.isArray(res.tools) && res.tools.length > 0,
+    \`status=\${res.status} \${res.error ?? "tools=null"}\`,
+  );
+}
+
+check(
+  "OAuth access token lives a full year",
+  expiresIn === ONE_YEAR_SECONDS,
+  \`expires_in=\${expiresIn} (\${(expiresIn / 86400).toFixed(1)} days)\`,
+);
+
+check(
+  "the code sandbox cannot reach the internet",
+  escaped?.result?.isError === true &&
+    escapedText.includes("not permitted to access the internet"),
+  escapedText.slice(0, 200),
+);`,
+      output: `$ pnpm run test:pr 413 -- --preview
+QC pr_413 (MCP tools + auth + Code Mode) against https://wcrp-claude-mcp-tools-auth-availability-2efca8.hacolby.workers.dev
+
+  ✓ /api/mcp-docs reports a populated registry
+  ✓ OAuth authorization-code flow yields an access token
+  ✓ OAuth issues a refresh token
+  ✓ OAuth access token lives a full year
+  ✓ /mcp (oauth) returns a tool list
+  ✓ /mcp (api key) returns a tool list
+  ✓ /mcp/direct (oauth) returns a tool list
+  ✓ /mcp/direct (api key) returns a tool list
+  ✓ /mcp is Code Mode — exactly \`code\` + \`describe_tools\`
+  ✓ /mcp/direct advertises the whole registry
+  ✓ the API-key path sees the same surface as OAuth
+  ✓ describe_tools returns TypeScript for a named method
+  ✓ code executes JavaScript against live remodel data
+  ✓ the code sandbox cannot reach the internet
+  ✓ legacy /api/mcp bearer shim still lists its tools
+
+15 passed, 0 failed
+
+$ pnpm run test:pr 413        # production, before merge
+QC pr_413 (MCP tools + auth + Code Mode) against https://core-remodel.hacolby.workers.dev
+
+  ✓ /api/mcp-docs reports a populated registry
+  ✓ OAuth authorization-code flow yields an access token
+  ✓ OAuth issues a refresh token
+  ✓ OAuth access token lives a full year
+    ~ /mcp (oauth) returns a tool list — pending merge/deploy on production (status=200 {"code":-32603,"message":"Date cannot be represented in JSON Schema"})
+    ~ /mcp (api key) returns a tool list — pending merge/deploy on production (status=401 {"error":"invalid_token","error_description":"Invalid access token"})
+    ~ /mcp/direct (oauth) returns a tool list — pending merge/deploy on production (status=404 {"error":{"code":-32000,"message":"Not found"},"id":null,"jsonrpc":"2.0"})
+    ~ /mcp/direct (api key) returns a tool list — pending merge/deploy on production (status=401 {"error":"invalid_token","error_description":"Invalid access token"})
+    ~ /mcp is Code Mode — exactly \`code\` + \`describe_tools\` — pending merge/deploy on production (tools=null)
+    ~ /mcp/direct advertises the whole registry — pending merge/deploy on production (direct=undefined catalog=173)
+    ~ the API-key path sees the same surface as OAuth — pending merge/deploy on production (oauth=null apikey=null)
+    ~ code-tool execution — pending merge/deploy on production
+  ✓ legacy /api/mcp bearer shim still lists its tools
+
+5 passed, 0 failed`,
+      migrations: [],
+      previewWorker: {
+        name: "wcrp-claude-mcp-tools-auth-availability-2efca8",
+        status: "deployed",
+        note: "Live while PR #413 is open. Torn down with `pnpm run preview:delete` in the same turn as the merge.",
+      },
+    },
+  },
   "budget-command-center": {
     slug: "budget-command-center",
     subtitle: "/admin/budget rebuilt as one workbench, every tab on a real API",
@@ -397,7 +719,8 @@ obtained by JOIN, so it cannot drift when the parent is renamed.`,
     ],
     verification: {
       qcScript: "scripts/qc/pr_budget_command_center.mjs",
-      command: "node scripts/qc/pr_budget_command_center.mjs --preview   # then again bare, against production",
+      command:
+        "node scripts/qc/pr_budget_command_center.mjs --preview   # then again bare, against production",
       ranAt: "2026-09-03",
       output: `$ node scripts/qc/pr_budget_command_center.mjs --preview
 QC · Budget Command Center -> https://wcrp-orca-budget-ux-overhaul.hacolby.workers.dev (preview)
@@ -736,7 +1059,8 @@ Migrations: none.`,
     diagrams: [],
     verification: {
       qcScript: "scripts/qc/pr_400.mjs",
-      command: "node scripts/qc/pr_400.mjs --preview  (11/11)  &&  node scripts/qc/pr_400.mjs  (prod 8/8)",
+      command:
+        "node scripts/qc/pr_400.mjs --preview  (11/11)  &&  node scripts/qc/pr_400.mjs  (prod 8/8)",
       ranAt: "2026-08-12",
       output:
         "QC 11/11 preview: phases list, funding round-trip (write current values back), phase assign → line moves into the phase group, phase RETAINED after an unrelated edit (carry-forward fix), restored to Unphased, grid regression. Prod 8/8: funding + regression green; phase-assign persistence correctly reports pending merge/deploy (old prod code ignores phaseId). Funding dialog also browser-verified on preview (load → edit → save → refetch, no console errors). Build green; tsc no new errors in touched files; view self-check incl. slugifyAccountKey passes.",

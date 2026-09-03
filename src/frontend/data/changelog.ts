@@ -77,6 +77,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/mcp-tools-auth-availability-2efca8",
+    title: "MCP connector — zero tools fixed, API-key auth, and Code Mode on /mcp",
+    summary:
+      "The MCP connector authenticated cleanly and advertised ZERO tools. One field caused it: `updatedAt: z.date()` in `get_email_instructions`'s outputShape. The MCP SDK serialises every registered tool's schema in a single pass to answer `tools/list`, so one field with no JSON Schema representation failed the whole response (-32603 \"Date cannot be represented in JSON Schema\") — not 172 of 173, but zero, for every client, while OAuth, the handshake and /api/mcp-docs all looked healthy. Fixed by serialising that timestamp at the boundary, and the cliff removed by probing each shape with z.toJSONSchema before registering, so a future bad field costs one tool instead of all of them. A new mcp_tool_schema_serializable health probe surfaces the same condition, which mcp_tool_registry_integrity structurally could not see. Separately, /mcp now accepts the shared WORKER_API_KEY bearer ahead of OAuthProvider (which owned the entire /mcp prefix and 401'd every key-authed call), and /mcp + /mcp/sse now serve Code Mode — a `code` tool running model-written JavaScript against `codemode.<tool>` inside an isolated Worker, plus `describe_tools` for exact types on demand — with the 173 raw tools kept at /mcp/direct. No migration.",
+    date: "2026-09-03",
+    status: "staged",
+    prNumber: 413,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/413",
+  },
+  {
     branch: "orca/budget-ux-overhaul",
     title: "Budget & Procurement Command Center — /admin/budget rebuilt as one workbench",
     summary:
@@ -494,6 +504,49 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "mcp-tool-list-auth-and-code-mode",
+    branch: "claude/mcp-tools-auth-availability-2efca8",
+    date: "2026-09-03",
+    tag: "0015",
+    area: "MCP connector",
+    title: "Zero tools fixed, API-key auth on /mcp, and Code Mode",
+    summary:
+      "A single z.date() blanked the entire tool list for every MCP client while auth looked healthy. Fixed at the source, guarded so it cannot recur, surfaced by a new health probe — and while in here, /mcp gained WORKER_API_KEY bearer auth and a Code Mode surface that replaces 173 tool schemas with one `code` tool plus an on-demand type lookup.",
+    changes: [
+      {
+        kind: "fixed",
+        text: '`tools/list` returned -32603 "Date cannot be represented in JSON Schema" because `get_email_instructions` declared `updatedAt: z.date()`. The SDK serialises every tool\'s schema in one pass, so one bad field zeroed the whole catalog. The timestamp is now an ISO-8601 string, serialised in the handler.',
+      },
+      {
+        kind: "added",
+        text: "RemodelMcpAgent probes each shape with z.toJSONSchema before registering: a bad inputShape costs that one tool, a bad outputShape costs only its structured output. The cliff is gone.",
+      },
+      {
+        kind: "added",
+        text: "`mcp_tool_schema_serializable` health probe — runs the same conversion over the whole registry and fails at /admin/system/health. mcp_tool_registry_integrity could never have caught this; the registry was valid.",
+      },
+      {
+        kind: "added",
+        text: "/mcp accepts `Authorization: Bearer <WORKER_API_KEY>`, `x-worker-api-key`, or the remodel_access cookie, checked ahead of OAuthProvider. OAuth is untouched — an OAuth bearer is not the worker key, so it falls through as before.",
+      },
+      {
+        kind: "added",
+        text: "Code Mode on /mcp + /mcp/sse: a `code` tool executing model-written JavaScript against `codemode.<tool>` in an isolated Worker with no outbound network, and `describe_tools` for exact TypeScript types on demand. Tool description is 20KB (~5k tokens) versus 197KB when the full types were inlined.",
+      },
+      {
+        kind: "added",
+        text: "/mcp/direct + /mcp/direct/sse keep the classic one-tool-per-tool surface with all 173 tools, as the fallback while Code Mode is experimental.",
+      },
+      {
+        kind: "fixed",
+        text: "apiHandlers are now ordered longest-path-first. OAuthProvider matches with pathname.startsWith and takes the first hit, so the pre-existing bare `/mcp` entry was already shadowing `/mcp/sse`.",
+      },
+    ],
+    status: "staged",
+    prNumber: 413,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/413",
+  },
+  {
     id: "budget-command-center",
     branch: "orca/budget-ux-overhaul",
     date: "2026-09-03",
@@ -628,11 +681,26 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:
       "Maps individual estimate line items to rooms with an AI-staged, human-confirmed loop — the first BudgetWorkbench phase. estimate_line_items gains room_id (FK), budget_item_track_id (TEXT no-FK), mapping_status, and ai_suggested_room_id/category + mapping_confidence (migration 0183). POST /ai-suggest calls generateStructured, feeds the model the real room id:name list, validates every returned roomId against live rooms (drops hallucinations), stages the guess and NEVER writes roomId. PATCH /reconcile is the only roomId write (validates the room exists, auto-confirms). A /admin/budget/reconcile HITL page shows the queue with the AI's ranked candidates + confidence + reasoning, a RoomSelect override, and Confirm/Reject; MCP list_reconciliation_queue + reconcile_estimate_line give chat the same confirm path. Built with the local-ai-orchestrator (claude) doing edits under per-diff review + an adversarial review pass (7/7 checks clean, 1 minor summary fix). QC 9/9 preview.",
     changes: [
-      { kind: "migration", text: "0183 (additive): estimate_line_items += room_id (FK rooms set null), budget_item_track_id (TEXT no-FK), mapping_status (default unmapped), ai_suggested_room_id/category, mapping_confidence. Applied + verified on remote." },
-      { kind: "added", text: "POST /api/estimates/line-items/:id/ai-suggest — structured-output room suggestion; validates AI roomIds against live rooms; stages ai_suggested_*, never writes roomId; no {} degrade." },
-      { kind: "added", text: "PATCH /api/estimates/line-items/:id/reconcile (the only roomId write; validates room exists; auto-confirms) + GET /api/estimates/reconcile/queue." },
-      { kind: "added", text: "/admin/budget/reconcile HITL UI — queue + AI candidates (confidence + reasoning) + RoomSelect + Confirm/Reject." },
-      { kind: "added", text: "MCP list_reconciliation_queue (READ) + reconcile_estimate_line (WRITE) — same confirm write as the UI." },
+      {
+        kind: "migration",
+        text: "0183 (additive): estimate_line_items += room_id (FK rooms set null), budget_item_track_id (TEXT no-FK), mapping_status (default unmapped), ai_suggested_room_id/category, mapping_confidence. Applied + verified on remote.",
+      },
+      {
+        kind: "added",
+        text: "POST /api/estimates/line-items/:id/ai-suggest — structured-output room suggestion; validates AI roomIds against live rooms; stages ai_suggested_*, never writes roomId; no {} degrade.",
+      },
+      {
+        kind: "added",
+        text: "PATCH /api/estimates/line-items/:id/reconcile (the only roomId write; validates room exists; auto-confirms) + GET /api/estimates/reconcile/queue.",
+      },
+      {
+        kind: "added",
+        text: "/admin/budget/reconcile HITL UI — queue + AI candidates (confidence + reasoning) + RoomSelect + Confirm/Reject.",
+      },
+      {
+        kind: "added",
+        text: "MCP list_reconciliation_queue (READ) + reconcile_estimate_line (WRITE) — same confirm write as the UI.",
+      },
     ],
     migrations: ["0183"],
     status: "staged",
@@ -647,9 +715,18 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:
       "The shipped grid launched degenerate: every line was Unphased and Total Budget was $0 with no UI to change either. This adds a compact per-line phase-select (PATCH /api/budget-tracker/items/{id} {phaseId} → refetch, line moves into its phase group) and a 'Set budget' funding editor on the Total-budget scorecard (loads /financial-status, edits label + amount per account, saves via PUT /financial-accounts). It also fixes a load-bearing correctness bug: the budget-item PATCH revision insert dropped phaseId and the variance note, so ANY edit silently wiped a line's phase — phaseId + variance md/html are now carried forward across revisions (undefined=keep, null=unassign). QC 11/11 preview; phase-assign persistence + carry-forward verified by round-trip.",
     changes: [
-      { kind: "added", text: "Per-line phase assignment on the grid: ghost phase-select → PATCH /api/budget-tracker/items/{id} {phaseId} → refetch; options from GET /api/config/budget-phases." },
-      { kind: "added", text: "Funding config: 'Set budget' dialog on the Total-budget scorecard (GET /financial-status load, PUT /financial-accounts save, add/remove rows, CurrencyInput, empty-state hint)." },
-      { kind: "fixed", text: "budget-item PATCH now carries phaseId + variance-note md/html across revisions (added phaseId to BudgetTrackerPatch) — previously any edit wiped the phase assignment." },
+      {
+        kind: "added",
+        text: "Per-line phase assignment on the grid: ghost phase-select → PATCH /api/budget-tracker/items/{id} {phaseId} → refetch; options from GET /api/config/budget-phases.",
+      },
+      {
+        kind: "added",
+        text: "Funding config: 'Set budget' dialog on the Total-budget scorecard (GET /financial-status load, PUT /financial-accounts save, add/remove rows, CurrencyInput, empty-state hint).",
+      },
+      {
+        kind: "fixed",
+        text: "budget-item PATCH now carries phaseId + variance-note md/html across revisions (added phaseId to BudgetTrackerPatch) — previously any edit wiped the phase assignment.",
+      },
     ],
     status: "staged",
   },
