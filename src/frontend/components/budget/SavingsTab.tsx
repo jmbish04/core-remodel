@@ -12,7 +12,7 @@
  *
  * ZERO SQL here — every figure comes from `@/lib/budget-api`.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CircleAlert, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -68,22 +68,48 @@ function FundingAccountsPanel() {
   const [draft, setDraft] = useState<FundingAccount[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // accountKey -> true while its CurrencyInput holds unparseable text. Save
+  // stays blocked and the row's amountCents is left untouched (never zeroed)
+  // until the user fixes or clears it.
+  const [invalidKeys, setInvalidKeys] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    if (fundingData) setDraft(fundingData.accounts);
+    if (fundingData) {
+      setDraft(fundingData.accounts);
+      setInvalidKeys(new Set());
+    }
   }, [fundingData]);
 
+  // Only compare the fields the server round-trips. `amountText` always
+  // comes back `null` from GET, so including it made every draft compare
+  // unequal to the server data after the first keystroke — the form was
+  // permanently "dirty" and Cancel/Save never settled.
   const dirty =
     draft !== null &&
     fundingData !== null &&
-    JSON.stringify(draft) !== JSON.stringify(fundingData.accounts);
+    JSON.stringify(draft.map(({ accountKey, accountLabel, amountCents, notes }) => ({ accountKey, accountLabel, amountCents, notes }))) !==
+      JSON.stringify(
+        fundingData.accounts.map(({ accountKey, accountLabel, amountCents, notes }) => ({
+          accountKey,
+          accountLabel,
+          amountCents,
+          notes,
+        })),
+      );
 
   function updateAmount(accountKey: string, text: string, cents: number | null) {
+    const invalid = text.trim() !== "" && cents === null;
+    setInvalidKeys((current) => {
+      const next = new Set(current);
+      if (invalid) next.add(accountKey);
+      else next.delete(accountKey);
+      return next;
+    });
     setDraft(
       (prev) =>
         prev?.map((row) =>
           row.accountKey === accountKey
-            ? { ...row, amountText: text, amountCents: cents ?? 0 }
+            ? { ...row, amountText: text, amountCents: invalid ? row.amountCents : (cents ?? 0) }
             : row,
         ) ?? prev,
     );
@@ -92,11 +118,12 @@ function FundingAccountsPanel() {
 
   function handleCancel() {
     setDraft(fundingData?.accounts ?? null);
+    setInvalidKeys(new Set());
     setSaveError(null);
   }
 
   async function handleSave() {
-    if (!draft) return;
+    if (!draft || invalidKeys.size > 0) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -148,23 +175,34 @@ function FundingAccountsPanel() {
         </div>
       ) : (
         <div className="flex flex-col gap-2.5 p-4">
-          {draft.map((row) => (
-            <div key={row.accountKey} className="flex items-center gap-2">
-              <Label
-                htmlFor={`funding-account-${row.accountKey}`}
-                className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-normal text-foreground"
-              >
-                {row.accountLabel}
-              </Label>
-              <CurrencyInput
-                id={`funding-account-${row.accountKey}`}
-                value={row.amountText ?? ""}
-                onValueChange={(text, cents) => updateAmount(row.accountKey, text, cents)}
-                aria-label={`${row.accountLabel} amount`}
-                className="w-[136px] shrink-0"
-              />
-            </div>
-          ))}
+          {draft.map((row) => {
+            const invalid = invalidKeys.has(row.accountKey);
+            return (
+              <div key={row.accountKey} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <Label
+                    htmlFor={`funding-account-${row.accountKey}`}
+                    className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-normal text-foreground"
+                  >
+                    {row.accountLabel}
+                  </Label>
+                  <CurrencyInput
+                    id={`funding-account-${row.accountKey}`}
+                    value={row.amountText ?? ""}
+                    onValueChange={(text, cents) => updateAmount(row.accountKey, text, cents)}
+                    aria-label={`${row.accountLabel} amount`}
+                    aria-invalid={invalid}
+                    className="w-[136px] shrink-0"
+                  />
+                </div>
+                {invalid ? (
+                  <p role="alert" className="text-right text-xs text-destructive">
+                    Enter a valid amount.
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -182,10 +220,15 @@ function FundingAccountsPanel() {
           </span>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleCancel} disabled={!dirty || saving}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCancel}
+            disabled={(!dirty && invalidKeys.size === 0) || saving}
+          >
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
+          <Button size="sm" onClick={handleSave} disabled={!dirty || saving || invalidKeys.size > 0}>
             {saving ? "Saving…" : "Save accounts"}
           </Button>
         </div>
@@ -199,44 +242,49 @@ function FundingAccountsPanel() {
 // ────────────────────────────────────────────────────────────────────────
 
 function ReallocationLedgerPanel() {
+  // First page goes through the shared hook, which cancels the fetch on tab
+  // switch/unmount via AbortSignal like every other tab. Pages after that are
+  // appended locally — there's no total count to reconcile a server-driven
+  // list against, same as the estimate-reconciliation queue.
+  const {
+    data: firstPage,
+    error: ledgerError,
+    isLoading: ledgerLoading,
+  } = useBudgetQuery((signal) => getReallocations({ limit: LEDGER_PAGE_SIZE }, signal), []);
+
   const [entries, setEntries] = useState<ReallocationEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [ledgerLoading, setLedgerLoading] = useState(true);
-  const [ledgerError, setLedgerError] = useState<Error | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Separate from ledgerError: a failed loadMore must not blank out the rows
+  // already on screen, so it renders inline instead of replacing the table.
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const loadMoreController = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    setLedgerLoading(true);
-    setLedgerError(null);
-    getReallocations({ limit: LEDGER_PAGE_SIZE })
-      .then((page) => {
-        if (cancelled) return;
-        setEntries(page.entries);
-        setCursor(page.nextCursor);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setLedgerError(err instanceof Error ? err : new Error(String(err)));
-      })
-      .finally(() => {
-        if (!cancelled) setLedgerLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!firstPage) return;
+    setEntries(firstPage.entries);
+    setCursor(firstPage.nextCursor);
+    setLoadMoreError(null);
+  }, [firstPage]);
+
+  useEffect(() => () => loadMoreController.current?.abort(), []);
 
   async function loadMore() {
     if (!cursor || loadingMore) return;
     setLoadingMore(true);
+    setLoadMoreError(null);
+    const controller = new AbortController();
+    loadMoreController.current = controller;
     try {
-      const page = await getReallocations({ limit: LEDGER_PAGE_SIZE, cursor });
+      const page = await getReallocations({ limit: LEDGER_PAGE_SIZE, cursor }, controller.signal);
+      if (controller.signal.aborted) return;
       setEntries((prev) => [...prev, ...page.entries]);
       setCursor(page.nextCursor);
     } catch (err) {
-      setLedgerError(err instanceof Error ? err : new Error(String(err)));
+      if (controller.signal.aborted) return;
+      setLoadMoreError(err instanceof Error ? err.message : "Couldn't load more entries.");
     } finally {
-      setLoadingMore(false);
+      if (!controller.signal.aborted) setLoadingMore(false);
     }
   }
 
@@ -312,11 +360,16 @@ function ReallocationLedgerPanel() {
         </div>
       )}
 
-      {cursor && !ledgerLoading && (
+      {cursor && !ledgerLoading && !ledgerError && (
         <div className="border-t border-border px-4 py-2.5">
           <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
             {loadingMore ? "Loading…" : "Load more"}
           </Button>
+          {loadMoreError ? (
+            <p role="alert" className="mt-2 text-xs text-destructive">
+              {loadMoreError}
+            </p>
+          ) : null}
         </div>
       )}
 

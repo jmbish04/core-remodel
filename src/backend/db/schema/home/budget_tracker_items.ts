@@ -209,4 +209,9 @@ export const budgetExpenseEntries = sqliteTable("budget_expense_entries", {
   // Room finance rollup (GET /api/budget/rooms-finance): WHERE isActive = true
   // GROUP BY roomId. Without this the per-room spend subquery scans the table.
   activeRoomIdx: index("idx_bee_active_room").on(t.isActive, t.roomId),
+  // Budget grid footer net-burn (GET /api/budget/grid): WHERE isActive = true
+  // AND dateIncurred BETWEEN ..., summed across ALL expenses regardless of
+  // budgetItemTrackId attribution — activeTrackDateIdx leads with
+  // budgetItemTrackId so it can't serve this range scan alone.
+  activeDateIdx: index("idx_bee_active_date").on(t.isActive, t.dateIncurred),
 }));

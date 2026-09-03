@@ -155,6 +155,10 @@ export interface PlanScheduleUpdate {
   lineItemId: number;
   month: string;
   plannedCents: number | null;
+  /** Verbatim text the user typed (e.g. "1,299.00"). Optional, NOT nullable —
+   * clearing a cell (plannedCents: null) deletes the row, so omit this
+   * field entirely rather than sending null. */
+  plannedText?: string;
 }
 
 export function patchPlanSchedule(body: PlanScheduleUpdate): Promise<void> {
@@ -204,8 +208,23 @@ export interface RoomFinanceRow {
   risk: "ok" | "watch" | "at_risk";
 }
 
+export interface RoomFinanceTotals {
+  committedCents: number;
+  spentCents: number;
+  remainingCents: number;
+  openMaterialsCount: number;
+}
+
 export interface RoomsFinanceResponse {
   rooms: RoomFinanceRow[];
+  /**
+   * `totals` minus the sum of the rows. The totals are project-wide on purpose
+   * (an item mapped to several rooms would double-count if summed across rows,
+   * and money with no room at all would vanish), so the Total row will not
+   * always equal the column above it. Render this delta rather than letting a
+   * reader add the column and find a different number.
+   */
+  unassigned: RoomFinanceTotals;
   totals: {
     committedCents: number;
     spentCents: number;
@@ -392,10 +411,20 @@ export interface ComplianceContract {
 
 export interface ComplianceResponse {
   contracts: ComplianceContract[];
+  /** Keyset cursor; null when this is the last page. */
+  nextCursor: string | null;
 }
 
-export function getCompliance(signal?: AbortSignal): Promise<ComplianceResponse> {
-  return request<ComplianceResponse>("/api/budget/compliance", { signal });
+export interface GetComplianceParams {
+  limit?: number;
+  cursor?: string;
+}
+
+export function getCompliance(
+  params: GetComplianceParams = {},
+  signal?: AbortSignal,
+): Promise<ComplianceResponse> {
+  return request<ComplianceResponse>(`/api/budget/compliance${qs(params)}`, { signal });
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -489,13 +518,56 @@ export function useBudgetQuery<T>(
 // Money formatting
 // ────────────────────────────────────────────────────────────────────────
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
+// Built on first use, not at module scope. This module is pulled into the SSR
+// worker bundle, and constructing an Intl.NumberFormat is real work at startup
+// — this Worker sits close to Cloudflare's startup-CPU ceiling (error 10021),
+// so eager top-level construction is a cost paid on every cold start whether or
+// not a page formats any money.
+let exactCurrencyFormatter: Intl.NumberFormat | undefined;
+let wholeDollarCurrencyFormatter: Intl.NumberFormat | undefined;
 
-/** The one place every tab formats money. Integer cents in, "$1,234" out. */
-export function formatCents(cents: number): string {
-  return currencyFormatter.format(cents / 100);
+function exactFormatter(): Intl.NumberFormat {
+  exactCurrencyFormatter ??= new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
+  return exactCurrencyFormatter;
+}
+
+function wholeDollarFormatter(): Intl.NumberFormat {
+  wholeDollarCurrencyFormatter ??= new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+  return wholeDollarCurrencyFormatter;
+}
+
+/**
+ * The one place every tab formats money. Integer cents in, exact currency
+ * string out (e.g. "$1,234.56") — the stored data is exact cents, so the
+ * display must be too, or rows stop summing to their subtotal.
+ *
+ * Pass `{ whole: true }` only for a large KPI figure that is deliberately
+ * shown rounded to the dollar; never for a value a user will sum by eye.
+ */
+/**
+ * Format integer cents as currency.
+ *
+ * Decimals are shown only when the amount actually has them. Whole-dollar
+ * figures render as "$248,500" — matching the design comps, where every figure
+ * is a round dollar — while $1,299.40 keeps its cents.
+ *
+ * The alternative, rounding everything to whole dollars, is what a review
+ * caught: three rows of $0.50 render as "$1, $1, $1" under a subtotal of "$2",
+ * so a column visibly fails to add up. The stored data is exact integer cents;
+ * the display must not be the thing that loses money.
+ *
+ * `{ whole: true }` forces rounding, for a headline figure where the reader is
+ * scanning magnitude rather than reconciling a column. Use it deliberately.
+ */
+export function formatCents(cents: number, opts?: { whole?: boolean }): string {
+  if (opts?.whole) return wholeDollarFormatter().format(cents / 100);
+  const formatter = cents % 100 === 0 ? wholeDollarFormatter() : exactFormatter();
+  return formatter.format(cents / 100);
 }

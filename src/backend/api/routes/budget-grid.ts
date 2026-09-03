@@ -122,8 +122,15 @@ budgetGridRouter.get("/grid", async (c) => {
     // line+month; actual is GROUP BY trackId + strftime month, since several
     // expense entries can land in the same line+month), pivoted to month
     // columns by `pivotBudgetGrid` in budget-grid-math.ts.
-    const [phaseRows, itemRows, planRows, actualRows, fundingRows, spentAllTimeRows] =
-      await db.batch([
+    const [
+      phaseRows,
+      itemRows,
+      planRows,
+      actualRows,
+      fundingRows,
+      spentAllTimeRows,
+      spentInWindowAllRows,
+    ] = await db.batch([
         db
           .select({ id: budgetPhases.id, name: budgetPhases.name, sortOrder: budgetPhases.sortOrder })
           .from(budgetPhases)
@@ -173,6 +180,21 @@ budgetGridRouter.get("/grid", async (c) => {
           .select({ spentCents: sql<number>`coalesce(sum(${budgetExpenseEntries.amountCents}), 0)` })
           .from(budgetExpenseEntries)
           .where(eq(budgetExpenseEntries.isActive, true)),
+        // Same "spent" definition as spentAllTimeRows above (ALL active
+        // expenses, not just ones attributed to a budget line), just scoped
+        // to the visible window. See the footer comment below for why this
+        // has to match availableBudgetCents's definition.
+        db
+          .select({ spentCents: sql<number>`coalesce(sum(${budgetExpenseEntries.amountCents}), 0)` })
+          .from(budgetExpenseEntries)
+          .where(
+            and(
+              eq(budgetExpenseEntries.isActive, true),
+              isNotNull(budgetExpenseEntries.dateIncurred),
+              gte(budgetExpenseEntries.dateIncurred, new Date(fromEpochSeconds * 1000)),
+              lt(budgetExpenseEntries.dateIncurred, new Date(toEpochSecondsExclusive * 1000)),
+            ),
+          ),
       ]);
 
     const pivotItems: PivotLineItem[] = itemRows.map((row) => ({
@@ -210,11 +232,28 @@ budgetGridRouter.get("/grid", async (c) => {
     // Footer: whole-project figures, independent of the visible window (same
     // convention the old service's `scorecards` used) — except netBurnCents,
     // which is a rate over the visible window by definition.
+    //
+    // "Spent" definition (deliberately the SAME for both figures below): ALL
+    // active expenses, attributed to a budget line or not. The seed route
+    // leaves an expense unattributed whenever its title match isn't unique,
+    // so an "attributed only" definition would understate real spend here —
+    // that money left the account either way. `flatActualRows` (used for the
+    // per-line grid cells above) stays narrower, filtered to attributed rows
+    // only, because a cell has to belong to a specific line to render at
+    // all; that's a different, defensible scope for a different purpose, not
+    // a second definition of "spent" for the footer.
     const totalFundingCents = fundingRows[0]?.totalCents ?? 0;
     const spentAllTimeCents = spentAllTimeRows[0]?.spentCents ?? 0;
     const availableBudgetCents = totalFundingCents - spentAllTimeCents;
-    const spentInWindowCents = flatActualRows.reduce((sum, row) => sum + row.actualCents, 0);
-    const netBurnCents = months.length > 0 ? Math.round(spentInWindowCents / months.length) : 0;
+    const spentInWindowCents = spentInWindowAllRows[0]?.spentCents ?? 0;
+    // Net burn is a RATE, so it must divide by months that have actually
+    // elapsed, not the width of the (possibly future-scrolled) requested
+    // window — dividing by the full window understates burn whenever the
+    // window includes future months, and the number would then swing every
+    // time the user scrolls the range.
+    const nowMonth = secondsToMonth(Math.floor(Date.now() / 1000));
+    const elapsedMonths = months.filter((month) => month <= nowMonth).length;
+    const netBurnCents = elapsedMonths > 0 ? Math.round(spentInWindowCents / elapsedMonths) : 0;
 
     return c.json({
       months: monthsOut,
@@ -245,6 +284,7 @@ const newPlanSchedulePatchSchema = z.object({
   lineItemId: z.number().int(),
   month: z.string().regex(PERIOD_RE, "month must be YYYY-MM"),
   plannedCents: z.number().int().nullable(),
+  plannedText: z.string().optional(),
 });
 
 const oldPlanSchedulePatchSchema = z.object({
@@ -266,6 +306,10 @@ budgetGridRouter.patch("/plan-schedule", async (c) => {
     let period: string;
     let plannedCents: number | null;
     let plannedText: string | null = null;
+    // Whether the caller actually sent a plannedText field (vs. it being
+    // absent from the body). Absent must NOT clear a previously-stored
+    // verbatim-currency value — see the PATCH write below.
+    let plannedTextProvided = false;
 
     if (isNewShape) {
       const body = newPlanSchedulePatchSchema.safeParse(raw);
@@ -288,6 +332,8 @@ budgetGridRouter.patch("/plan-schedule", async (c) => {
       trackId = activeItem.trackId;
       period = body.data.month;
       plannedCents = body.data.plannedCents;
+      plannedTextProvided = body.data.plannedText !== undefined;
+      plannedText = body.data.plannedText ?? null;
     } else {
       const body = oldPlanSchedulePatchSchema.safeParse(raw);
       if (!body.success) {
@@ -309,6 +355,7 @@ budgetGridRouter.patch("/plan-schedule", async (c) => {
       trackId = body.data.trackId;
       period = body.data.period;
       plannedCents = body.data.plannedCents;
+      plannedTextProvided = body.data.plannedText !== undefined;
       plannedText = body.data.plannedText ?? null;
     }
 
@@ -329,6 +376,12 @@ budgetGridRouter.patch("/plan-schedule", async (c) => {
     }
 
     const now = new Date();
+    // plannedText: only overwrite the stored column when the caller actually
+    // sent one. The new single-cell PATCH shape doesn't always carry it (a
+    // planned-cents-only edit), and unconditionally writing `null` here wipes
+    // `plannedText` set through the old grid the first time a cell is
+    // touched through the new one. On a brand-new row there's nothing to
+    // preserve, so the insert side always writes it (null is correct there).
     await db
       .insert(budgetPlanSchedule)
       .values({
@@ -342,12 +395,9 @@ budgetGridRouter.patch("/plan-schedule", async (c) => {
       })
       .onConflictDoUpdate({
         target: [budgetPlanSchedule.budgetItemTrackId, budgetPlanSchedule.period],
-        set: {
-          plannedCents,
-          plannedText,
-          source: "manual",
-          datetimeUpdated: now,
-        },
+        set: plannedTextProvided
+          ? { plannedCents, plannedText, source: "manual", datetimeUpdated: now }
+          : { plannedCents, source: "manual", datetimeUpdated: now },
       })
       .run();
 
@@ -432,18 +482,31 @@ budgetGridRouter.post("/grid/seed", async (c) => {
     });
 
     // Check pre-existence up front so plansSeeded/plansSkipped are exact —
-    // onConflictDoNothing alone can't tell us which rows it skipped.
-    const existingKeys = new Set(
-      (
-        await db
-          .select({
-            budgetItemTrackId: budgetPlanSchedule.budgetItemTrackId,
-            period: budgetPlanSchedule.period,
-          })
-          .from(budgetPlanSchedule)
-          .all()
-      ).map((row) => `${row.budgetItemTrackId}::${row.period}`),
-    );
+    // onConflictDoNothing alone can't tell us which rows it skipped. Scoped
+    // to the period range actually being seeded (idx_budget_plan_schedule_period)
+    // instead of reading the whole table — that table only grows over time,
+    // so an unscoped SELECT * here is a row-read cost that grows with it for
+    // no reason (D1-DRIZZLE-RULES.md §8).
+    const candidatePeriods = planCandidates.map((c) => c.period);
+    let existingKeys = new Set<string>();
+    if (candidatePeriods.length > 0) {
+      const minPeriod = candidatePeriods.reduce((a, b) => (b < a ? b : a));
+      const maxPeriod = candidatePeriods.reduce((a, b) => (b > a ? b : a));
+      existingKeys = new Set(
+        (
+          await db
+            .select({
+              budgetItemTrackId: budgetPlanSchedule.budgetItemTrackId,
+              period: budgetPlanSchedule.period,
+            })
+            .from(budgetPlanSchedule)
+            .where(
+              and(gte(budgetPlanSchedule.period, minPeriod), lte(budgetPlanSchedule.period, maxPeriod)),
+            )
+            .all()
+        ).map((row) => `${row.budgetItemTrackId}::${row.period}`),
+      );
+    }
     const toInsert = planCandidates.filter(
       (candidate) => !existingKeys.has(`${candidate.budgetItemTrackId}::${candidate.period}`),
     );
@@ -488,28 +551,41 @@ budgetGridRouter.post("/grid/seed", async (c) => {
       titleIndex.set(key, list);
     }
 
-    let expensesAttributed = 0;
     let expensesSkipped = 0;
-    // Sequential single-row UPDATEs, not a batched multi-value statement, so
-    // there's no D1 100-bound-param exposure here (each statement binds
-    // budgetItemTrackId + datetimeUpdated + the id in WHERE — 3 params).
-    // Read-then-write, not atomic (D1 has no transactions): between the read
-    // above and each update below another writer could change the picture.
-    // Acceptable here — this is an idempotent, re-runnable best-effort seed,
-    // not a financial ledger post.
+    const attributionUpdates: Array<{ id: number; trackId: string }> = [];
     for (const expense of unattributedExpenses) {
       const candidates = titleIndex.get(expense.item.trim().toLowerCase()) ?? [];
       if (candidates.length !== 1) {
         expensesSkipped += 1;
         continue;
       }
-      await db
-        .update(budgetExpenseEntries)
-        .set({ budgetItemTrackId: candidates[0], datetimeUpdated: new Date() })
-        .where(eq(budgetExpenseEntries.id, expense.id))
-        .run();
-      expensesAttributed += 1;
+      attributionUpdates.push({ id: expense.id, trackId: candidates[0] });
     }
+
+    // Batched UPDATEs, not a sequential `await` per row (D1-DRIZZLE-RULES.md
+    // §8 — an await-in-a-loop here is exactly the ">500ms responses,
+    // connection saturation" anti-pattern once there are more than a
+    // handful of unattributed expenses). Each statement binds only
+    // budgetItemTrackId + datetimeUpdated + the id in WHERE — 3 params — so
+    // 20 statements per db.batch() call is nowhere near the 100-bound-param
+    // cap; 20 is kept only for parity with the insert chunk size above, not
+    // because these narrow statements require it.
+    // Read-then-write, not atomic (D1 has no transactions): between the read
+    // above and these updates another writer could change the picture.
+    // Acceptable here — this is an idempotent, re-runnable best-effort seed,
+    // not a financial ledger post.
+    const attributionNow = new Date();
+    for (const rowsChunk of chunk(attributionUpdates, 20)) {
+      if (rowsChunk.length === 0) continue;
+      const stmts: BatchItem<"sqlite">[] = rowsChunk.map((row) =>
+        db
+          .update(budgetExpenseEntries)
+          .set({ budgetItemTrackId: row.trackId, datetimeUpdated: attributionNow })
+          .where(eq(budgetExpenseEntries.id, row.id)),
+      );
+      await db.batch(stmts as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+    }
+    const expensesAttributed = attributionUpdates.length;
 
     await emitBudgetRealtime(c.env, {
       event: "budget.grid.seeded",

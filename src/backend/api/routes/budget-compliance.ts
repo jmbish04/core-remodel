@@ -20,11 +20,11 @@
  * built yet). A contract with no row for a gate type reads as `na` — never
  * fabricated as `pass`.
  *
- * D1 shape: one `db.batch([...])` with two independent SELECTs — contracts
- * (joined to vendor + linked-estimate money) and ALL compliance-gate rows
- * (this table is small: at most 4 rows per contract, capped by the unique
- * index in `contract_compliance_gates.ts`) — stitched together in the
- * Worker by `contractId`. No per-contract follow-up query.
+ * D1 shape: `GET /compliance?limit=&cursor=` keyset-paginates ACTIVE
+ * contracts (never an unbounded table scan), then fetches compliance-gate
+ * rows scoped to exactly that page's contract ids — chunked at 90 ids and
+ * `db.batch()`'d per D1's 100-bound-parameter cap — and stitches them
+ * together in the Worker by `contractId`. No per-contract follow-up query.
  */
 import {
   contractComplianceGates,
@@ -33,7 +33,13 @@ import {
   estimateRevisions,
   estimates,
 } from "@backend/db";
-import { eq } from "drizzle-orm";
+import {
+  capForContractCents,
+  downPaymentCapVerdict,
+  licenseActiveVerdict,
+  LICENSE_WARN_WINDOW_SECONDS,
+} from "@backend/services/budget/compliance-gates";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
@@ -66,7 +72,18 @@ const GATE_LABELS: Record<GateType, string> = {
 // "reducing rows in JS" targets aggregating many DB rows (money, counts),
 // which the gates-table half of this already avoids via db.batch fetching
 // every row in one shot rather than N+1.
-const SEVERITY: Record<GateState, number> = { na: 0, pass: 0, warn: 1, fail: 2 };
+//
+// `na` is NOT folded into "ok". `na` means "nothing has evaluated this gate
+// yet" — an absence of evidence, not a pass. Two of the four gates
+// (signed_change_order, lien_release) are always `na` until the evaluation
+// pipeline referenced in the file header exists, so treating `na` as `ok`
+// would render a green "ok" badge for a contract nothing has actually
+// checked. `na` therefore carries the same severity as `warn`: it can never
+// win over a real `fail`, but it can never silently present as `ok` either.
+// Kept inside the existing "ok" | "block" | "warn" response enum (no schema
+// change) rather than adding a fourth overall state — see the report for
+// why that's the call.
+const SEVERITY: Record<GateState, number> = { na: 1, pass: 0, warn: 1, fail: 2 };
 
 function overallStateOf(states: GateState[]): "ok" | "block" | "warn" {
   const worst = Math.max(...states.map((s) => SEVERITY[s]));
@@ -80,7 +97,8 @@ function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function evidenceOf(markdown: string): { markdown: string; html: string } {
@@ -99,32 +117,37 @@ function formatDate(ms: number): string {
 
 // --- down_payment_cap ----------------------------------------------------
 
-/**
- * California Business & Professions Code §7159.5 — a home improvement
- * contract's down payment may not exceed the LESSER of $1,000 or 10% of the
- * contract price (finance charges excluded). Integer-cents arithmetic only:
- * 10% via floor(contractValueCents / 10), never a float multiply — flooring
- * rounds the cap DOWN, which is the conservative (more strict) direction.
- */
-export function capForContractCents(contractValueCents: number): number {
-  return Math.min(100_000, Math.floor(contractValueCents / 10));
-}
-
-function downPaymentGate(
+// California Business & Professions Code §7159.5 — a home improvement
+// contract's down payment may not exceed the LESSER of $1,000 or 10% of the
+// contract price (finance charges excluded). The verdict itself
+// (capForContractCents + the pass/fail call) is SHARED math imported from
+// `@backend/services/budget/compliance-gates` — budget-workbench.ts's header
+// badge and decision inbox count/rank on the exact same function, so the two
+// surfaces cannot disagree about which contracts are over the cap. This file
+// only adds the human-readable evidence text on top of that shared verdict.
+export function downPaymentGate(
   contractValueCents: number | null,
   depositAmountCents: number | null,
 ): Gate {
   if (contractValueCents == null || depositAmountCents == null) {
+    // Say which value is actually missing — "no down payment" when the
+    // contract price is the thing that's absent is misleading.
+    const missing =
+      contractValueCents == null && depositAmountCents == null
+        ? "No contract price or down payment recorded for this contract yet."
+        : contractValueCents == null
+          ? "No contract price recorded for this contract yet."
+          : "No down payment recorded for this contract yet.";
     return {
       gateType: "down_payment_cap",
       label: GATE_LABELS.down_payment_cap,
       state: "na",
-      evidence: evidenceOf("No down payment recorded for this contract yet."),
+      evidence: evidenceOf(missing),
       expiresAt: null,
     };
   }
+  const state = downPaymentCapVerdict(contractValueCents, depositAmountCents);
   const capCents = capForContractCents(contractValueCents);
-  const state: GateState = depositAmountCents > capCents ? "fail" : "pass";
   const verb = state === "fail" ? "requested" : "collected";
   const comparison = state === "fail" ? "exceeds" : "under";
   const markdown =
@@ -142,7 +165,9 @@ function downPaymentGate(
 
 // --- license_active --------------------------------------------------------
 
-const WARN_WINDOW_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+// The pass/warn/fail verdict is shared math (see the down_payment_cap note
+// above) — LICENSE_WARN_WINDOW_SECONDS from compliance-gates.ts is the same
+// 60-day window budget-workbench.ts counts/ranks against.
 
 function licenseGate(licenseExpiresAt: Date | null, nowMs: number): Gate {
   if (!licenseExpiresAt) {
@@ -155,17 +180,14 @@ function licenseGate(licenseExpiresAt: Date | null, nowMs: number): Gate {
     };
   }
   const expiresAtMs = licenseExpiresAt.getTime();
-  const msLeft = expiresAtMs - nowMs;
-  let state: GateState;
+  const state = licenseActiveVerdict(licenseExpiresAt, nowMs);
+  const warnWindowDays = Math.round(LICENSE_WARN_WINDOW_SECONDS / (24 * 60 * 60));
   let markdown: string;
-  if (msLeft < 0) {
-    state = "fail";
+  if (state === "fail") {
     markdown = `License expired ${formatDate(expiresAtMs)}.`;
-  } else if (msLeft <= WARN_WINDOW_MS) {
-    state = "warn";
-    markdown = `License expires ${formatDate(expiresAtMs)} — renew within 60 days.`;
+  } else if (state === "warn") {
+    markdown = `License expires ${formatDate(expiresAtMs)} — renew within ${warnWindowDays} days.`;
   } else {
-    state = "pass";
     markdown = `Verified with CSLB · expires ${formatMonthYear(expiresAtMs)}.`;
   }
   return {
@@ -205,9 +227,12 @@ function gateFromRow(
     gateType,
     label: GATE_LABELS[gateType],
     state,
+    // markdown and html are different formats — never cross them. If only
+    // one was stored, the other stays null rather than being filled from
+    // the wrong format (raw HTML is not valid markdown, and vice versa).
     evidence: hasEvidence
       ? {
-          markdown: row.evidenceMarkdown ?? (row.evidenceHtml ? row.evidenceHtml : null),
+          markdown: row.evidenceMarkdown,
           html:
             row.evidenceHtml ??
             (row.evidenceMarkdown ? `<p>${escapeHtml(row.evidenceMarkdown)}</p>` : null),
@@ -217,13 +242,57 @@ function gateFromRow(
   };
 }
 
+// --- pagination --------------------------------------------------------
+
+// API-CONTRACT.md §8 originally shipped `{ contracts: [...] }` with no
+// pagination — but D1-DRIZZLE-RULES.md's own pre-merge checklist bans an
+// unbounded list endpoint, and this query had neither a WHERE-scoped gates
+// join nor a LIMIT. Adding keyset pagination here widens the response with
+// `nextCursor` (see the report — flagging for the frontend client + the
+// contract doc to catch up).
+const PAGE_LIMIT_DEFAULT = 50;
+const PAGE_LIMIT_MAX = 100;
+// D1 caps a statement at 100 bound parameters (D1-DRIZZLE-RULES.md §4); the
+// gates follow-up query binds one parameter per contract id via inArray, so
+// chunk at 90 and db.batch() the chunks rather than risk one query at the
+// boundary.
+const GATE_ID_CHUNK_SIZE = 90;
+
+function chunk<T>(values: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+
 // --- GET /api/budget/compliance ---------------------------------------------
 
 budgetComplianceRouter.get("/compliance", async (c) => {
   try {
     const db = drizzle(c.env.DB);
 
-    const contractsQuery = db
+    const rawLimit = c.req.query("limit");
+    let limit = PAGE_LIMIT_DEFAULT;
+    if (rawLimit !== undefined) {
+      const parsed = Number(rawLimit);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > PAGE_LIMIT_MAX) {
+        return c.json({ error: `limit must be an integer between 1 and ${PAGE_LIMIT_MAX}` }, 400);
+      }
+      limit = parsed;
+    }
+
+    const rawCursor = c.req.query("cursor");
+    let cursorId: number | undefined;
+    if (rawCursor !== undefined) {
+      if (!/^\d+$/.test(rawCursor)) {
+        return c.json({ error: "cursor must be a numeric contract id" }, 400);
+      }
+      cursorId = Number(rawCursor);
+    }
+
+    // Page the ACTIVE contracts only — never every row in the table. Gates
+    // are then scoped to exactly this page's contract ids below, so the
+    // gates query never reads gates belonging to inactive contracts either.
+    const contractRowsPlusOne = await db
       .select({
         contractId: contracts.id,
         vendorName: estimateCompanies.name,
@@ -237,20 +306,41 @@ budgetComplianceRouter.get("/compliance", async (c) => {
       .leftJoin(estimateCompanies, eq(contracts.estimateCompanyId, estimateCompanies.id))
       .leftJoin(estimates, eq(contracts.linkedEstimateId, estimates.id))
       .leftJoin(estimateRevisions, eq(estimates.currentRevisionId, estimateRevisions.id))
-      .where(eq(contracts.isActive, true));
+      .where(
+        and(
+          eq(contracts.isActive, true),
+          cursorId !== undefined ? gt(contracts.id, cursorId) : undefined,
+        ),
+      )
+      .orderBy(asc(contracts.id))
+      .limit(limit + 1);
 
-    const gatesQuery = db
-      .select({
-        contractId: contractComplianceGates.contractId,
-        gateType: contractComplianceGates.gateType,
-        state: contractComplianceGates.state,
-        evidenceMarkdown: contractComplianceGates.evidenceMarkdown,
-        evidenceHtml: contractComplianceGates.evidenceHtml,
-        expiresAt: contractComplianceGates.expiresAt,
-      })
-      .from(contractComplianceGates);
+    const hasMore = contractRowsPlusOne.length > limit;
+    const contractRows = contractRowsPlusOne.slice(0, limit);
+    const contractIds = contractRows.map((row) => row.contractId);
 
-    const [contractRows, gateRows] = await db.batch([contractsQuery, gatesQuery]);
+    // Gates for exactly this page's contracts, chunked at the D1 bound-
+    // parameter cap and batched into one round trip per chunk.
+    const idChunks = chunk(contractIds, GATE_ID_CHUNK_SIZE);
+    const gateQueries = idChunks.map((ids) =>
+      db
+        .select({
+          contractId: contractComplianceGates.contractId,
+          gateType: contractComplianceGates.gateType,
+          state: contractComplianceGates.state,
+          evidenceMarkdown: contractComplianceGates.evidenceMarkdown,
+          evidenceHtml: contractComplianceGates.evidenceHtml,
+          expiresAt: contractComplianceGates.expiresAt,
+        })
+        .from(contractComplianceGates)
+        .where(inArray(contractComplianceGates.contractId, ids)),
+    );
+    const gateRowChunks = gateQueries.length
+      ? await db.batch(
+          gateQueries as [(typeof gateQueries)[number], ...(typeof gateQueries)[number][]],
+        )
+      : [];
+    const gateRows = gateRowChunks.flat();
 
     const gatesByContract = new Map<number, Map<string, (typeof gateRows)[number]>>();
     for (const row of gateRows) {
@@ -287,7 +377,9 @@ budgetComplianceRouter.get("/compliance", async (c) => {
       };
     });
 
-    return c.json({ contracts: responseContracts });
+    const nextCursor = hasMore ? String(contractIds[contractIds.length - 1]) : null;
+
+    return c.json({ contracts: responseContracts, nextCursor });
   } catch (error) {
     return c.json(
       {
@@ -301,33 +393,14 @@ budgetComplianceRouter.get("/compliance", async (c) => {
 
 export { budgetComplianceRouter };
 
-// --- self-check ------------------------------------------------------------
-
-/** ponytail: self-check for the CSLB down-payment-cap math — money/compliance logic. */
-export function __selfCheck(): void {
-  // $118,400 contract → 10% = $11,840, cap = lesser of $1,000 or $11,840 = $1,000.
-  console.assert(capForContractCents(118_400_00) === 100_000, "large contract caps at $1,000");
-  // $9,500 contract → 10% = $950, which is under $1,000, so cap = $950.
-  console.assert(capForContractCents(9_500_00) === 95_000, "small contract caps at 10%");
-  // Exact boundary: $10,000 contract → 10% = $1,000 = the flat cap either way.
-  console.assert(capForContractCents(10_000_00) === 100_000, "boundary contract caps at $1,000");
-  // Non-round cents: floor(9_995_00 / 10) = 99_950 — never a float multiply artifact.
-  console.assert(capForContractCents(9_995_00) === 99_950, "10% floors exactly, no float drift");
-
-  console.assert(
-    downPaymentGate(118_400_00, 400_000).state === "fail",
-    "$4,000 down payment on a $118,400 contract must fail (cap is $1,000)",
-  );
-  console.assert(
-    downPaymentGate(31_600_00, 95_000).state === "pass",
-    "$950 down payment on a $31,600 contract must pass (cap is $1,000)",
-  );
-  console.assert(
-    downPaymentGate(null, 100_000).state === "na",
-    "no contract value on file must be na, never pass",
-  );
-  console.assert(
-    downPaymentGate(118_400_00, null).state === "na",
-    "no recorded down payment must be na, never pass",
-  );
-}
+// Self-check deliberately NOT here: this file is the route module itself,
+// reachable from the Worker's entry point, so anything in it (including a
+// console.assert self-test) ships in the deployed Worker bundle — this repo
+// has hit Cloudflare's 10 MiB Worker script-size cap once already (see
+// worker-10mb-liteparse-blocker in project memory / budget-grid-math.ts's
+// identical note). The self-check lives instead in
+// `scripts/tests/test_budget_compliance.mjs`, a standalone Node script that
+// dynamically imports `capForContractCents` (from the shared
+// services/budget/compliance-gates module) and this file's local
+// `downPaymentGate`, and is never part of the Worker bundle. Run it with:
+//   npx tsx scripts/tests/test_budget_compliance.mjs

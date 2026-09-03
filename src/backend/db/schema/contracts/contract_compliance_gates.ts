@@ -33,5 +33,10 @@ export const contractComplianceGates = sqliteTable(
       t.contractId,
       t.state,
     ),
+    // GET /api/budget/workbench-summary and /inbox (budget-workbench.ts) filter
+    // on state ALONE (no contractId predicate) to count/rank fail+warn gates
+    // across every contract — the composite index above can't serve a
+    // state-only WHERE, so it scans the whole table without this.
+    stateIdx: index("idx_contract_compliance_gates_state").on(t.state),
   }),
 );

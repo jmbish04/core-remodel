@@ -87,12 +87,12 @@ assert.strictEqual(tile.cells["2026-03"].plannedCents, null);
 assert.strictEqual(tile.cells["2026-03"].actualCents, null);
 assert.strictEqual(tile.cells["2026-03"].isEditable, true, "empty cell -> editable");
 assert.strictEqual(tile.totalCents, 11600, "totalCents = sum of planned across the window");
-assert.strictEqual(tile.varianceCents, 11600 - 4200, "varianceCents = planned - actual");
+assert.strictEqual(tile.varianceCents, 4200 - 11600, "varianceCents = actual - planned; positive = over budget");
 assert.strictEqual(tile.note, "slab upgrade");
 
 const cabinetry = finishes.rows.find((r) => r.trackId === "t2");
 assert.strictEqual(cabinetry.totalCents, 20500);
-assert.strictEqual(cabinetry.varianceCents, 20500, "no actuals posted -> full planned variance");
+assert.strictEqual(cabinetry.varianceCents, -20500, "nothing spent -> fully UNDER by the planned amount");
 
 assert.strictEqual(finishes.subtotalCents, tile.totalCents + cabinetry.totalCents);
 

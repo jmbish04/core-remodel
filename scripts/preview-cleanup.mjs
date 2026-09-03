@@ -41,14 +41,55 @@ function sh(cmd, args) {
  * Live worker names on the account.
  *
  * `wrangler` has no command that lists an account's Workers, so this uses the
- * REST API. NOTE the token: `CLOUDFLARE_API_TOKEN` is NOT the one with Workers
- * scope on this account — `CLOUDFLARE_EDIT_WORKERS_API_TOKEN` is. Both live
- * inside one JSON blob in the tokens store.
+ * REST API. `CLOUDFLARE_API_TOKEN` is NOT the one with Workers scope here —
+ * `CLOUDFLARE_EDIT_WORKERS_API_TOKEN` is, with `CLOUDFLARE_WRANGLER_API_TOKEN`
+ * as the fallback.
+ *
+ * These used to be bundled inside one JSON blob under `CLOUDFLARE_API_TOKEN`;
+ * they are now separate entries in the tokens store. Both shapes are handled,
+ * because assuming either one silently broke the orphan sweep — the failure
+ * mode is preview workers quietly accumulating on an account that already
+ * carries ~184 of them.
  */
+/**
+ * The Workers-scoped token, from separate store entries or the legacy JSON blob.
+ * Never interpolate the value into an error — a credential must not reach a log.
+ */
+function workersScopedToken() {
+  for (const name of ["CLOUDFLARE_EDIT_WORKERS_API_TOKEN", "CLOUDFLARE_WRANGLER_API_TOKEN"]) {
+    try {
+      const value = getToken(name).trim();
+      if (value && !value.startsWith("{")) return value;
+    } catch {
+      // Not in the store under this name — try the next.
+    }
+  }
+  // Legacy shape: one JSON blob under CLOUDFLARE_API_TOKEN.
+  try {
+    const raw = getToken("CLOUDFLARE_API_TOKEN").trim();
+    if (raw.startsWith("{")) {
+      const blob = JSON.parse(raw);
+      return blob.CLOUDFLARE_EDIT_WORKERS_API_TOKEN ?? blob.CLOUDFLARE_WRANGLER_API_TOKEN ?? null;
+    }
+  } catch {
+    // Fall through to the caller's error.
+  }
+  return null;
+}
+
 async function liveWorkerNames() {
-  const blob = JSON.parse(getToken("CLOUDFLARE_API_TOKEN").trim());
-  const token = blob.CLOUDFLARE_EDIT_WORKERS_API_TOKEN ?? blob.CLOUDFLARE_WRANGLER_API_TOKEN;
-  if (!token) throw new Error("No Workers-scoped Cloudflare token available.");
+  // Parse defensively: `getToken` will hand back a bare token string if
+  // CLOUDFLARE_API_TOKEN happens to be exported in the shell (as it is during a
+  // manual `wrangler` session), and the raw JSON.parse error echoes that token
+  // into the log. Never put a credential in an error message.
+  const token = workersScopedToken();
+  if (!token) {
+    throw new Error(
+      "No Workers-scoped Cloudflare token available. Expected " +
+        "CLOUDFLARE_EDIT_WORKERS_API_TOKEN or CLOUDFLARE_WRANGLER_API_TOKEN in " +
+        "the tokens store.",
+    );
+  }
   const accountId = getToken("CLOUDFLARE_ACCOUNT_ID").trim();
 
   const res = await fetch(

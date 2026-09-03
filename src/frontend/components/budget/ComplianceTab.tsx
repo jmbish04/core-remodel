@@ -166,7 +166,13 @@ function ContractCard({ contract }: { contract: ComplianceContract }) {
 }
 
 export function ComplianceTab() {
-  const { data, error, isLoading, refetch } = useBudgetQuery(getCompliance, []);
+  // The route is keyset-paginated. Passing no params takes the first page;
+  // `nextCursor` drives Load more below, so a long contract list is not
+  // silently truncated the way the reconciliation queue was.
+  const { data, error, isLoading, refetch } = useBudgetQuery(
+    (signal) => getCompliance({}, signal),
+    [],
+  );
 
   return (
     <Card>

@@ -87,6 +87,27 @@ function chunk<T>(values: T[], size: number): T[][] {
   return out;
 }
 
+/**
+ * A Unix timestamp in seconds or milliseconds, or null if the number is not
+ * plausibly either. The window is 2001-09-09 to 2096-10-02, wide enough for any
+ * real project date and narrow enough that a compact date like 20260903 falls
+ * through to normal date parsing instead of being read as 1970.
+ */
+function fromEpochNumber(value: number): Date | null {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const SEC_MIN = 1_000_000_000;
+  const SEC_MAX = 4_000_000_000;
+  const ms =
+    value >= SEC_MIN && value <= SEC_MAX
+      ? value * 1000
+      : value >= SEC_MIN * 1000 && value <= SEC_MAX * 1000
+        ? value
+        : null;
+  if (ms === null) return null;
+  const parsed = new Date(ms);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function parseTimestamp(input: unknown): Date | null {
   // Numbers are accepted as Unix SECONDS, which is what the D1 columns store
   // (`integer(..., { mode: "timestamp" })` + `unixepoch()`) and what the Budget
@@ -94,18 +115,18 @@ function parseTimestamp(input: unknown): Date | null {
   // silently: the insert succeeded with `date_incurred` unset, so a logged
   // expense looked saved but had no date. Milliseconds are detected by
   // magnitude so an accidental Date.now() is not read as the year 56000.
-  if (typeof input === "number") {
-    if (!Number.isFinite(input) || input <= 0) return null;
-    const ms = input > 1e11 ? input : input * 1000;
-    const parsed = new Date(ms);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
+  if (typeof input === "number") return fromEpochNumber(input);
   if (typeof input !== "string") return null;
   const trimmed = input.trim();
   if (!trimmed) return null;
   // An all-digit string is a Unix timestamp, not a date string: `new Date("0")`
-  // parses as the year 2000 rather than the epoch.
-  if (/^\d+$/.test(trimmed)) return parseTimestamp(Number(trimmed));
+  // parses as the year 2000 rather than the epoch. But only when the magnitude
+  // is actually epoch-shaped — "20260903" is a compact DATE, and treating it as
+  // seconds would silently yield 1970 where this used to (correctly) reject it.
+  if (/^\d+$/.test(trimmed)) {
+    const asEpoch = fromEpochNumber(Number(trimmed));
+    if (asEpoch) return asEpoch;
+  }
   const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

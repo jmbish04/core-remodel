@@ -127,6 +127,12 @@ One grouped query with LEFT JOINs. No per-room follow-up query.
     risk: "ok" | "watch" | "at_risk";
   }>;
   totals: { committedCents: number; spentCents: number; remainingCents: number; openMaterialsCount: number };
+  // `totals` minus the sum of the rows. The totals are project-wide on purpose
+  // — an item mapped to several rooms would double-count if summed across rows,
+  // and money with no room at all would vanish — so the Total row does not
+  // always equal the column above it. The UI renders this delta by name instead
+  // of leaving a reader to add the column and find a different number.
+  unassigned: { committedCents: number; spentCents: number; remainingCents: number; openMaterialsCount: number };
 }
 ```
 
@@ -212,10 +218,16 @@ chunked at 20 rows (D1 caps a statement at 100 bound parameters).
 { openingReserveCents: number; currentBalanceCents: number; pctRemaining: number }
 ```
 
-## 8. `GET /api/budget/compliance`
+## 8. `GET /api/budget/compliance?limit=&cursor=`
 
 Contracts joined to their gates in one batch; the block/ok rollup computed in
-SQL.
+SQL. Keyset-paginated on `contracts.id`, and the gate query is scoped to the
+page's contract ids (chunked at 90 for D1's bound-parameter cap) rather than
+reading the whole table.
+
+`overallState` never reports `ok` for a contract whose gates are all `na`. An
+absence of evidence is not a pass on a compliance surface, so unevaluated
+gates carry the same weight as a warning.
 
 ```ts
 {
@@ -234,6 +246,7 @@ SQL.
       expiresAt: number | null;
     }>;
   }>;
+  nextCursor: string | null;
 }
 ```
 

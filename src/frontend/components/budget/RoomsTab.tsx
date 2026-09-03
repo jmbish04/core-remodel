@@ -164,12 +164,23 @@ export function RoomsTab() {
     );
   }
 
-  const totals = data?.totals ?? {
+  const ZERO_TOTALS = {
     committedCents: 0,
     spentCents: 0,
     remainingCents: 0,
     openMaterialsCount: 0,
   };
+  const totals = data?.totals ?? ZERO_TOTALS;
+
+  // The Total row is project-wide, so it does not always equal the column above
+  // it: money attached to no room, and items mapped to several rooms, live in
+  // this gap. Naming it is the difference between a reader trusting the table
+  // and a reader finding two numbers that disagree.
+  const unassigned = data?.unassigned ?? ZERO_TOTALS;
+  const hasUnassigned =
+    unassigned.committedCents !== 0 ||
+    unassigned.spentCents !== 0 ||
+    unassigned.openMaterialsCount !== 0;
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -222,6 +233,29 @@ export function RoomsTab() {
           ))}
         </TableBody>
         <TableFooter>
+          {hasUnassigned && (
+            <TableRow className="text-muted-foreground">
+              <TableCell className="font-medium">
+                Not assigned to a room
+                <span className="ml-2 text-xs font-normal">
+                  counted in the total, not in the rows above
+                </span>
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums">
+                {formatCents(unassigned.committedCents)}
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums">
+                {formatCents(unassigned.spentCents)}
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums">
+                {formatCents(unassigned.remainingCents)}
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums">
+                {unassigned.openMaterialsCount}
+              </TableCell>
+              <TableCell aria-hidden />
+            </TableRow>
+          )}
           <TableRow>
             <TableCell className="font-semibold">Total</TableCell>
             <TableCell className="text-right font-mono font-semibold tabular-nums">

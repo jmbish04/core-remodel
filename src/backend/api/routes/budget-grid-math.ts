@@ -402,8 +402,15 @@ export function monthStartEpochSeconds(period: string): number {
  * Row total/variance are scoped to the visible window only (matches the
  * design comp's per-row Total column, which sums only the visible months):
  *   totalCents    = sum(plannedCents) across cells in the window
- *   varianceCents = totalPlannedCents - totalActualCents ("planned − actual",
- *                   the same convention `budget_plan_schedule.ts` documents)
+ *   varianceCents = totalActualCents - totalPlannedCents  ("actual − planned")
+ *
+ * The sign convention is POSITIVE = OVER BUDGET, matching
+ * `workbench-summary`'s `varianceVsEstimateCents` (API-CONTRACT.md §1) and the
+ * per-cell variance the grid already renders. `budget_plan_schedule.ts`
+ * documents the opposite convention for its own column; this row-level figure
+ * is the one the UI labels "over"/"under", so it follows the UI's convention
+ * and not that column's. Getting this backwards shows an amber "over" warning
+ * on a line that has spent nothing.
  */
 export function pivotBudgetGrid(
   months: string[],
@@ -447,7 +454,7 @@ export function pivotBudgetGrid(
       note: item.note,
       cells,
       totalCents: totalPlanned,
-      varianceCents: totalPlanned - totalActual,
+      varianceCents: totalActual - totalPlanned,
     };
     const bucket = rowsByPhaseId.get(phaseId) ?? [];
     bucket.push(row);

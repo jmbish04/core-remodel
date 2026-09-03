@@ -134,7 +134,7 @@ export function BudgetWorkbench() {
           {summary && (
             <>
               <Progress
-                value={Math.round(summary.kpis.spentPctOfBudget * 100)}
+                value={Math.max(0, Math.min(100, Math.round(summary.kpis.spentPctOfBudget * 100)))}
                 className="mt-2.5"
               />
               <div className="mt-1 text-[11px] text-muted-foreground">
@@ -147,8 +147,12 @@ export function BudgetWorkbench() {
           label="Remaining"
           value={summary ? formatCents(summary.kpis.remainingCents) : "—"}
           sub={
-            summary?.kpis.runwayMonths != null
-              ? `≈ ${summary.kpis.runwayMonths.toFixed(1)} months at current burn`
+            summary
+              ? summary.kpis.remainingCents < 0
+                ? "Over budget"
+                : summary.kpis.runwayMonths != null
+                  ? `≈ ${summary.kpis.runwayMonths.toFixed(1)} months at current burn`
+                  : undefined
               : undefined
           }
         />

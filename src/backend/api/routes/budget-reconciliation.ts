@@ -32,7 +32,7 @@ import {
   rooms,
 } from "@backend/db";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 // ---------------------------------------------------------------------------
@@ -93,6 +93,22 @@ const RejectResponseSchema = z.object({
   mappingStatus: z.string(),
   reason: z.string().nullable(),
 });
+
+const REJECT_NOTE_PREFIX = "Rejected: ";
+// estimate_line_items has no dedicated rejection-reason column (see the
+// handler below), so rejections append to the free-text `notes` field —
+// bound the growth and skip a repeat of the exact same reason so re-clicking
+// "reject" with an unchanged reason doesn't grow the field forever.
+const REJECT_NOTE_MAX_LINES = 20;
+
+export function appendRejectionNote(priorNotes: string | null, reason: string | undefined): string | null {
+  if (!reason) return priorNotes;
+  const entry = `${REJECT_NOTE_PREFIX}${reason}`;
+  const lines = (priorNotes ?? "").split("\n").filter((line) => line.length > 0);
+  if (lines[lines.length - 1] === entry) return priorNotes; // identical repeat, no-op
+  lines.push(entry);
+  return lines.slice(-REJECT_NOTE_MAX_LINES).join("\n");
+}
 
 // ---------------------------------------------------------------------------
 // Router
@@ -280,7 +296,15 @@ budgetReconciliationRouter.openapi(
             mappingStatus: estimateLineItems.mappingStatus,
           }),
       ]);
-      const updated = updatedRows[0]!;
+      // The row passed the validation batch above but can still be deleted
+      // between that read and this write — a read-then-write race that D1's
+      // per-statement atomicity doesn't cover (db.batch is atomic across the
+      // statements it's given, not across separate batches). Surface it as a
+      // 404, not a 500 from an unchecked `[0]!`.
+      const updated = updatedRows[0];
+      if (!updated) {
+        return c.json({ error: `Line item ${lineItemId} no longer exists` }, 404);
+      }
 
       return c.json(
         { lineItemId: updated.id, roomId: updated.roomId!, mappingStatus: updated.mappingStatus },
@@ -311,6 +335,10 @@ budgetReconciliationRouter.openapi(
     responses: {
       200: { content: { "application/json": { schema: RejectResponseSchema } }, description: "Rejected" },
       404: { content: { "application/json": { schema: ErrorSchema } }, description: "Line item not found" },
+      409: {
+        content: { "application/json": { schema: ErrorSchema } },
+        description: "notes changed concurrently — reload and retry",
+      },
       500: { content: { "application/json": { schema: ErrorSchema } }, description: "Write failed" },
     },
     tags: ["budget-reconciliation"],
@@ -337,16 +365,31 @@ budgetReconciliationRouter.openapi(
       // authorized to make (schema/migrations belong to the S1 agent). Append
       // the reason to the existing `notes` field instead of dropping it —
       // add the column later if a structured reason ever needs to be queried.
-      const notes = reason
-        ? [prior.notes, `Rejected: ${reason}`].filter(Boolean).join("\n")
-        : prior.notes;
+      // Bounded + deduped by appendRejectionNote so repeated rejects don't
+      // grow the field forever (see report finding #5).
+      const notes = appendRejectionNote(prior.notes, reason);
 
-      await db.batch([
+      // The read (above) and this write are two separate D1 calls, so a read-
+      // between-writes race is possible — outside any atomic unit on D1
+      // (db.batch only makes the statements it's GIVEN atomic, not two
+      // separate batches). Guard it with optimistic concurrency: the UPDATE
+      // only applies if `notes` still matches what was just read; if another
+      // request changed it in between, zero rows update and this returns 409
+      // instead of silently discarding one of the two writers' notes.
+      const notesMatch = prior.notes === null ? isNull(estimateLineItems.notes) : eq(estimateLineItems.notes, prior.notes);
+      const [updatedRows] = await db.batch([
         db
           .update(estimateLineItems)
           .set({ mappingStatus: "rejected", notes, datetimeUpdated: new Date() })
-          .where(eq(estimateLineItems.id, lineItemId)),
+          .where(and(eq(estimateLineItems.id, lineItemId), notesMatch))
+          .returning({ id: estimateLineItems.id }),
       ]);
+      if (!updatedRows[0]) {
+        return c.json(
+          { error: `Line item ${lineItemId} was modified concurrently — reload and retry` },
+          409,
+        );
+      }
 
       return c.json({ lineItemId, mappingStatus: "rejected", reason: reason ?? null }, 200);
     } catch (error) {

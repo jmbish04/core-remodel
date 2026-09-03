@@ -61,7 +61,7 @@ const CONTINGENCY_ACCOUNT_KEY = "contingency_reserve";
 
 // ─── Shared shapes ─────────────────────────────────────────────────────────
 
-const errorSchema = z.object({ error: z.string() });
+const errorSchema = z.object({ error: z.string(), details: z.string().optional() });
 
 /**
  * `from` and `to` share one shape now that contingency is a plain account:
@@ -195,75 +195,89 @@ budgetReallocationsRouter.openapi(
         description: "Bad limit/cursor",
         content: { "application/json": { schema: errorSchema } },
       },
+      500: {
+        description: "Query failed",
+        content: { "application/json": { schema: errorSchema } },
+      },
     },
   }),
   async (c) => {
-    const { limit: limitRaw, cursor: cursorRaw } = c.req.valid("query");
+    try {
+      const { limit: limitRaw, cursor: cursorRaw } = c.req.valid("query");
 
-    const limit = limitRaw === undefined ? DEFAULT_LIMIT : Number(limitRaw);
-    if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-      return c.json({ error: `limit must be an integer between 1 and ${MAX_LIMIT}` }, 400);
+      const limit = limitRaw === undefined ? DEFAULT_LIMIT : Number(limitRaw);
+      if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+        return c.json({ error: `limit must be an integer between 1 and ${MAX_LIMIT}` }, 400);
+      }
+
+      let cursor: { occurredAt: Date; id: number } | null = null;
+      if (cursorRaw !== undefined) {
+        cursor = decodeCursor(cursorRaw);
+        if (!cursor) return c.json({ error: "cursor is malformed" }, 400);
+      }
+
+      const db = drizzle(c.env.DB);
+      // No special-casing for the contingency account here — it is a normal
+      // budget_funding_accounts row, so the generic fromAccount/toAccount
+      // joins below pick up its label like any other account.
+      const fromAccount = alias(budgetFundingAccounts, "realloc_from_account");
+      const toAccount = alias(budgetFundingAccounts, "realloc_to_account");
+      const fromRoom = alias(rooms, "realloc_from_room");
+      const toRoom = alias(rooms, "realloc_to_room");
+
+      const keysetWhere = cursor
+        ? or(
+            lt(budgetReallocationLedger.occurredAt, cursor.occurredAt),
+            and(
+              eq(budgetReallocationLedger.occurredAt, cursor.occurredAt),
+              lt(budgetReallocationLedger.id, cursor.id),
+            ),
+          )
+        : undefined;
+
+      const rows = await db
+        .select({
+          id: budgetReallocationLedger.id,
+          occurredAt: budgetReallocationLedger.occurredAt,
+          eventTitle: budgetReallocationLedger.eventTitle,
+          eventDetail: budgetReallocationLedger.eventDetail,
+          amountCents: budgetReallocationLedger.amountCents,
+          amountText: budgetReallocationLedger.amountText,
+          referenceType: budgetReallocationLedger.referenceType,
+          referenceId: budgetReallocationLedger.referenceId,
+          fromAccountId: budgetReallocationLedger.fromAccountId,
+          fromAccountLabel: fromAccount.accountLabel,
+          fromRoomId: budgetReallocationLedger.fromRoomId,
+          fromRoomName: fromRoom.roomName,
+          toAccountId: budgetReallocationLedger.toAccountId,
+          toAccountLabel: toAccount.accountLabel,
+          toRoomId: budgetReallocationLedger.toRoomId,
+          toRoomName: toRoom.roomName,
+        })
+        .from(budgetReallocationLedger)
+        .leftJoin(fromAccount, eq(budgetReallocationLedger.fromAccountId, fromAccount.id))
+        .leftJoin(toAccount, eq(budgetReallocationLedger.toAccountId, toAccount.id))
+        .leftJoin(fromRoom, eq(budgetReallocationLedger.fromRoomId, fromRoom.id))
+        .leftJoin(toRoom, eq(budgetReallocationLedger.toRoomId, toRoom.id))
+        .where(keysetWhere)
+        .orderBy(desc(budgetReallocationLedger.occurredAt), desc(budgetReallocationLedger.id))
+        .limit(limit + 1);
+
+      const hasNext = rows.length > limit;
+      const page = hasNext ? rows.slice(0, limit) : rows;
+      const last = page[page.length - 1];
+      const nextCursor = hasNext && last ? encodeCursor(last.occurredAt, last.id) : null;
+
+      return c.json({ entries: page.map(toEntryDto), nextCursor }, 200);
+    } catch (error) {
+      return c.json(
+        {
+          error: "Failed to load reallocation ledger",
+          details: error instanceof Error ? error.message : "Unknown error",
+        },
+        500,
+      );
     }
-
-    let cursor: { occurredAt: Date; id: number } | null = null;
-    if (cursorRaw !== undefined) {
-      cursor = decodeCursor(cursorRaw);
-      if (!cursor) return c.json({ error: "cursor is malformed" }, 400);
-    }
-
-    const db = drizzle(c.env.DB);
-    // No special-casing for the contingency account here — it is a normal
-    // budget_funding_accounts row, so the generic fromAccount/toAccount
-    // joins below pick up its label like any other account.
-    const fromAccount = alias(budgetFundingAccounts, "realloc_from_account");
-    const toAccount = alias(budgetFundingAccounts, "realloc_to_account");
-    const fromRoom = alias(rooms, "realloc_from_room");
-    const toRoom = alias(rooms, "realloc_to_room");
-
-    const keysetWhere = cursor
-      ? or(
-          lt(budgetReallocationLedger.occurredAt, cursor.occurredAt),
-          and(
-            eq(budgetReallocationLedger.occurredAt, cursor.occurredAt),
-            lt(budgetReallocationLedger.id, cursor.id),
-          ),
-        )
-      : undefined;
-
-    const rows = await db
-      .select({
-        id: budgetReallocationLedger.id,
-        occurredAt: budgetReallocationLedger.occurredAt,
-        eventTitle: budgetReallocationLedger.eventTitle,
-        eventDetail: budgetReallocationLedger.eventDetail,
-        amountCents: budgetReallocationLedger.amountCents,
-        amountText: budgetReallocationLedger.amountText,
-        referenceType: budgetReallocationLedger.referenceType,
-        referenceId: budgetReallocationLedger.referenceId,
-        fromAccountId: budgetReallocationLedger.fromAccountId,
-        fromAccountLabel: fromAccount.accountLabel,
-        fromRoomId: budgetReallocationLedger.fromRoomId,
-        fromRoomName: fromRoom.roomName,
-        toAccountId: budgetReallocationLedger.toAccountId,
-        toAccountLabel: toAccount.accountLabel,
-        toRoomId: budgetReallocationLedger.toRoomId,
-        toRoomName: toRoom.roomName,
-      })
-      .from(budgetReallocationLedger)
-      .leftJoin(fromAccount, eq(budgetReallocationLedger.fromAccountId, fromAccount.id))
-      .leftJoin(toAccount, eq(budgetReallocationLedger.toAccountId, toAccount.id))
-      .leftJoin(fromRoom, eq(budgetReallocationLedger.fromRoomId, fromRoom.id))
-      .leftJoin(toRoom, eq(budgetReallocationLedger.toRoomId, toRoom.id))
-      .where(keysetWhere)
-      .orderBy(desc(budgetReallocationLedger.occurredAt), desc(budgetReallocationLedger.id))
-      .limit(limit + 1);
-
-    const hasNext = rows.length > limit;
-    const page = hasNext ? rows.slice(0, limit) : rows;
-    const last = page[page.length - 1];
-    const nextCursor = hasNext && last ? encodeCursor(last.occurredAt, last.id) : null;
-
-    return c.json({ entries: page.map(toEntryDto), nextCursor }, 200);
   },
 );
 
@@ -360,64 +374,95 @@ budgetReallocationsRouter.openapi(
         description: "Bad reference",
         content: { "application/json": { schema: errorSchema } },
       },
+      500: {
+        description: "Write failed",
+        content: { "application/json": { schema: errorSchema } },
+      },
     },
   }),
   async (c) => {
-    const body = c.req.valid("json");
-    const db = drizzle(c.env.DB);
+    try {
+      const body = c.req.valid("json");
 
-    // ponytail: two independent single-row PK lookups on a low-traffic write
-    // path — not the N+1/screen-load case D1-DRIZZLE-RULES §2 targets, so
-    // plain sequential awaits rather than a batch() shaped for a fixed
-    // 2-query set. Each lookup also grabs the display label in the same
-    // round trip, so the response DTO below needs no follow-up read.
-    const fromResolved = await resolveRefInput(db, body.from, "from");
-    if ("error" in fromResolved) return c.json({ error: fromResolved.error }, 400);
-    const toResolved = await resolveRefInput(db, body.to, "to");
-    if ("error" in toResolved) return c.json({ error: toResolved.error }, 400);
+      // A transfer to itself is not a transfer — reject before touching the
+      // DB. Same check for "both sides external": that's money that never
+      // crossed the tracked budget boundary at all, not a reallocation.
+      if (body.from.kind === "external" && body.to.kind === "external") {
+        return c.json(
+          { error: "from and to cannot both be 'external' — that would not be a tracked transfer" },
+          400,
+        );
+      }
+      if (body.from.kind === body.to.kind && body.from.id !== null && body.from.id === body.to.id) {
+        return c.json(
+          { error: "from and to reference the same account/room — that is not a transfer" },
+          400,
+        );
+      }
 
-    const [inserted] = await db
-      .insert(budgetReallocationLedger)
-      .values({
-        occurredAt: new Date(body.occurredAt * 1000),
-        eventTitle: body.eventTitle,
-        eventDetail: body.eventDetail ?? null,
-        fromAccountId: fromResolved.accountId,
-        fromRoomId: fromResolved.roomId,
-        toAccountId: toResolved.accountId,
-        toRoomId: toResolved.roomId,
-        amountCents: body.amountCents,
-        amountText: body.amountText ?? null,
-        referenceType: body.referenceType ?? null,
-        referenceId: body.referenceId ?? null,
-      })
-      .returning();
+      const db = drizzle(c.env.DB);
 
-    if (!inserted) {
-      return c.json({ error: "Insert failed" }, 400);
+      // ponytail: two independent single-row PK lookups on a low-traffic write
+      // path — not the N+1/screen-load case D1-DRIZZLE-RULES §2 targets, so
+      // plain sequential awaits rather than a batch() shaped for a fixed
+      // 2-query set. Each lookup also grabs the display label in the same
+      // round trip, so the response DTO below needs no follow-up read.
+      const fromResolved = await resolveRefInput(db, body.from, "from");
+      if ("error" in fromResolved) return c.json({ error: fromResolved.error }, 400);
+      const toResolved = await resolveRefInput(db, body.to, "to");
+      if ("error" in toResolved) return c.json({ error: toResolved.error }, 400);
+
+      const [inserted] = await db
+        .insert(budgetReallocationLedger)
+        .values({
+          occurredAt: new Date(body.occurredAt * 1000),
+          eventTitle: body.eventTitle,
+          eventDetail: body.eventDetail ?? null,
+          fromAccountId: fromResolved.accountId,
+          fromRoomId: fromResolved.roomId,
+          toAccountId: toResolved.accountId,
+          toRoomId: toResolved.roomId,
+          amountCents: body.amountCents,
+          amountText: body.amountText ?? null,
+          referenceType: body.referenceType ?? null,
+          referenceId: body.referenceId ?? null,
+        })
+        .returning();
+
+      if (!inserted) {
+        return c.json({ error: "Insert failed" }, 400);
+      }
+
+      return c.json(
+        toEntryDto({
+          id: inserted.id,
+          occurredAt: inserted.occurredAt,
+          eventTitle: inserted.eventTitle,
+          eventDetail: inserted.eventDetail,
+          amountCents: inserted.amountCents,
+          amountText: inserted.amountText,
+          referenceType: inserted.referenceType,
+          referenceId: inserted.referenceId,
+          fromAccountId: fromResolved.accountId,
+          fromAccountLabel: fromResolved.accountLabel,
+          fromRoomId: fromResolved.roomId,
+          fromRoomName: fromResolved.roomName,
+          toAccountId: toResolved.accountId,
+          toAccountLabel: toResolved.accountLabel,
+          toRoomId: toResolved.roomId,
+          toRoomName: toResolved.roomName,
+        }),
+        201,
+      );
+    } catch (error) {
+      return c.json(
+        {
+          error: "Failed to record reallocation",
+          details: error instanceof Error ? error.message : "Unknown error",
+        },
+        500,
+      );
     }
-
-    return c.json(
-      toEntryDto({
-        id: inserted.id,
-        occurredAt: inserted.occurredAt,
-        eventTitle: inserted.eventTitle,
-        eventDetail: inserted.eventDetail,
-        amountCents: inserted.amountCents,
-        amountText: inserted.amountText,
-        referenceType: inserted.referenceType,
-        referenceId: inserted.referenceId,
-        fromAccountId: fromResolved.accountId,
-        fromAccountLabel: fromResolved.accountLabel,
-        fromRoomId: fromResolved.roomId,
-        fromRoomName: fromResolved.roomName,
-        toAccountId: toResolved.accountId,
-        toAccountLabel: toResolved.accountLabel,
-        toRoomId: toResolved.roomId,
-        toRoomName: toResolved.roomName,
-      }),
-      201,
-    );
   },
 );
 
@@ -437,46 +482,60 @@ budgetReallocationsRouter.openapi(
         description: "Contingency snapshot",
         content: { "application/json": { schema: contingencySchema } },
       },
+      500: {
+        description: "Query failed",
+        content: { "application/json": { schema: errorSchema } },
+      },
     },
   }),
   async (c) => {
-    const db = drizzle(c.env.DB);
+    try {
+      const db = drizzle(c.env.DB);
 
-    // Resolve the contingency account's id + opening amount once; the SUM
-    // query below depends on that id, so it cannot be pre-batched with this
-    // lookup (db.batch() issues all statements before any result is known).
-    const [reserveAccount] = await db
-      .select({ id: budgetFundingAccounts.id, amountCents: budgetFundingAccounts.amountCents })
-      .from(budgetFundingAccounts)
-      .where(eq(budgetFundingAccounts.accountKey, CONTINGENCY_ACCOUNT_KEY))
-      .limit(1);
+      // Resolve the contingency account's id + opening amount once; the SUM
+      // query below depends on that id, so it cannot be pre-batched with this
+      // lookup (db.batch() issues all statements before any result is known).
+      const [reserveAccount] = await db
+        .select({ id: budgetFundingAccounts.id, amountCents: budgetFundingAccounts.amountCents })
+        .from(budgetFundingAccounts)
+        .where(eq(budgetFundingAccounts.accountKey, CONTINGENCY_ACCOUNT_KEY))
+        .limit(1);
 
-    if (!reserveAccount) {
-      // No reserve has ever been allotted (set_funding_account never called
-      // for this key) — zeros, not an error, and not "fully spent".
-      return c.json({ openingReserveCents: 0, currentBalanceCents: 0, pctRemaining: 0 });
-    }
+      if (!reserveAccount) {
+        // No reserve has ever been allotted (set_funding_account never called
+        // for this key) — zeros, not an error, and not "fully spent".
+        return c.json({ openingReserveCents: 0, currentBalanceCents: 0, pctRemaining: 0 }, 200);
+      }
 
-    const contingencyAccountId = reserveAccount.id;
-    const [flowRow] = await db
-      .select({
-        inflowCents: sql<number>`coalesce(sum(case when ${budgetReallocationLedger.toAccountId} = ${contingencyAccountId} then ${budgetReallocationLedger.amountCents} else 0 end), 0)`,
-        outflowCents: sql<number>`coalesce(sum(case when ${budgetReallocationLedger.fromAccountId} = ${contingencyAccountId} then ${budgetReallocationLedger.amountCents} else 0 end), 0)`,
-      })
-      .from(budgetReallocationLedger)
-      .where(
-        or(
-          eq(budgetReallocationLedger.toAccountId, contingencyAccountId),
-          eq(budgetReallocationLedger.fromAccountId, contingencyAccountId),
-        ),
+      const contingencyAccountId = reserveAccount.id;
+      const [flowRow] = await db
+        .select({
+          inflowCents: sql<number>`coalesce(sum(case when ${budgetReallocationLedger.toAccountId} = ${contingencyAccountId} then ${budgetReallocationLedger.amountCents} else 0 end), 0)`,
+          outflowCents: sql<number>`coalesce(sum(case when ${budgetReallocationLedger.fromAccountId} = ${contingencyAccountId} then ${budgetReallocationLedger.amountCents} else 0 end), 0)`,
+        })
+        .from(budgetReallocationLedger)
+        .where(
+          or(
+            eq(budgetReallocationLedger.toAccountId, contingencyAccountId),
+            eq(budgetReallocationLedger.fromAccountId, contingencyAccountId),
+          ),
+        );
+
+      const openingReserveCents = reserveAccount.amountCents;
+      const inflowCents = flowRow?.inflowCents ?? 0;
+      const outflowCents = flowRow?.outflowCents ?? 0;
+      const currentBalanceCents = openingReserveCents + inflowCents - outflowCents;
+      const pctRemaining = openingReserveCents > 0 ? currentBalanceCents / openingReserveCents : 0;
+
+      return c.json({ openingReserveCents, currentBalanceCents, pctRemaining }, 200);
+    } catch (error) {
+      return c.json(
+        {
+          error: "Failed to load contingency snapshot",
+          details: error instanceof Error ? error.message : "Unknown error",
+        },
+        500,
       );
-
-    const openingReserveCents = reserveAccount.amountCents;
-    const inflowCents = flowRow?.inflowCents ?? 0;
-    const outflowCents = flowRow?.outflowCents ?? 0;
-    const currentBalanceCents = openingReserveCents + inflowCents - outflowCents;
-    const pctRemaining = openingReserveCents > 0 ? currentBalanceCents / openingReserveCents : 0;
-
-    return c.json({ openingReserveCents, currentBalanceCents, pctRemaining });
+    }
   },
 );

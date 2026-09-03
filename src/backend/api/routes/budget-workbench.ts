@@ -32,6 +32,7 @@ import {
   estimateCompanies,
   estimateLineItems,
   estimateRevisions,
+  estimates,
   materialScheduleItems,
   rooms,
 } from "@backend/db";
@@ -39,6 +40,11 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { unionAll } from "drizzle-orm/sqlite-core";
+
+import {
+  DOWN_PAYMENT_FLAT_CAP_CENTS,
+  LICENSE_WARN_WINDOW_SECONDS,
+} from "@backend/services/budget/compliance-gates";
 
 const budgetWorkbenchRouter = new OpenAPIHono<{ Bindings: Env }>();
 
@@ -49,8 +55,13 @@ type Db = DrizzleD1Database;
 // "what does committed/spent mean for a room" definition isn't hand-copied
 // three times with three chances to drift.
 
-/** Midpoint of an estimate range, computed IN SQL. 0 when both bounds are null. */
-const MIDPOINT_EXPR = sql<number>`(coalesce(${budgetTrackerItems.estimatedLowCents}, ${budgetTrackerItems.estimatedHighCents}, 0) + coalesce(${budgetTrackerItems.estimatedHighCents}, ${budgetTrackerItems.estimatedLowCents}, 0)) / 2`;
+/**
+ * Midpoint of an estimate range, computed IN SQL. 0 when both bounds are
+ * null. Divides by 2.0 (float) then rounds and casts back to an integer
+ * cents value — SQLite integer division here would truncate toward zero,
+ * losing up to a cent per line before the SUM.
+ */
+const MIDPOINT_EXPR = sql<number>`cast(round((coalesce(${budgetTrackerItems.estimatedLowCents}, ${budgetTrackerItems.estimatedHighCents}, 0) + coalesce(${budgetTrackerItems.estimatedHighCents}, ${budgetTrackerItems.estimatedLowCents}, 0)) / 2.0) as integer)`;
 
 /** One row per room: SUM(midpoint) over active budget-tracker items mapped to it. */
 function committedByRoomSubquery(db: Db) {
@@ -138,12 +149,86 @@ function inboxUnmappedEstimateCountQuery(db: Db) {
     );
 }
 
-/** COUNT of contract compliance gates in a fail or warn state. */
-function contractGateFailWarnCountQuery(db: Db) {
+// ─── Contract compliance gates ──────────────────────────────────────────
+//
+// `contract_compliance_gates` (read via `storedGateCountQuery` /
+// `storedGateSource` below) is currently NEVER WRITTEN — grep confirms only
+// readers exist. Two of the four gate types are pure arithmetic this route
+// can and does evaluate live, every request, the same way
+// `routes/budget-compliance.ts` does: `capForContractCents` /
+// `DOWN_PAYMENT_FLAT_CAP_CENTS` / `LICENSE_WARN_WINDOW_SECONDS` come from
+// `@backend/services/budget/compliance-gates`, the module shared by both
+// routes so the two never compute a different verdict for the same contract.
+// The other two gate types (signed_change_order, lien_release) have no live
+// derivation — they can ONLY come from the stored table, so a stored `fail`
+// still counts (see `storedGateCountQuery`'s `DB_ONLY_GATE_TYPES` filter,
+// which deliberately excludes the two live-derived types so a future write
+// into this table can never be double-counted against the live check).
+
+/** Gate types this route can ONLY learn about from the stored table. */
+const DB_ONLY_GATE_TYPES = ["signed_change_order", "lien_release"] as const;
+
+/**
+ * COUNT of active contracts whose down payment exceeds the CSLB cap (the
+ * lesser of $1,000 or 10% of the contract price — SQLite integer division on
+ * two non-negative integers truncates the same way `capForContractCents`'s
+ * `Math.floor` does). This gate has no `warn` state, so this single count
+ * serves both the "fail only" (tabCounts.compliance) and "fail or warn"
+ * (decisionsWaiting / inbox total) call sites.
+ */
+function downPaymentCapFailCountQuery(db: Db) {
+  return db
+    .select({ n: count() })
+    .from(contracts)
+    .leftJoin(estimates, eq(contracts.linkedEstimateId, estimates.id))
+    .innerJoin(estimateRevisions, eq(estimates.currentRevisionId, estimateRevisions.id))
+    .where(
+      and(
+        eq(contracts.isActive, true),
+        sql`${estimateRevisions.depositAmountCents} is not null`,
+        sql`${estimateRevisions.totalAmountCents} is not null`,
+        sql`${estimateRevisions.depositAmountCents} > min(${DOWN_PAYMENT_FLAT_CAP_CENTS}, ${estimateRevisions.totalAmountCents} / 10)`,
+      ),
+    );
+}
+
+/**
+ * COUNT of active contracts whose vendor license is expired (`failOnly`) or
+ * expired-or-expiring-within-60-days (`!failOnly`).
+ */
+function licenseIssueCountQuery(db: Db, failOnly: boolean) {
+  const cutoff = failOnly
+    ? sql`unixepoch()`
+    : sql`(unixepoch() + ${LICENSE_WARN_WINDOW_SECONDS})`;
+  return db
+    .select({ n: count() })
+    .from(contracts)
+    .leftJoin(estimateCompanies, eq(contracts.estimateCompanyId, estimateCompanies.id))
+    .where(
+      and(
+        eq(contracts.isActive, true),
+        sql`${estimateCompanies.licenseExpiresAt} is not null`,
+        sql`${estimateCompanies.licenseExpiresAt} < ${cutoff}`,
+      ),
+    );
+}
+
+/**
+ * COUNT of stored gate rows for the two gate types nothing evaluates live
+ * yet (`signed_change_order`, `lien_release`) — a stored `fail` still counts.
+ */
+function storedGateCountQuery(db: Db, failOnly: boolean) {
   return db
     .select({ n: count() })
     .from(contractComplianceGates)
-    .where(inArray(contractComplianceGates.state, ["fail", "warn"]));
+    .where(
+      and(
+        failOnly
+          ? eq(contractComplianceGates.state, "fail")
+          : inArray(contractComplianceGates.state, ["fail", "warn"]),
+        inArray(contractComplianceGates.gateType, [...DB_ONLY_GATE_TYPES]),
+      ),
+    );
 }
 
 function riskLevel(spentCents: number, committedCents: number): "ok" | "watch" | "at_risk" {
@@ -228,6 +313,22 @@ const roomsFinanceResponseSchema = z.object({
     remainingCents: z.number().int(),
     openMaterialsCount: z.number().int(),
   }),
+  /**
+   * `totals` minus the sum of the `rooms` column, so the two always reconcile.
+   *
+   * The totals are project-wide on purpose: an item mapped to several rooms
+   * would double-count if summed across rows, and money with no room at all
+   * would vanish. But the UI renders `totals` as a Total row directly under
+   * the column, so a reader adds the column and expects that number. This
+   * delta is what the difference IS, so the UI can name it instead of leaving
+   * a contractor to wonder which figure is lying.
+   */
+  unassigned: z.object({
+    committedCents: z.number().int(),
+    spentCents: z.number().int(),
+    remainingCents: z.number().int(),
+    openMaterialsCount: z.number().int(),
+  }),
 });
 
 const errorSchema = z.object({ error: z.string(), details: z.string().optional() });
@@ -292,29 +393,25 @@ budgetWorkbenchRouter.openapi(
         .from(budgetProjectInfo)
         .where(inArray(budgetProjectInfo.infoKey, ["project_name", "address"]));
 
-      // tabCounts.inbox / decisionsWaiting = the same three sources unioned by
+      // tabCounts.inbox / decisionsWaiting = the same sources unioned by
       // GET /inbox below, counted rather than fetched — kept in lockstep by
       // calling the identical shared query builders (defined above).
       const overBudgetRoomsCount = overBudgetRoomsCountQuery(db);
       const inboxUnmappedEstimateCount = inboxUnmappedEstimateCountQuery(db);
-      const contractGateCount = contractGateFailWarnCountQuery(db);
+      // Down payment has no "warn" state, so one query serves both the
+      // fail-only (tabCounts.compliance) and fail-or-warn (decisionsWaiting)
+      // needs below.
+      const downPaymentFailCount = downPaymentCapFailCountQuery(db);
+      const licenseFailOnlyCount = licenseIssueCountQuery(db, true);
+      const licenseFailOrWarnCount = licenseIssueCountQuery(db, false);
+      const storedGateFailOnlyCount = storedGateCountQuery(db, true);
+      const storedGateFailOrWarnCount = storedGateCountQuery(db, false);
 
-      // tabCounts.estimates — a DIFFERENT filter than the inbox source above:
-      // "not confirmed" (includes 'rejected'), per the API contract wording,
-      // vs the inbox's narrower "still actionable" (unmapped/ai_suggested).
-      const estimatesTabCountQuery = db
-        .select({ n: count() })
-        .from(estimateLineItems)
-        .innerJoin(
-          estimateRevisions,
-          eq(estimateLineItems.estimateRevisionId, estimateRevisions.id),
-        )
-        .where(
-          and(
-            sql`${estimateLineItems.mappingStatus} != 'confirmed'`,
-            eq(estimateRevisions.isLatest, true),
-          ),
-        );
+      // tabCounts.estimates: same predicate as the inbox's estimate source
+      // and the reconciliation queue (budget-reconciliation.ts) —
+      // unmapped/ai_suggested on the latest revision. Reuses
+      // `inboxUnmappedEstimateCount` below rather than a second query with
+      // its own (previously drifted) predicate.
 
       const roomsTabCountQuery = db
         .select({ n: count() })
@@ -322,11 +419,6 @@ budgetWorkbenchRouter.openapi(
         .where(eq(rooms.isActive, true));
 
       const savingsTabCountQuery = db.select({ n: count() }).from(budgetReallocationLedger);
-
-      const complianceTabCountQuery = db
-        .select({ n: count() })
-        .from(contractComplianceGates)
-        .where(eq(contractComplianceGates.state, "fail"));
 
       const [
         fundingRows,
@@ -336,11 +428,13 @@ budgetWorkbenchRouter.openapi(
         projectInfoRows,
         overBudgetRoomsRows,
         inboxUnmappedRows,
-        contractGateRows,
-        estimatesTabRows,
+        downPaymentFailRows,
+        licenseFailOnlyRows,
+        licenseFailOrWarnRows,
+        storedGateFailOnlyRows,
+        storedGateFailOrWarnRows,
         roomsTabRows,
         savingsTabRows,
-        complianceTabRows,
       ] = await db.batch([
         fundingQuery,
         spentQuery,
@@ -349,11 +443,13 @@ budgetWorkbenchRouter.openapi(
         projectInfoQuery,
         overBudgetRoomsCount,
         inboxUnmappedEstimateCount,
-        contractGateCount,
-        estimatesTabCountQuery,
+        downPaymentFailCount,
+        licenseFailOnlyCount,
+        licenseFailOrWarnCount,
+        storedGateFailOnlyCount,
+        storedGateFailOrWarnCount,
         roomsTabCountQuery,
         savingsTabCountQuery,
-        complianceTabCountQuery,
       ]);
 
       const totalBudgetCents = fundingRows[0]?.totalBudgetCents ?? 0;
@@ -372,10 +468,20 @@ budgetWorkbenchRouter.openapi(
 
       const infoByKey = new Map(projectInfoRows.map((r) => [r.infoKey, r.infoValue ?? ""]));
 
+      const complianceFailCount =
+        (downPaymentFailRows[0]?.n ?? 0) +
+        (licenseFailOnlyRows[0]?.n ?? 0) +
+        (storedGateFailOnlyRows[0]?.n ?? 0);
+
+      const complianceFailWarnCount =
+        (downPaymentFailRows[0]?.n ?? 0) +
+        (licenseFailOrWarnRows[0]?.n ?? 0) +
+        (storedGateFailOrWarnRows[0]?.n ?? 0);
+
       const inboxCount =
         (overBudgetRoomsRows[0]?.n ?? 0) +
         (inboxUnmappedRows[0]?.n ?? 0) +
-        (contractGateRows[0]?.n ?? 0);
+        complianceFailWarnCount;
 
       return c.json(
         {
@@ -387,6 +493,12 @@ budgetWorkbenchRouter.openapi(
             totalBudgetCents,
             fundingAccountCount,
             spentToDateCents,
+            // ponytail: 0 here is ambiguous — "no budget set" and "on budget
+            // with $0 spent" both read as 0. No spend has ever been recorded
+            // against a $0 budget in this dataset, so this hasn't mattered
+            // yet; if it does, the fix is a `hasBudget: totalBudgetCents > 0`
+            // flag alongside this field rather than smuggling a sentinel
+            // into a number the frontend already renders as a plain percent.
             spentPctOfBudget: totalBudgetCents > 0 ? spentToDateCents / totalBudgetCents : 0,
             remainingCents,
             runwayMonths,
@@ -395,10 +507,10 @@ budgetWorkbenchRouter.openapi(
           },
           tabCounts: {
             inbox: inboxCount,
-            estimates: estimatesTabRows[0]?.n ?? 0,
+            estimates: inboxUnmappedRows[0]?.n ?? 0,
             rooms: roomsTabRows[0]?.n ?? 0,
             savings: savingsTabRows[0]?.n ?? 0,
-            compliance: complianceTabRows[0]?.n ?? 0,
+            compliance: complianceFailCount,
           },
           decisionsWaiting: inboxCount,
         },
@@ -421,6 +533,13 @@ budgetWorkbenchRouter.openapi(
 // the exposure column, LIMIT). Never fetched-then-sorted in JS.
 
 const INBOX_LIMIT = 30;
+
+/** Maps the SQL `severity_rank` that ordered the list onto its label. */
+function severityFromRank(rank: number): "block" | "warn" | "info" {
+  if (rank <= 0) return "block";
+  if (rank === 1) return "warn";
+  return "info";
+}
 
 budgetWorkbenchRouter.openapi(
   createRoute({
@@ -457,6 +576,13 @@ budgetWorkbenchRouter.openapi(
             sql<number>`coalesce(${spentSub.spentCents}, 0) - coalesce(${committedSub.committedCents}, 0)`.as(
               "exposure_cents",
             ),
+          // 0 = block, 1 = warn, 2 = info. Computed in SQL because it is the
+          // PRIMARY sort key; the label below is derived from this same number
+          // so the badge can never disagree with the position.
+          severityRank:
+            sql<number>`case when coalesce(${spentSub.spentCents}, 0) > coalesce(${committedSub.committedCents}, 0) * 1.2 then 0 else 1 end`.as(
+              "severity_rank",
+            ),
         })
         .from(rooms)
         .leftJoin(committedSub, eq(committedSub.roomId, rooms.id))
@@ -482,6 +608,7 @@ budgetWorkbenchRouter.openapi(
           exposureCents: sql<number>`coalesce(${estimateLineItems.lineTotalCents}, 0)`.as(
             "exposure_cents",
           ),
+          severityRank: sql<number>`1`.as("severity_rank"),
         })
         .from(estimateLineItems)
         .innerJoin(
@@ -515,37 +642,67 @@ budgetWorkbenchRouter.openapi(
               "status_text",
             ),
           exposureCents: sql<number>`0`.as("exposure_cents"),
+          severityRank: sql<number>`case when ${contractComplianceGates.state} = 'fail' then 0 else 1 end`.as(
+            "severity_rank",
+          ),
         })
         .from(contractComplianceGates)
         .innerJoin(contracts, eq(contracts.id, contractComplianceGates.contractId))
         .leftJoin(estimateCompanies, eq(estimateCompanies.id, contracts.estimateCompanyId))
         .where(inArray(contractComplianceGates.state, ["fail", "warn"]));
 
-      // Shared shape's 7th column is exposureCents — order by ordinal position
-      // rather than a re-quoted alias, so this is robust to how each driver
-      // happens to case-fold the "exposure_cents" identifier post-union.
+      // SEVERITY LEADS, exposure orders within a band. Ranking by dollars alone
+      // put a blocking compliance gate — which carries no dollar figure of its
+      // own — below every priced row, so it fell off the end of the LIMIT behind
+      // 30 low-value unmapped lines. A gate that blocks a payment has to be at
+      // the top of a screen whose instruction is "resolve top-down".
+      //
+      // Ordered by ordinal position (8 = severity_rank, 7 = exposure_cents)
+      // rather than re-quoted aliases, which is robust to how each driver
+      // case-folds an identifier after a UNION.
+      //
+      // Caveat worth knowing when reading the list: the two dollar sources
+      // measure different things — a room's exposure is its OVERSPEND, an
+      // estimate line's is its GROSS VALUE — so within the warn band a large
+      // unmapped line can outrank a smaller genuine overspend.
       const unionedQuery = unionAll(roomSource, estimateSource, contractSource)
-        .orderBy(sql`7 desc`)
+        .orderBy(sql`8 asc, 7 desc`)
         .limit(INBOX_LIMIT);
 
-      const [unionedRows, overBudgetRoomsRows, unmappedEstimateRows, contractGateRows] =
-        await db.batch([
-          unionedQuery,
-          overBudgetRoomsCountQuery(db),
-          inboxUnmappedEstimateCountQuery(db),
-          contractGateFailWarnCountQuery(db),
-        ]);
+      // `total` must count the same three sources the union draws from, using
+      // the same helpers the summary route uses — otherwise the badge and the
+      // list disagree. Compliance is three counts, not one: the two gates that
+      // are derived live (down-payment cap, licence) plus whatever is stored.
+      const [
+        unionedRows,
+        overBudgetRoomsRows,
+        unmappedEstimateRows,
+        downPaymentFailRows,
+        licenseFailOrWarnRows,
+        storedGateFailOrWarnRows,
+      ] = await db.batch([
+        unionedQuery,
+        overBudgetRoomsCountQuery(db),
+        inboxUnmappedEstimateCountQuery(db),
+        downPaymentCapFailCountQuery(db),
+        licenseIssueCountQuery(db, false),
+        storedGateCountQuery(db, false),
+      ]);
 
       const items = unionedRows.map((row) => {
         const amountA = Number(row.amountA ?? 0);
         const amountB = Number(row.amountB ?? 0);
         const exposureCents = Number(row.exposureCents ?? 0);
 
+        // Derived from the SQL rank that did the sorting, never recomputed —
+        // two copies of this rule would eventually disagree, and a "warn" badge
+        // sitting above every "block" is exactly the bug that hides.
+        const severity = severityFromRank(Number(row.severityRank ?? 1));
+
         if (row.kind === "room") {
-          const severity = amountA > amountB * 1.2 ? "block" : "warn";
           return {
             id: `room_variance:${row.entityId}`,
-            severity: severity as "block" | "warn",
+            severity,
             title: `${row.entityLabel} is over budget`,
             detail: `Spent ${formatCents(amountA)} against ${formatCents(amountB)} committed.`,
             contextKind: "room" as const,
@@ -553,14 +710,14 @@ budgetWorkbenchRouter.openapi(
             contextLabel: row.entityLabel,
             exposureCents,
             actionKind: "reconcile" as const,
-            actionHref: `/admin/budget/grid?roomId=${row.entityId}`,
+            actionHref: `/admin/budget?tab=grid&roomId=${row.entityId}`,
           };
         }
 
         if (row.kind === "estimate") {
           return {
             id: `unmapped_estimate:${row.entityId}`,
-            severity: "warn" as const,
+            severity,
             title: "Estimate line needs room mapping",
             detail: row.entityLabel,
             contextKind: "estimate" as const,
@@ -568,7 +725,7 @@ budgetWorkbenchRouter.openapi(
             contextLabel: row.entityLabel,
             exposureCents,
             actionKind: "reconcile" as const,
-            actionHref: `/admin/budget/reconcile?lineItemId=${row.entityId}`,
+            actionHref: `/admin/budget?tab=estimates&lineItemId=${row.entityId}`,
           };
         }
 
@@ -576,7 +733,7 @@ budgetWorkbenchRouter.openapi(
         const [gateType, state] = (row.statusText ?? "unknown:unknown").split(":");
         return {
           id: `compliance_gate:${row.entityId}:${gateType}`,
-          severity: (state === "fail" ? "block" : "warn") as "block" | "warn",
+          severity,
           title: `${(gateType ?? "compliance gate").replace(/_/g, " ")} needs attention`,
           detail: `Contract with ${row.entityLabel} — ${state ?? "unknown"} on ${(gateType ?? "").replace(/_/g, " ")}.`,
           contextKind: "contract" as const,
@@ -591,7 +748,9 @@ budgetWorkbenchRouter.openapi(
       const total =
         (overBudgetRoomsRows[0]?.n ?? 0) +
         (unmappedEstimateRows[0]?.n ?? 0) +
-        (contractGateRows[0]?.n ?? 0);
+        (downPaymentFailRows[0]?.n ?? 0) +
+        (licenseFailOrWarnRows[0]?.n ?? 0) +
+        (storedGateFailOrWarnRows[0]?.n ?? 0);
 
       return c.json({ items, total }, 200);
     } catch (error) {
@@ -687,13 +846,25 @@ budgetWorkbenchRouter.openapi(
         };
       });
 
-      const committedCents = totalsCommittedRows[0]?.committedCents ?? 0;
-      const spentCents = totalsSpentRows[0]?.spentCents ?? 0;
-      const openMaterialsCount = totalsMaterialsRows[0]?.openCount ?? 0;
+      const committedCents = Number(totalsCommittedRows[0]?.committedCents ?? 0);
+      const spentCents = Number(totalsSpentRows[0]?.spentCents ?? 0);
+      const openMaterialsCount = Number(totalsMaterialsRows[0]?.openCount ?? 0);
+
+      // What the visible column adds up to, so the gap can be stated rather
+      // than left for a reader to discover by adding it themselves.
+      const rowsCommitted = roomsOut.reduce((n, r) => n + r.committedCents, 0);
+      const rowsSpent = roomsOut.reduce((n, r) => n + r.spentCents, 0);
+      const rowsMaterials = roomsOut.reduce((n, r) => n + r.openMaterialsCount, 0);
 
       return c.json(
         {
           rooms: roomsOut,
+          unassigned: {
+            committedCents: committedCents - rowsCommitted,
+            spentCents: spentCents - rowsSpent,
+            remainingCents: committedCents - spentCents - (rowsCommitted - rowsSpent),
+            openMaterialsCount: openMaterialsCount - rowsMaterials,
+          },
           totals: {
             committedCents,
             spentCents,

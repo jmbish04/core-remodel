@@ -128,6 +128,63 @@ function cellDisplay(
   };
 }
 
+/**
+ * Net change to a row's planned total from any locally-committed overrides
+ * (optimistic edits not yet reflected in a refetch). A null cell contributes
+ * 0 either side, matching how the server sums only real values.
+ */
+function rowOverrideDeltaCents(row: BudgetGridRow, overrides: Map<CellKey, number | null>): number {
+  let delta = 0;
+  for (const month of Object.keys(row.cells)) {
+    const key = cellKey(row.lineItemId, month);
+    if (!overrides.has(key)) continue;
+    delta += (overrides.get(key) ?? 0) - (row.cells[month].plannedCents ?? 0);
+  }
+  return delta;
+}
+
+/**
+ * Row-level planned total and variance, adjusted for any optimistic
+ * overrides — the single place that keeps a row's Total/Variance
+ * self-consistent right after an inline edit, before the next refetch.
+ * Editing a planned cell only moves the planned side (actual is untouched),
+ * so variance (`actual − planned`) moves the opposite direction by the same
+ * amount.
+ */
+function effectiveRowTotals(
+  row: BudgetGridRow,
+  overrides: Map<CellKey, number | null>,
+): { plannedCents: number; varianceCents: number } {
+  const delta = rowOverrideDeltaCents(row, overrides);
+  return { plannedCents: row.totalCents + delta, varianceCents: row.varianceCents - delta };
+}
+
+/**
+ * Row Total column value for the active view. The API only gives planned
+ * (`totalCents`) and variance (`varianceCents`) per row — actual is derived
+ * as planned + variance (variance = actual − planned) rather than asking for
+ * a new field.
+ */
+function rowTotalCentsForView(
+  view: BudgetGridView,
+  row: BudgetGridRow,
+  overrides: Map<CellKey, number | null>,
+): number {
+  const { plannedCents, varianceCents } = effectiveRowTotals(row, overrides);
+  if (view === "variance") return varianceCents;
+  if (view === "actuals") return plannedCents + varianceCents;
+  return plannedCents;
+}
+
+/** Phase subtotal for the active view — sum of each row's view-aware Total. */
+function phaseSubtotalCentsForView(
+  view: BudgetGridView,
+  phase: BudgetGrid["phases"][number],
+  overrides: Map<CellKey, number | null>,
+): number {
+  return phase.rows.reduce((sum, row) => sum + rowTotalCentsForView(view, row, overrides), 0);
+}
+
 export function GridTab() {
   const [view, setView] = useState<BudgetGridView>("actuals");
   const [range] = useState(defaultRange);
@@ -153,19 +210,38 @@ export function GridTab() {
   async function commitEdit(row: BudgetGridRow, month: string, cell: BudgetGridCell) {
     const key = cellKey(row.lineItemId, month);
     const previous = overrides.has(key) ? overrides.get(key)! : cell.plannedCents;
-    const parsed = draft.trim() === "" ? null : parsePriceCents(draft);
+    const trimmed = draft.trim();
+    const parsed = trimmed === "" ? null : parsePriceCents(trimmed);
+
+    if (trimmed !== "" && parsed === null) {
+      // Non-empty but unparseable ("tbd", "n/a", a typo) — refuse to save and
+      // stay in edit mode so the figure is never silently wiped. An empty
+      // draft still means "clear this cell"; only a non-empty one that fails
+      // to parse is rejected.
+      setCellError({ key, message: `${row.title} · ${month}: "${trimmed}" isn't a valid amount` });
+      return;
+    }
+
     setEditing(null);
     if (parsed === previous) return;
 
     setOverrides((m) => new Map(m).set(key, parsed));
     setSavingKey(key);
     try {
-      await patchPlanSchedule({ lineItemId: row.lineItemId, month, plannedCents: parsed });
-      // ponytail: not refetching here — useBudgetQuery's refetch flips isLoading
-      // and blanks the whole grid mid-edit. The edited cell is already correct
-      // via `overrides`; Total/subtotal/Variance catch up on the next natural
-      // refetch (tab revisit). Upgrade to a silent background refresh if that
-      // staleness matters in practice.
+      await patchPlanSchedule({
+        lineItemId: row.lineItemId,
+        month,
+        plannedCents: parsed,
+        // The route's `plannedText` is optional but NOT nullable (clearing a
+        // cell deletes the row outright, so there's no text to store) —
+        // `undefined` so JSON.stringify omits the key, never `null`.
+        plannedText: trimmed === "" ? undefined : draft,
+      });
+      // Total/subtotal/Variance are recomputed locally from `overrides` (see
+      // effectiveRowTotals/phaseSubtotalCentsForView below) so they stay
+      // correct without a refetch — useBudgetQuery's refetch flips isLoading
+      // and blanks the whole grid mid-edit, which a background refresh would
+      // avoid; not worth it while the local derivation already covers it.
     } catch (err) {
       setOverrides((m) => new Map(m).set(key, previous)); // rollback
       setCellError({
@@ -341,7 +417,9 @@ function PhaseGroup({
         </TableHead>
         <TableCell colSpan={Math.max(months.length, 1)} aria-hidden="true" />
         <TableCell className="text-right font-mono text-xs font-semibold tabular-nums text-muted-foreground">
-          {formatCents(phase.subtotalCents)}
+          {view === "variance"
+            ? formatSigned(phaseSubtotalCentsForView(view, phase, overrides))
+            : formatCents(phaseSubtotalCentsForView(view, phase, overrides))}
         </TableCell>
         <TableCell aria-hidden="true" />
       </TableRow>
@@ -395,9 +473,10 @@ function GridRow({
   onCommit,
   onCancel,
 }: GridRowProps) {
-  const vMeta = varianceMeta(row.varianceCents);
-  const totalText =
-    view === "variance" ? formatSigned(row.totalCents) : formatCents(row.totalCents);
+  const { varianceCents: effectiveVarianceCents } = effectiveRowTotals(row, overrides);
+  const vMeta = varianceMeta(effectiveVarianceCents);
+  const totalCents = rowTotalCentsForView(view, row, overrides);
+  const totalText = view === "variance" ? formatSigned(totalCents) : formatCents(totalCents);
 
   return (
     <TableRow>
@@ -435,6 +514,16 @@ function GridRow({
         return (
           <TableCell key={m.key} className="text-right">
             {isEditingThis ? (
+              // ponytail: tried <CurrencyInput> first (per AGENTS.md's money
+              // rule). Its "$" addon (px-3 + glyph, ~34px) + input padding
+              // (px-2.5, ~20px) + room for digits (~60px) needs ~115-120px
+              // minimum — the design's month columns are 92px
+              // (screens/1-budget-grid.html:27), and this is a real <table>
+              // where one cell's width sets the whole column for every row,
+              // so it would reflow the entire grid on every edit. Falling
+              // back to its exported parsePriceCents + a real verbatim-text
+              // capture (`draft`, sent as plannedText) instead. Revisit if
+              // the grid ever moves to fixed CSS-grid columns.
               <Input
                 autoFocus
                 type="text"

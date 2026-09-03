@@ -603,6 +603,13 @@
       "when": 1788441460586,
       "tag": "0185_magical_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "6",
+      "when": 1788451441714,
+      "tag": "0186_acoustic_rictor",
+      "breakpoints": true
     }
   ]
 }

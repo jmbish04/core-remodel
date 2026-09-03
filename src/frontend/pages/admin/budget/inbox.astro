@@ -8,6 +8,12 @@
  * contract (docs/plans/budget-command-center/API-CONTRACT.md §3 and §4). The
  * island file is left in place pending its removal; this path redirects so no
  * one lands on a page that can no longer parse its own data.
+ *
+ * Any query string on the old URL is carried through, so an existing deep
+ * link or bookmark (e.g. `?roomId=7`) survives the move instead of landing
+ * on an unfiltered workbench.
  */
-return Astro.redirect("/admin/budget?tab=inbox", 302);
+const forwarded = new URLSearchParams(Astro.url.search);
+forwarded.set("tab", "inbox");
+return Astro.redirect(`/admin/budget?${forwarded.toString()}`, 302);
 ---

@@ -116,6 +116,33 @@ await shape("/api/budget/workbench-summary", "workbench-summary", (b) => {
   );
   check("tabCounts has all six tabs", b.tabCounts && isInt(b.tabCounts.inbox) && isInt(b.tabCounts.compliance));
   check("decisionsWaiting is an integer", isInt(b.decisionsWaiting), `got ${b.decisionsWaiting}`);
+  // The four KPI cards are read side by side; they have to agree.
+  check(
+    "remaining equals total budget minus spent",
+    k.remainingCents === k.totalBudgetCents - k.spentToDateCents,
+    `${k.totalBudgetCents} - ${k.spentToDateCents} != ${k.remainingCents}`,
+  );
+  if (k.totalBudgetCents > 0) {
+    const pct = k.spentToDateCents / k.totalBudgetCents;
+    check(
+      "spentPctOfBudget matches spent over total",
+      Math.abs(k.spentPctOfBudget - pct) < 0.0001,
+      `got ${k.spentPctOfBudget}, expected ~${pct.toFixed(4)}`,
+    );
+  }
+  // A negative runway is not a number of months.
+  check(
+    "runwayMonths is never negative",
+    k.runwayMonths === null || k.runwayMonths >= 0,
+    `got ${k.runwayMonths}`,
+  );
+  check(
+    "varianceDirection agrees with the sign of varianceVsEstimateCents",
+    (k.varianceVsEstimateCents > 0 && k.varianceDirection === "over") ||
+      (k.varianceVsEstimateCents < 0 && k.varianceDirection === "under") ||
+      (k.varianceVsEstimateCents === 0 && k.varianceDirection === "even"),
+    `${k.varianceVsEstimateCents} vs ${k.varianceDirection}`,
+  );
   info(`budget ${k.totalBudgetCents}¢ · spent ${k.spentToDateCents}¢ · inbox ${b.tabCounts?.inbox}`);
 });
 
@@ -140,8 +167,57 @@ await shape("/api/budget/grid?from=2026-02&to=2026-07&view=actuals", "grid", (b)
       );
     }
     info(`${months.length} months · ${(b.phases ?? []).length} phases · ${(b.phases ?? []).flatMap((p) => p.rows ?? []).length} rows`);
+
+    // Arithmetic, not shape. A shape-only check passed while the row variance
+    // badge was sign-inverted and every under-budget line read "over".
+    const allRows = (b.phases ?? []).flatMap((p) => p.rows ?? []);
+
+    // totalCents is the planned sum across the visible window.
+    const totalMismatch = allRows.filter((r) => {
+      const planned = Object.values(r.cells ?? {}).reduce((n, c) => n + (c.plannedCents ?? 0), 0);
+      return r.totalCents !== planned;
+    });
+    check(
+      "every row's totalCents equals the sum of its planned cells",
+      totalMismatch.length === 0,
+      totalMismatch.length ? `${totalMismatch.length} row(s), first: ${totalMismatch[0].title}` : "",
+    );
+
+    // varianceCents is actual - planned, so POSITIVE MEANS OVER BUDGET.
+    const varianceMismatch = allRows.filter((r) => {
+      const cells = Object.values(r.cells ?? {});
+      const planned = cells.reduce((n, c) => n + (c.plannedCents ?? 0), 0);
+      const actual = cells.reduce((n, c) => n + (c.actualCents ?? 0), 0);
+      return r.varianceCents !== actual - planned;
+    });
+    check(
+      "every row's varianceCents equals actual minus planned (positive = over)",
+      varianceMismatch.length === 0,
+      varianceMismatch.length ? `${varianceMismatch.length} row(s), first: ${varianceMismatch[0].title}` : "",
+    );
+
+    // A line with nothing spent cannot be over budget. This is the assertion
+    // that catches a flipped sign even when both sides agree with each other.
+    const falseOver = allRows.filter((r) => {
+      const spent = Object.values(r.cells ?? {}).reduce((n, c) => n + (c.actualCents ?? 0), 0);
+      return spent === 0 && r.varianceCents > 0;
+    });
+    check(
+      "no row with zero actuals reports a positive (over-budget) variance",
+      falseOver.length === 0,
+      falseOver.length ? `${falseOver.length} row(s), first: ${falseOver[0].title}` : "",
+    );
+
+    const subtotalMismatch = (b.phases ?? []).filter(
+      (p) => p.subtotalCents !== (p.rows ?? []).reduce((n, r) => n + r.totalCents, 0),
+    );
+    check(
+      "every phase subtotal equals the sum of its rows",
+      subtotalMismatch.length === 0,
+      subtotalMismatch.length ? `first: ${subtotalMismatch[0].name}` : "",
+    );
   } else {
-    info("grid returned no rows — shape checks on rows skipped");
+    info("grid returned no rows — arithmetic checks skipped");
   }
 });
 
@@ -159,14 +235,29 @@ await shape("/api/budget/inbox", "inbox", (b) => {
     "every item has an actionKind and href",
     items.every((i) => typeof i.actionKind === "string" && typeof i.actionHref === "string"),
   );
-  // The ranking is the endpoint's whole contract: it must be ordered by the
-  // server, not by the client. If this fails the ORDER BY is not doing its job.
-  const exposures = items.map((i) => i.exposureCents);
+  // The ranking is the endpoint's whole contract: the server orders, not the
+  // client. Severity leads (a blocking gate must never sort below a bigger
+  // dollar figure), and exposure orders WITHIN a severity band.
+  let bandOk = true;
+  for (const sev of ["block", "warn", "info"]) {
+    const band = items.filter((i) => i.severity === sev).map((i) => i.exposureCents);
+    if (!band.every((v, idx) => idx === 0 || band[idx - 1] >= v)) bandOk = false;
+  }
   check(
-    "items arrive sorted by exposure descending",
-    exposures.every((v, idx) => idx === 0 || exposures[idx - 1] >= v),
-    `order: ${exposures.slice(0, 6).join(", ")}`,
+    "exposure descends within each severity band",
+    bandOk,
+    `order: ${items.slice(0, 6).map((i) => `${i.severity}:${i.exposureCents}`).join(", ")}`,
   );
+  // A blocking compliance gate must not sort below a larger dollar figure —
+  // it fell off the end of the list behind 30 low-value rows.
+  const rank = { block: 0, warn: 1, info: 2 };
+  const severities = items.map((i) => rank[i.severity]);
+  check(
+    "severity outranks exposure in the ordering",
+    severities.every((v, idx) => idx === 0 || severities[idx - 1] <= v),
+    `order: ${items.slice(0, 6).map((i) => i.severity).join(", ")}`,
+  );
+  check("no item reports a negative exposure", items.every((i) => i.exposureCents >= 0));
   info(`${items.length} decisions · total ${b.total}`);
 });
 
@@ -181,6 +272,29 @@ await shape("/api/budget/rooms-finance", "rooms-finance", (b) => {
   check("every room has a numeric id and a name", rooms.every((r) => isInt(r.roomId) && typeof r.name === "string"));
   check("every room has integer money fields", rooms.every((r) => isInt(r.committedCents) && isInt(r.spentCents) && isInt(r.remainingCents)));
   check("every room risk is one of ok|watch|at_risk", rooms.every((r) => ["ok", "watch", "at_risk"].includes(r.risk)));
+  // RoomsTab renders `totals` as a Total row directly under the column, so a
+  // reader adds the column and expects that number. If the endpoint's totals
+  // are deliberately project-wide (including rooms not listed), the response
+  // must say so rather than letting the two silently disagree.
+  for (const [field, label] of [
+    ["committedCents", "committed"],
+    ["spentCents", "spent"],
+    ["remainingCents", "remaining"],
+  ]) {
+    const summed = rooms.reduce((n, r) => n + r[field], 0);
+    const total = b.totals?.[field];
+    const explained = b.totals?.unassigned?.[field] ?? b.unassigned?.[field] ?? null;
+    check(
+      `totals.${field} reconciles with the ${label} column`,
+      total === summed || (explained !== null && total === summed + explained),
+      `rows=${summed} total=${total}${explained === null ? " (no unassigned delta reported)" : ` unassigned=${explained}`}`,
+    );
+  }
+  check(
+    "every room's remaining equals committed minus spent",
+    rooms.every((r) => r.remainingCents === r.committedCents - r.spentCents),
+    "",
+  );
   info(`${rooms.length} rooms · committed ${b.totals?.committedCents}¢ · spent ${b.totals?.spentCents}¢`);
 });
 
