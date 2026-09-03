@@ -613,10 +613,10 @@ export const CHANGELOG: ChangelogEntry[] = [
       },
       {
         kind: "migration",
-        text: "0184 adds estimate_line_room_candidates (ranked room candidates with reasoning), budget_reallocation_ledger, and contract_compliance_gates, plus license_expires_at on estimate_companies. 0185 adds eleven covering indexes for the new WHERE / JOIN ON / ORDER BY columns. Both are purely additive — three CREATE TABLE, one ADD COLUMN, eleven CREATE INDEX — with no drops and no table rebuilds, so no data was at risk.",
+        text: "0184 adds estimate_line_room_candidates (ranked room candidates with reasoning), budget_reallocation_ledger, and contract_compliance_gates, plus license_expires_at on estimate_companies, along with seven covering indexes (two unique) on those new tables. 0185 adds eleven more covering indexes for the WHERE / JOIN ON / ORDER BY columns the new queries hit on pre-existing tables (estimate_line_items, contracts, budget_expense_entries, budget_tracker_item_rooms, budget_tracker_items, budget_reallocation_ledger, budget_phases, budget_plan_schedule). 0186 adds two more indexes (contract_compliance_gates.state, and an is_active+date_incurred index on budget_expense_entries) that a later query needed. All three are purely additive — three CREATE TABLE, one ADD COLUMN, twenty CREATE INDEX/UNIQUE INDEX statements total — with no drops and no table rebuilds, so no data was at risk.",
       },
     ],
-    migrations: ["0184_talented_wendell_vaughn", "0185_magical_rage"],
+    migrations: ["0184_talented_wendell_vaughn", "0185_magical_rage", "0186_acoustic_rictor"],
     status: "staged",
     prNumber: 412,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/412",

@@ -13,7 +13,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   formatCents,
   getWorkbenchSummary,
@@ -198,15 +198,29 @@ export function BudgetWorkbench() {
             );
           })}
         </TabsList>
-      </Tabs>
 
-      {/* Only the active tab's component mounts */}
-      {tab === "grid" && <GridTab />}
-      {tab === "inbox" && <InboxTab />}
-      {tab === "estimates" && <EstimatesTab />}
-      {tab === "rooms" && <RoomsTab />}
-      {tab === "savings" && <SavingsTab />}
-      {tab === "compliance" && <ComplianceTab />}
+        {/* Base UI's TabsContent (keepMounted defaults to false) unmounts the
+            panel — and its child — entirely while inactive, so only the
+            active tab's component mounts and fetches. */}
+        <TabsContent value="grid">
+          <GridTab />
+        </TabsContent>
+        <TabsContent value="inbox">
+          <InboxTab />
+        </TabsContent>
+        <TabsContent value="estimates">
+          <EstimatesTab />
+        </TabsContent>
+        <TabsContent value="rooms">
+          <RoomsTab />
+        </TabsContent>
+        <TabsContent value="savings">
+          <SavingsTab />
+        </TabsContent>
+        <TabsContent value="compliance">
+          <ComplianceTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

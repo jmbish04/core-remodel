@@ -581,11 +581,19 @@ CREATE TABLE budget_reallocation_ledger (
   datetime_created INTEGER DEFAULT (unixepoch()) NOT NULL
 );
 ALTER TABLE estimate_companies ADD license_expires_at INTEGER;
--- plus the unique and covering indexes for all three tables`,
+-- plus 7 indexes on the three new tables (2 UNIQUE, 5 non-unique):
+CREATE UNIQUE INDEX uidx_estimate_line_room_candidates_line_room ON estimate_line_room_candidates (estimate_line_item_id, room_id);
+CREATE INDEX idx_estimate_line_room_candidates_line_rank ON estimate_line_room_candidates (estimate_line_item_id, rank);
+CREATE UNIQUE INDEX uidx_contract_compliance_gates_contract_type ON contract_compliance_gates (contract_id, gate_type);
+CREATE INDEX idx_contract_compliance_gates_contract_state ON contract_compliance_gates (contract_id, state);
+CREATE INDEX idx_budget_reallocation_ledger_occurred_at ON budget_reallocation_ledger (occurred_at);
+CREATE INDEX idx_budget_reallocation_ledger_from_account ON budget_reallocation_ledger (from_account_id);
+CREATE INDEX idx_budget_reallocation_ledger_to_account ON budget_reallocation_ledger (to_account_id);`,
       },
       {
         tag: "0185_magical_rage",
-        sql: `CREATE INDEX idx_estimate_line_items_mapping_status_id ON estimate_line_items (mapping_status, id);
+        sql: `-- 11 more covering indexes, on pre-existing tables the new queries hit:
+CREATE INDEX idx_estimate_line_items_mapping_status_id ON estimate_line_items (mapping_status, id);
 CREATE INDEX idx_contracts_is_active ON contracts (is_active);
 CREATE INDEX idx_contracts_estimate_company_id ON contracts (estimate_company_id);
 CREATE INDEX idx_contracts_linked_estimate_id ON contracts (linked_estimate_id);
@@ -596,6 +604,12 @@ CREATE INDEX idx_bti_active_phase ON budget_tracker_items (is_active, phase_id);
 CREATE INDEX idx_budget_reallocation_ledger_occurred_at_id ON budget_reallocation_ledger (occurred_at, id);
 CREATE INDEX idx_budget_phases_active_sort ON budget_phases (is_active, sort_order);
 CREATE INDEX idx_budget_plan_schedule_period ON budget_plan_schedule (period);`,
+      },
+      {
+        tag: "0186_acoustic_rictor",
+        sql: `-- 2 more indexes a later query needed:
+CREATE INDEX idx_contract_compliance_gates_state ON contract_compliance_gates (state);
+CREATE INDEX idx_bee_active_date ON budget_expense_entries (is_active, date_incurred);`,
       },
     ],
     code: [
@@ -779,12 +793,17 @@ render; visual parity against the comps still wants a human pass.`,
         {
           tag: "0184_talented_wendell_vaughn",
           appliedRemote: true,
-          note: "Applied via pnpm run migrate:remote. Verified on production D1: all 3 tables present. Purely additive — 3 CREATE TABLE plus 1 ADD COLUMN, no drops and no table rebuilds, so no data was at risk.",
+          note: "Applied via pnpm run migrate:remote. Verified on production D1: all 3 tables present, plus their 7 indexes (2 unique, 5 non-unique). Purely additive — 3 CREATE TABLE plus 1 ADD COLUMN plus 7 CREATE INDEX/UNIQUE INDEX, no drops and no table rebuilds, so no data was at risk.",
         },
         {
           tag: "0185_magical_rage",
           appliedRemote: true,
           note: "Applied via pnpm run migrate:remote. Verified on production D1: all 11 indexes present.",
+        },
+        {
+          tag: "0186_acoustic_rictor",
+          appliedRemote: true,
+          note: "Applied via pnpm run migrate:remote. Verified on production D1: both indexes present — idx_contract_compliance_gates_state and idx_bee_active_date.",
         },
       ],
       previewWorker: {
