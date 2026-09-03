@@ -1,0 +1,129 @@
+<!-- ═══ 1 · BUDGET GRID ═══ -->
+<div style="display:flex;flex-direction:column;gap:10px">
+<div style="font:500 11px 'Geist Mono',monospace;color:oklch(0.708 0 0);letter-spacing:0.06em">01 · BUDGET GRID — PHASE × MONTH</div>
+<div style="width:1200px;background:oklch(0.145 0 0);border:1px solid oklch(1 0 0/10%);border-radius:12px;color:oklch(0.985 0 0);padding:24px;box-sizing:border-box;display:flex;flex-direction:column;gap:18px" data-screen-label="Budget grid">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:32px;height:32px;border-radius:8px;background:oklch(0.205 0 0);border:1px solid oklch(1 0 0/10%);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="oklch(0.985 0 0)" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></div>
+      <div><div style="font-size:16px;font-weight:600;letter-spacing:-0.02em">Budget grid</div><div style="font-size:12px;color:oklch(0.708 0 0);margin-top:1px">Planned vs actual spend by phase and month. Click a planned cell to edit.</div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="display:flex;gap:2px;background:oklch(0.205 0 0);padding:3px;border-radius:8px;border:1px solid oklch(1 0 0/10%)">
+        <div style="padding:5px 12px;font-size:12px;border-radius:6px;color:oklch(0.708 0 0)">Estimate</div>
+        <div style="padding:5px 12px;font-size:12px;border-radius:6px;background:oklch(0.371 0 0);font-weight:500">Actuals</div>
+        <div style="padding:5px 12px;font-size:12px;border-radius:6px;color:oklch(0.708 0 0)">Variance</div>
+      </div>
+      <button style="background:oklch(0.985 0 0);color:oklch(0.145 0 0);border:none;border-radius:8px;padding:7px 14px;font:500 13px 'Geist',sans-serif;cursor:pointer">Log expense</button>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+    <div style="background:oklch(0.205 0 0);border:1px solid oklch(1 0 0/10%);border-radius:10px;padding:14px 16px"><div style="font-size:12px;color:oklch(0.708 0 0)">Total budget</div><div style="font:600 20px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;margin-top:5px">$248,500</div></div>
+    <div style="background:oklch(0.205 0 0);border:1px solid oklch(1 0 0/10%);border-radius:10px;padding:14px 16px"><div style="font-size:12px;color:oklch(0.708 0 0)">Spent</div><div style="font:600 20px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;margin-top:5px">$96,240</div><div style="height:4px;background:oklch(1 0 0/10%);border-radius:2px;margin-top:8px"><div style="height:4px;width:39%;background:oklch(0.72 0.15 162);border-radius:2px"></div></div></div>
+    <div style="background:oklch(0.205 0 0);border:1px solid oklch(1 0 0/10%);border-radius:10px;padding:14px 16px"><div style="font-size:12px;color:oklch(0.708 0 0)">Remaining</div><div style="font:600 20px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;margin-top:5px">$152,260</div></div>
+    <div style="background:oklch(0.205 0 0);border:1px solid oklch(1 0 0/10%);border-radius:10px;padding:14px 16px"><div style="font-size:12px;color:oklch(0.708 0 0)">Variance vs estimate</div><div style="font:600 20px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;margin-top:5px;color:oklch(0.79 0.15 78)">+$4,180</div></div>
+  </div>
+  <div style="border:1px solid oklch(1 0 0/10%);border-radius:10px;overflow-x:auto;background:oklch(0.205 0 0)">
+    <div style="min-width:1380px;font-size:13px">
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:9px 14px;border-bottom:1px solid oklch(1 0 0/10%);color:oklch(0.708 0 0);font-size:12px;align-items:center">
+        <div>Line item</div><div>Phase</div>
+        <div style="text-align:right">Feb</div><div style="text-align:right">Mar</div><div style="text-align:right">Apr</div><div style="text-align:right">May</div><div style="text-align:right">Jun</div><div style="text-align:right">Jul</div>
+        <div style="text-align:right">Total</div><div style="padding-left:16px">Variance</div>
+      </div>
+      <!-- PHASE: Pre-construction -->
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:oklch(0.145 0 0);border-bottom:1px solid oklch(1 0 0/10%)">
+        <svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="oklch(1 0 0/12%)" stroke-width="2.5"></circle><circle cx="11" cy="11" r="9" fill="none" stroke="oklch(0.72 0.15 162)" stroke-width="2.5" stroke-dasharray="52 56.5" stroke-linecap="round" transform="rotate(-90 11 11)"></circle></svg>
+        <div style="font-weight:600;font-size:13px">Pre-construction</div><div style="font:500 12px 'Geist Mono',monospace;color:oklch(0.708 0 0)">92% complete</div>
+        <div style="margin-left:auto;font:500 12px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;color:oklch(0.708 0 0)">$28,450 of $28,000</div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Permits &amp; fees</div><div style="font-size:11px;color:oklch(0.708 0 0)">City of Oakland</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Pre-con <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">3,850</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">1,200</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">5,050</div>
+        <div style="padding-left:16px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.72 0.15 162/30%);background:oklch(0.72 0.15 162/10%);color:oklch(0.72 0.15 162)">✓ $450 under</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Design &amp; engineering</div><div style="font-size:11px;color:oklch(0.708 0 0)">Atelier North</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Pre-con <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">6,500</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">6,500</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">2,000</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">15,000</div>
+        <div style="padding-left:16px;display:flex;flex-direction:column;gap:2px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.72 0.15 162/30%);background:oklch(0.72 0.15 162/10%);color:oklch(0.72 0.15 162);width:max-content">✓ $320 under</span><span style="font-size:10.5px;color:oklch(0.708 0 0)">final invoice pending</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Demolition</div><div style="font-size:11px;color:oklch(0.708 0 0)">Vasquez Demo Co</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Pre-con <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">8,400</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">8,400</div>
+        <div style="padding-left:16px;display:flex;flex-direction:column;gap:2px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.79 0.15 78/30%);background:oklch(0.79 0.15 78/10%);color:oklch(0.79 0.15 78);width:max-content">▲ $900 over</span><span style="font-size:10.5px;color:oklch(0.708 0 0)">hazmat abatement added</span></div>
+      </div>
+      <!-- PHASE: Structural -->
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:oklch(0.145 0 0);border-bottom:1px solid oklch(1 0 0/10%)">
+        <svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="oklch(1 0 0/12%)" stroke-width="2.5"></circle><circle cx="11" cy="11" r="9" fill="none" stroke="oklch(0.72 0.15 162)" stroke-width="2.5" stroke-dasharray="32.8 56.5" stroke-linecap="round" transform="rotate(-90 11 11)"></circle></svg>
+        <div style="font-weight:600;font-size:13px">Structural</div><div style="font:500 12px 'Geist Mono',monospace;color:oklch(0.708 0 0)">58% complete</div>
+        <div style="margin-left:auto;font:500 12px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;color:oklch(0.708 0 0)">$75,700 of $72,920</div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Framing</div><div style="font-size:11px;color:oklch(0.708 0 0)">Delgado Builders</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Structural <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">12,000</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">18,500</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">9,200</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">39,700</div>
+        <div style="padding-left:16px;display:flex;flex-direction:column;gap:2px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.79 0.15 78/30%);background:oklch(0.79 0.15 78/10%);color:oklch(0.79 0.15 78);width:max-content">▲ $2,140 over</span><span style="font-size:10.5px;color:oklch(0.708 0 0)">CO-12 · joist sistering</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Electrical rough-in</div><div style="font-size:11px;color:oklch(0.708 0 0)">Brightline Electric</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Structural <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">7,800</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">6,400</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">14,200</div>
+        <div style="padding-left:16px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.72 0.15 162/30%);background:oklch(0.72 0.15 162/10%);color:oklch(0.72 0.15 162)">✓ $600 under</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Plumbing rough-in</div><div style="font-size:11px;color:oklch(0.708 0 0)">Corebond Plumbing</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Structural <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">6,900</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">5,100</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">12,000</div>
+        <div style="padding-left:16px;display:flex;flex-direction:column;gap:2px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.7 0.19 22/30%);background:oklch(0.7 0.19 22/10%);color:oklch(0.7 0.19 22);width:max-content">▲ $1,240 over</span><span style="font-size:10.5px;color:oklch(0.708 0 0)">repipe · upstairs bath</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">HVAC</div><div style="font-size:11px;color:oklch(0.708 0 0)">Summit Air Systems</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Structural <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">9,800</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">9,800</div>
+        <div style="padding-left:16px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.72 0.15 162/30%);background:oklch(0.72 0.15 162/10%);color:oklch(0.72 0.15 162)">✓ on estimate</span></div>
+      </div>
+      <!-- PHASE: Finishes -->
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:oklch(0.145 0 0);border-bottom:1px solid oklch(1 0 0/10%)">
+        <svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="none" stroke="oklch(1 0 0/12%)" stroke-width="2.5"></circle><circle cx="11" cy="11" r="9" fill="none" stroke="oklch(0.72 0.15 162)" stroke-width="2.5" stroke-dasharray="6.8 56.5" stroke-linecap="round" transform="rotate(-90 11 11)"></circle></svg>
+        <div style="font-weight:600;font-size:13px">Finishes</div><div style="font:500 12px 'Geist Mono',monospace;color:oklch(0.708 0 0)">12% complete</div>
+        <div style="margin-left:auto;font:500 12px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;color:oklch(0.708 0 0)">$43,500 of $41,700</div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Tile &amp; stone</div><div style="font-size:11px;color:oklch(0.708 0 0)">Meridian Tile</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Finishes <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">4,200</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right;border-bottom:1px dashed oklch(1 0 0/30%);cursor:text">11,600</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">15,800</div>
+        <div style="padding-left:16px;display:flex;flex-direction:column;gap:2px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.79 0.15 78/30%);background:oklch(0.79 0.15 78/10%);color:oklch(0.79 0.15 78);width:max-content">▲ $2,900 over</span><span style="font-size:10.5px;color:oklch(0.708 0 0)">slab upgrade · CO pending</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;border-bottom:1px solid oklch(1 0 0/8%);align-items:center">
+        <div><div style="font-weight:500">Cabinetry</div><div style="font-size:11px;color:oklch(0.708 0 0)">Alder &amp; Oak Cabinetry</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Finishes <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right;border-bottom:1px dashed oklch(1 0 0/30%);cursor:text">14,500</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right;border-bottom:1px dashed oklch(1 0 0/30%);cursor:text">6,000</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">20,500</div>
+        <div style="padding-left:16px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid oklch(0.72 0.15 162/30%);background:oklch(0.72 0.15 162/10%);color:oklch(0.72 0.15 162)">✓ $1,100 under</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:250px 118px repeat(6,92px) 108px 220px;padding:10px 14px;align-items:center">
+        <div><div style="font-weight:500">Paint &amp; finish</div><div style="font-size:11px;color:oklch(0.708 0 0)">TrueCoat Painting</div></div>
+        <div><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid oklch(1 0 0/15%);color:oklch(0.708 0 0);cursor:pointer">Finishes <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></span></div>
+        <div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;text-align:right;color:oklch(0.708 0 0)">—</div><div style="font:400 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right;border-bottom:1px dashed oklch(1 0 0/30%);cursor:text">7,200</div>
+        <div style="font:500 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;text-align:right">7,200</div>
+        <div style="padding-left:16px"><span style="font-size:11px;color:oklch(0.708 0 0)">planned · not started</span></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:24px;padding:11px 14px;border-top:1px solid oklch(1 0 0/10%);background:oklch(0.145 0 0)">
+        <div style="font-size:12px;color:oklch(0.708 0 0)">Available budget <span style="font:600 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;color:oklch(0.985 0 0);margin-left:6px">$152,260</span></div>
+        <div style="font-size:12px;color:oklch(0.708 0 0)">Net burn <span style="font:600 13px 'Geist Mono',monospace;font-variant-numeric:tabular-nums;color:oklch(0.985 0 0);margin-left:6px">$16,040/mo</span></div>
+        <div style="margin-left:auto;font-size:11px;color:oklch(0.708 0 0)">Dashed cells are editable planned amounts</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+

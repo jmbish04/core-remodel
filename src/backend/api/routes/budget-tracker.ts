@@ -80,10 +80,53 @@ function normalizeString(input: unknown): string | null {
   return value.length > 0 ? value : null;
 }
 
+// D1 caps a statement at 100 bound parameters — chunk multi-row writes.
+function chunk<T>(values: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+
+/**
+ * A Unix timestamp in seconds or milliseconds, or null if the number is not
+ * plausibly either. The window is 2001-09-09 to 2096-10-02, wide enough for any
+ * real project date and narrow enough that a compact date like 20260903 falls
+ * through to normal date parsing instead of being read as 1970.
+ */
+function fromEpochNumber(value: number): Date | null {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const SEC_MIN = 1_000_000_000;
+  const SEC_MAX = 4_000_000_000;
+  const ms =
+    value >= SEC_MIN && value <= SEC_MAX
+      ? value * 1000
+      : value >= SEC_MIN * 1000 && value <= SEC_MAX * 1000
+        ? value
+        : null;
+  if (ms === null) return null;
+  const parsed = new Date(ms);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function parseTimestamp(input: unknown): Date | null {
+  // Numbers are accepted as Unix SECONDS, which is what the D1 columns store
+  // (`integer(..., { mode: "timestamp" })` + `unixepoch()`) and what the Budget
+  // Command Center contract sends. Rejecting them used to drop the date
+  // silently: the insert succeeded with `date_incurred` unset, so a logged
+  // expense looked saved but had no date. Milliseconds are detected by
+  // magnitude so an accidental Date.now() is not read as the year 56000.
+  if (typeof input === "number") return fromEpochNumber(input);
   if (typeof input !== "string") return null;
   const trimmed = input.trim();
   if (!trimmed) return null;
+  // An all-digit string is a Unix timestamp, not a date string: `new Date("0")`
+  // parses as the year 2000 rather than the epoch. But only when the magnitude
+  // is actually epoch-shaped — "20260903" is a compact DATE, and treating it as
+  // seconds would silently yield 1970 where this used to (correctly) reject it.
+  if (/^\d+$/.test(trimmed)) {
+    const asEpoch = fromEpochNumber(Number(trimmed));
+    if (asEpoch) return asEpoch;
+  }
   const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -732,6 +775,44 @@ budgetTrackerRouter.get("/financial-status", async (c) => {
   }
 });
 
+// budget_funding_accounts has no amount_text column (integer cents only) — the
+// repo's currency convention wants a verbatim-text column too, but adding one
+// is a migration and migrations belong to a different agent. Report null.
+budgetTrackerRouter.get("/financial-accounts", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const rowsQuery = db
+      .select({
+        id: budgetFundingAccounts.id,
+        accountKey: budgetFundingAccounts.accountKey,
+        accountLabel: budgetFundingAccounts.accountLabel,
+        amountCents: budgetFundingAccounts.amountCents,
+        notes: budgetFundingAccounts.notes,
+      })
+      .from(budgetFundingAccounts)
+      .orderBy(budgetFundingAccounts.id);
+    const totalQuery = db
+      .select({
+        totalCents: sql<number>`coalesce(sum(${budgetFundingAccounts.amountCents}), 0)`,
+      })
+      .from(budgetFundingAccounts);
+    const [rows, totalRows] = await db.batch([rowsQuery, totalQuery]);
+
+    return c.json({
+      accounts: rows.map((row) => ({ ...row, amountText: null as string | null })),
+      totalCents: totalRows[0]?.totalCents ?? 0,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to load funding accounts",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
 budgetTrackerRouter.put("/financial-accounts", async (c) => {
   try {
     const body = (await c.req.json()) as {
@@ -743,34 +824,60 @@ budgetTrackerRouter.put("/financial-accounts", async (c) => {
       }>;
     };
     const accounts = Array.isArray(body.accounts) ? body.accounts : [];
-    const db = drizzle(c.env.DB);
-    let updated = 0;
-    for (const account of accounts) {
+
+    const now = new Date();
+    const upsertRows: Array<{
+      accountKey: string;
+      accountLabel: string;
+      amountCents: number;
+      notes: string | null;
+      datetimeCreated: Date;
+      datetimeUpdated: Date;
+    }> = [];
+    for (const [index, account] of accounts.entries()) {
       const accountKey = normalizeString(account.accountKey);
-      if (!accountKey) continue;
+      if (!accountKey) {
+        return c.json({ error: `accounts[${index}] is missing accountKey` }, 400);
+      }
       const amountCents = parseCents(account.amountCents);
-      if (amountCents === null) continue;
-      await db
-        .insert(budgetFundingAccounts)
-        .values({
-          accountKey,
-          accountLabel: normalizeString(account.accountLabel) || accountKey,
-          amountCents,
-          notes: account.notes === null ? null : normalizeString(account.notes),
-          datetimeCreated: new Date(),
-          datetimeUpdated: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: budgetFundingAccounts.accountKey,
-          set: {
-            accountLabel: normalizeString(account.accountLabel) || accountKey,
-            amountCents,
-            notes: account.notes === null ? null : normalizeString(account.notes),
-            datetimeUpdated: new Date(),
-          },
-        });
-      updated += 1;
+      if (amountCents === null) {
+        return c.json(
+          { error: `accounts[${index}] (${accountKey}) has a missing or invalid amountCents` },
+          400,
+        );
+      }
+      upsertRows.push({
+        accountKey,
+        accountLabel: normalizeString(account.accountLabel) || accountKey,
+        amountCents,
+        notes: account.notes === null ? null : normalizeString(account.notes),
+        datetimeCreated: now,
+        datetimeUpdated: now,
+      });
     }
+
+    const db = drizzle(c.env.DB);
+    for (const rowsChunk of chunk(upsertRows, 20)) {
+      const stmts = rowsChunk.map((row) =>
+        db
+          .insert(budgetFundingAccounts)
+          .values(row)
+          .onConflictDoUpdate({
+            target: budgetFundingAccounts.accountKey,
+            set: {
+              accountLabel: row.accountLabel,
+              amountCents: row.amountCents,
+              notes: row.notes,
+              datetimeUpdated: row.datetimeUpdated,
+            },
+          }),
+      );
+      if (stmts.length > 0) {
+        await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+      }
+    }
+    const updated = upsertRows.length;
+
     await emitBudgetRealtime(c.env, {
       event: "budget.financial_accounts.updated",
       updated,

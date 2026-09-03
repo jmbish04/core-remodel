@@ -1,0 +1,2 @@
+CREATE INDEX `idx_contract_compliance_gates_state` ON `contract_compliance_gates` (`state`);--> statement-breakpoint
+CREATE INDEX `idx_bee_active_date` ON `budget_expense_entries` (`is_active`,`date_incurred`);

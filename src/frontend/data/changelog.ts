@@ -77,6 +77,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "orca/budget-ux-overhaul",
+    title: "Budget & Procurement Command Center — /admin/budget rebuilt as one workbench",
+    summary:
+      "Rebuilds /admin/budget as a single tabbed workbench matching the approved design canvas — Grid, Inbox, Estimates, Rooms, Savings, Compliance behind one KPI header — and wires every tab to a real API. Two documents were written before any code so parallel agents were held to one standard: a D1/Drizzle rules sheet researched against the live Cloudflare docs (row reads are the billed unit, one db.batch round trip per screen, aggregate in SQL, chunk at the 100 bound-parameter cap, db.transaction() is dead on D1), and an API contract pinning every endpoint shape up front. Rule zero throughout: no SQL in frontend code — islands call a typed client, the client calls Hono, Hono runs Drizzle. Adds three tables and eleven covering indexes (0184, 0185, both applied and verified on remote), three new routers, a reworked grid/inbox/rooms-finance, and fixes a silent data-loss bug where a logged expense saved with no date because parseTimestamp rejected numbers.",
+    date: "2026-09-03",
+    status: "staged",
+    prNumber: 412,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/412",
+  },
+  {
     branch: "worktree-bridge-cse_016Rp7EJTqbFmvTpUX2cUvWw",
     title:
       "System health audit — two false-alarm probes, an abandoned-run sweep, and a KV spend breaker",
@@ -483,6 +493,81 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "budget-command-center",
+    branch: "orca/budget-ux-overhaul",
+    date: "2026-09-03",
+    area: "Budget",
+    title: "Budget & Procurement Command Center",
+    summary:
+      "/admin/budget is now one tabbed workbench — Grid, Inbox, Estimates, Rooms, Savings, Compliance — behind a KPI header that loads in a single D1 round trip. Every tab is backed by a real endpoint; nothing on the page reads a database directly.",
+    changes: [
+      {
+        kind: "added",
+        text: "GET /api/budget/workbench-summary fills the entire shell header in ONE D1 round trip — a db.batch of 12 independent SELECTs covering the four KPI cards and all six tab counts. runwayMonths is null, never Infinity, when trailing burn is zero. The inbox tab badge reuses the inbox route's own query builders, so the count cannot drift from what the tab actually shows.",
+      },
+      {
+        kind: "changed",
+        text: "GET /api/budget/inbox now ranks in SQL. A UNION ALL over three sources — over-budget rooms, unmapped estimate lines on the latest revision, and failing or warning compliance gates joined to their contract's vendor — ordered by financial exposure descending with a LIMIT. It previously pulled rows and sorted them in JavaScript, which is the shape that quietly burns D1 row reads as the table grows.",
+      },
+      {
+        kind: "changed",
+        text: "GET /api/budget/rooms-finance is one grouped query: rooms LEFT JOINed to three aggregated subqueries (committed, spent, open materials), batched with three totals queries computed from the source tables rather than summed from the per-room rows — so an item mapped to several rooms, or a portfolio-level expense, cannot be double-counted. No per-room follow-up query anywhere.",
+      },
+      {
+        kind: "changed",
+        text: "GET /api/budget/grid returns the time-phased contract shape: month columns, per-cell planned/actual/editable, row totals and variance, phase subtotals, and a footer with available budget and net burn. The monthly rollup is a FLAT grouped query pivoted in the Worker, not a conditional-SUM pivot in SQL — the pivot scans exactly the same rows either way, so it buys no row reads and only buys dynamic SQL that breaks whenever the month range changes. The pivot lives in budget-grid-math.ts behind an assert-based self-check.",
+      },
+      {
+        kind: "added",
+        text: "PATCH /api/budget/plan-schedule accepts a single planned cell ({lineItemId, month, plannedCents}) alongside the existing bulk shape, so the already-shipped BudgetGridApp caller keeps working. plannedCents: null deletes the row rather than writing null into a NOT NULL column.",
+      },
+      {
+        kind: "added",
+        text: "budget-reconciliation router: a keyset-paginated queue of unmapped estimate lines with their RANKED candidate rooms, each carrying its elimination reasoning as {markdown, html}. The screen presents an argument, not a guess — nothing is written to estimate_line_items.room_id without an explicit human confirm, and there is deliberately no auto-confirm path for a high-confidence candidate.",
+      },
+      {
+        kind: "added",
+        text: "budget-reallocations router: the savings and reallocation ledger, keyset-paginated in SQL on (occurred_at DESC, id DESC), plus a contingency balance. Contingency is an ordinary funding account (accountKey contingency_reserve), not a special null state — the first modelling attempt reserved null/null for it and so could not represent the design's own first ledger row, 'Contingency to Primary Bath'. Balance is opening + inflows - outflows, all summed in SQL, and pctRemaining is 0 rather than NaN when nothing is allotted.",
+      },
+      {
+        kind: "added",
+        text: "budget-compliance router: every contract joined to its payment gates in one db.batch, with the block/warn/ok rollup computed in SQL. California's CSLB down-payment cap — the lesser of $1,000 or 10% of the contract price, Bus. & Prof. Code section 7159.5 — is evaluated server-side in integer cents and unit-checked; the frontend renders the verdict and never re-derives the rule. A contract with no recorded down payment reads 'na', never 'pass': an unknown is not a pass on a compliance surface, and an omitted gate row would read as all-clear.",
+      },
+      {
+        kind: "added",
+        text: "GET /api/budget-tracker/financial-accounts, returning the accounts and their SUM computed in SQL as the authoritative total budget.",
+      },
+      {
+        kind: "fixed",
+        text: "PUT /api/budget-tracker/financial-accounts issued one D1 round trip per account in an await loop, and silently `continue`d past any entry missing a key or amount — reporting success while writing nothing. It now builds the statements into an array, chunks at 20 rows for D1's 100 bound-parameter cap, and sends one db.batch; malformed input 400s naming the bad entry instead of vanishing.",
+      },
+      {
+        kind: "fixed",
+        text: "A logged expense saved with no date while looking saved. parseTimestamp early-returned null for anything that was not a string, so the numeric dateIncurred the contract specifies was dropped server-side and the insert succeeded with date_incurred unset. It now accepts Unix seconds, milliseconds (detected by magnitude, so an accidental Date.now() is not read as the year 56000), an all-digit string, or a date string — with a self-check covering each.",
+      },
+      {
+        kind: "added",
+        text: "src/frontend/lib/budget-api.ts — one typed client for all fifteen endpoints, with an AbortController per query so switching tabs cancels in-flight requests, a single BudgetApiError carrying HTTP status and the server's message, and one formatCents the whole surface formats money through. Zero SQL in any frontend file; a .tsx that talks to a database is a defect in this repo.",
+      },
+      {
+        kind: "added",
+        text: "Six tab components plus the workbench shell and the log-expense dialog. Tab state lives in the URL query string so tabs deep-link and the back button works; only the active tab mounts. Every money input is <CurrencyInput>, every select renders labels and submits ids, and gate and risk states are conveyed by text and icon rather than colour alone.",
+      },
+      {
+        kind: "changed",
+        text: "/admin/budget/grid and /admin/budget/inbox now redirect into the workbench. Their islands read the pre-rebuild response shapes for /api/budget/grid, /inbox and /rooms-finance, and those shapes cannot coexist with the new contract on the same endpoints. The island files are left on disk so nothing is lost; a follow-up removes them.",
+      },
+      {
+        kind: "migration",
+        text: "0184 adds estimate_line_room_candidates (ranked room candidates with reasoning), budget_reallocation_ledger, and contract_compliance_gates, plus license_expires_at on estimate_companies. 0185 adds eleven covering indexes for the new WHERE / JOIN ON / ORDER BY columns. Both are purely additive — three CREATE TABLE, one ADD COLUMN, eleven CREATE INDEX — with no drops and no table rebuilds, so no data was at risk.",
+      },
+    ],
+    migrations: ["0184_talented_wendell_vaughn", "0185_magical_rage"],
+    status: "staged",
+    prNumber: 412,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/412",
+  },
   {
     id: "health-probe-truth-and-spend-breaker",
     branch: "worktree-bridge-cse_016Rp7EJTqbFmvTpUX2cUvWw",

@@ -1,0 +1,47 @@
+---
+/**
+ * @fileoverview Budget Command Center — workbench home.
+ *
+ * Thin Astro shell mounting the `<BudgetWorkbench />` island: header KPIs,
+ * "N decisions waiting" pill, and the six-tab shell (Grid, Inbox, Estimates,
+ * Rooms, Savings, Compliance). See docs/plans/budget-command-center/.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { BudgetWorkbench } from "@/components/budget/BudgetWorkbench";
+---
+
+<BaseLayout
+  title="Budget Command Center - 126 Colby - Remodel Mission Control"
+  description="Time-phased budget grid, decision inbox, room finance, and compliance in one workbench."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path
+            d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"
+          ></path>
+          <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path>
+        </svg>
+        Budget Command Center
+      </h1>
+      <p class="text-muted-foreground">
+        The single workbench for the budget: schedule, inbox, estimates, rooms, savings, and compliance.
+      </p>
+    </div>
+
+    <BudgetWorkbench client:only="react" />
+  </main>
+</BaseLayout>

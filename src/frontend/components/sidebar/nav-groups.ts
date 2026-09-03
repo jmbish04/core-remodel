@@ -58,6 +58,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     admin: true,
     icon: Wallet,
     items: [
+      { href: "/admin/budget", label: "Command Center" },
       { href: "/admin/budget/tracker", label: "Budget Tracker" },
       { href: "/admin/budget/dashboard", label: "Budget Triage Matrix" },
       { href: "/admin/budget/truth-table", label: "Labor & Materials Costs" },

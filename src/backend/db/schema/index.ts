@@ -17,7 +17,9 @@ export * from "./documents/supporting_documents";
 export * from "./documents/document_entity_associations";
 export * from "./documents/document_saved_views";
 export * from "./estimates/estimates";
+export * from "./estimates/estimate_line_room_candidates";
 export * from "./contracts/contracts";
+export * from "./contracts/contract_compliance_gates";
 
 export * from "./home/floors";
 export * from "./home/rooms";
@@ -66,6 +68,7 @@ export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
 export * from "./home/room_action_items";
 export * from "./home/budget_tracker_items";
+export * from "./home/budget_reallocation_ledger";
 export * from "./home/budget_item_material_mappings";
 export * from "./home/budget_phases";
 export * from "./home/budget_plan_schedule";

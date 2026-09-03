@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Time-phased planned spend per budget line item, per month (0035 grid).
@@ -47,6 +47,11 @@ export const budgetPlanSchedule = sqliteTable(
       table.budgetItemTrackId,
       table.period,
     ),
+    // Budget Command Center grid (GET /api/budget/grid): WHERE period BETWEEN
+    // from AND to, unscoped by budgetItemTrackId — the unique index above
+    // leads with budgetItemTrackId so it can't serve a period-only range
+    // scan. This one leads with period instead.
+    periodIdx: index("idx_budget_plan_schedule_period").on(table.period),
   }),
 );
 

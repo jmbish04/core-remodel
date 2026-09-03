@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { workerEmailInvoices } from "../emails/worker_email_invoices";
 import { budgetPhases } from "./budget_phases";
@@ -68,7 +68,11 @@ export const budgetTrackerItems = sqliteTable("budget_tracker_items", {
   datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
-});
+}, (t) => ({
+  // Budget Command Center grid (GET /api/budget/grid): WHERE isActive = true,
+  // grouped by phaseId. Covers both in one index.
+  activePhaseIdx: index("idx_bti_active_phase").on(t.isActive, t.phaseId),
+}));
 
 /**
  * Many-to-many mapping between tracker item revisions and rooms.
@@ -84,7 +88,11 @@ export const budgetTrackerItemRooms = sqliteTable("budget_tracker_item_rooms", {
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
-});
+}, (t) => ({
+  // Room finance rollup (GET /api/budget/rooms-finance) joins this mapping by
+  // roomId; the PK leads with the item id so it cannot serve a roomId lookup.
+  roomIdx: index("idx_btir_room").on(t.roomId),
+}));
 
 /**
  * Sync idempotency and audit events for Google Sheets push/pull.
@@ -189,4 +197,21 @@ export const budgetExpenseEntries = sqliteTable("budget_expense_entries", {
   datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
-});
+}, (t) => ({
+  // Budget Command Center grid actuals rollup (GET /api/budget/grid): WHERE
+  // isActive = true AND dateIncurred in range, GROUP BY budgetItemTrackId +
+  // strftime month.
+  activeTrackDateIdx: index("idx_bee_active_track_date").on(
+    t.isActive,
+    t.budgetItemTrackId,
+    t.dateIncurred,
+  ),
+  // Room finance rollup (GET /api/budget/rooms-finance): WHERE isActive = true
+  // GROUP BY roomId. Without this the per-room spend subquery scans the table.
+  activeRoomIdx: index("idx_bee_active_room").on(t.isActive, t.roomId),
+  // Budget grid footer net-burn (GET /api/budget/grid): WHERE isActive = true
+  // AND dateIncurred BETWEEN ..., summed across ALL expenses regardless of
+  // budgetItemTrackId attribution — activeTrackDateIdx leads with
+  // budgetItemTrackId so it can't serve this range scan alone.
+  activeDateIdx: index("idx_bee_active_date").on(t.isActive, t.dateIncurred),
+}));
