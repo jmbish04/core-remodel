@@ -485,8 +485,8 @@ checks.ok("/api/artifacts sees the absolute path (404, not 400)", artifact.statu
 16 passed, 0 failed`,
       previewWorker: {
         name: "wcrp-orca-fix-cpu-load-time",
-        status: "deployed",
-        note: "Live for review. Tear down with `pnpm run preview:delete` in the same turn as the merge.",
+        status: "deleted",
+        note: "Torn down 2026-09-04 once the review was addressed and the QC was green, in the same turn as the merge. Verified gone: GET /api/ping on its URL returns 404.",
       },
     },
   },
