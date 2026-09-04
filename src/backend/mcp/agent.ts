@@ -47,10 +47,16 @@ import { McpAgent } from "agents/mcp";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+// TYPE-ONLY on purpose. `getAllTools()` pulls the whole tool registry — 219
+// modules of hand-written Zod — and this class is exported from `src/_worker.ts`
+// as a Durable Object, so a value import would build every tool schema during
+// Worker startup and count against the 1s startup CPU budget (measured at 13%
+// of startup samples; deploys were failing with 10021). `init()` imports it
+// dynamically instead — it runs per MCP session, not at module load.
+import type { getAllTools } from "./registry";
 import type { McpProps, ToolCtx } from "./types";
 
 import { logInvocation, principalLabel, type McpTransport } from "./logging";
-import { getAllTools } from "./registry";
 import { GITHUB_REPO_URL } from "./urls";
 
 /**
@@ -63,6 +69,9 @@ const REPO_URL_FIELD = {
     .string()
     .describe("GitHub repository backing this MCP server — where the code and issues live"),
 };
+
+/** One entry of the MCP tool registry. */
+type RegistryTool = ReturnType<typeof getAllTools>[number];
 
 /** Full-parity props used when a caller is trusted but carries no OAuth grant. */
 const DEFAULT_PROPS: McpProps = { userId: "justin", scope: "remodel", kind: "oauth" };
@@ -155,10 +164,12 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
    */
   async init(): Promise<void> {
     const server = new McpServer({ name: "core-remodel", version: "1.0.0" });
+    const { getAllTools } = await import("./registry");
+    const tools = getAllTools();
     if (this.props?.codeMode) {
-      this.registerCodeTool(server);
+      this.registerCodeTool(server, tools);
     } else {
-      this.registerRegistryTools(server);
+      this.registerRegistryTools(server, tools);
     }
     this.server = server;
   }
@@ -182,12 +193,12 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
    * themselves — so a Code Mode session is legible in `mcp_tool_invocations`
    * both as the script that ran and as the tools it touched.
    */
-  private registerCodeTool(server: McpServer): void {
+  private registerCodeTool(server: McpServer, tools: readonly RegistryTool[]): void {
     const descriptors: JsonSchemaToolDescriptors = {};
     const fns: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
     const byCategory = new Map<string, string[]>();
 
-    for (const tool of getAllTools()) {
+    for (const tool of tools) {
       if (!isSerializableShape(tool.inputShape)) {
         console.error(`mcp: skipping tool "${tool.name}" — inputShape is not serialisable`);
         continue;
@@ -368,10 +379,7 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
    * surfaces, so a Code Mode call is logged exactly like a direct one. Throws on
    * handler failure (after logging it) — the caller decides how to surface it.
    */
-  private async callTool(
-    tool: ReturnType<typeof getAllTools>[number],
-    input: Record<string, unknown>,
-  ): Promise<unknown> {
+  private async callTool(tool: RegistryTool, input: Record<string, unknown>): Promise<unknown> {
     const props = this.props ?? DEFAULT_PROPS;
     const ctx: ToolCtx = { env: this.env, db: drizzle(this.env.DB), props };
     const startedAt = Date.now();
@@ -398,8 +406,8 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
   }
 
   /** Registers every registry tool individually — the classic MCP surface. */
-  private registerRegistryTools(server: McpServer): void {
-    for (const tool of getAllTools()) {
+  private registerRegistryTools(server: McpServer, tools: readonly RegistryTool[]): void {
+    for (const tool of tools) {
       // Skip a tool whose INPUT schema cannot serialise — it could never be
       // called anyway, and registering it would blank the whole tools/list.
       if (!isSerializableShape(tool.inputShape)) {
