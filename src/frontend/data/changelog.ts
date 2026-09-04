@@ -83,6 +83,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "Deploys had started failing validation with `Script startup exceeded CPU time limit [code: 10021]`. A Worker must parse and execute its global scope inside a 1-second CPU budget, and this one no longer did — not a size problem (6.15 MB gzipped against a 10 MB cap). Profiling `wrangler check startup` and mapping every CPU sample back through the bundle's sourcemap put the cost in module-scope Zod schema construction and the garbage collection it provokes: `src/backend/api/index.ts` eagerly imported 109 routers building 231 module-scope z.object() schemas (46.5% of samples, inclusive), the RemodelMcpAgent Durable Object pulled all 219 MCP tool modules (13.1%), and `src/_worker.ts` statically imported 15 cron-only services whose reach included the email pipeline, business-card OCR and the whole Drizzle schema barrel. All three now load on demand — routers through a table of dynamic imports dispatched per prefix, the tool registry inside the DO's init(), the cron services inside scheduled(). Startup CPU samples fell 314 to 124 (-61%), garbage collection 96 to 24, eagerly-reachable modules 941 to 452. No public API change: 90 paths return identical statuses on preview and production and /openapi.json enumerates the same path set. No migration.",
     date: "2026-09-04",
     status: "staged",
+    prNumber: 416,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/416",
   },
   {
     branch: "claude/mcp-tools-auth-availability-2efca8",

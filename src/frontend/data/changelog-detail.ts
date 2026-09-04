@@ -146,6 +146,8 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     slug: "lazy-router-mounting-startup-cpu",
     subtitle: "Worker startup CPU — the 10021 deploy block",
     branch: "orca/fix-cpu-load-time",
+    prNumber: 416,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/416",
 
     introduction: `For a stretch of 2026-09-03 **nobody could deploy this Worker** — production
 or preview, any branch, every attempt rejected before it ever served a request:
