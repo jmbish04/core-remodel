@@ -44,6 +44,7 @@
     "preview:delete": "node scripts/deploy-preview.mjs --delete",
     "preview:cleanup": "node scripts/preview-cleanup.mjs",
     "preview:list": "node scripts/preview-list.mjs",
+    "perf:startup": "python3 scripts/perf/attribute-startup.py",
     "worktree:check": "node scripts/worktree-check.mjs",
     "cf-typegen": "wrangler types --include-runtime false",
     "secrets:google-photos": "node scripts/google-photos-secrets.mjs",

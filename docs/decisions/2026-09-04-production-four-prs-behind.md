@@ -2,7 +2,7 @@
 
 - **Date raised:** 2026-09-04
 - **Raised by:** fix-cpu-load-time session (orca/fix-cpu-load-time)
-- **Status:** awaiting decision
+- **Status:** decided
 
 ## What happened
 
@@ -74,4 +74,26 @@ one command whenever you want it.
 
 ## Decision
 
-_(empty until answered)_
+**Option 1 — merge, then deploy `main`.** — 2026-09-04
+
+Justin: *"try deploying"*.
+
+Deployed via the `Deploy (manual)` GitHub Action against `main` at `9f1afbbe`,
+with `run_migrations=true`. That ships #412 (Budget & Procurement Command
+Center), #413 (MCP connector fixes), #414, #415, and the startup-CPU work in
+#416/#417/#418 — everything merged since the 2026-09-03 15:42 UTC deploy.
+
+Verified against the DEPLOYED URL, not just the green Action:
+
+| Check | Result |
+| --- | --- |
+| Cloudflare deployment record | new deployment `f9330fac` at 2026-09-04T09:17:11Z (previous: 2026-09-03T15:42:07Z) |
+| Cron triggers still registered | 6 — `* * * * *`, `0 11 * * *`, `0 14 * * *`, `0 9 * * 1`, `15 */4 * * *`, `30 13 * * 1` |
+| Startup-CPU work live | `api_route_registry` reports `96 mount prefix(es), 96 dispatched … Every router imported cleanly` — the post-#417 wording |
+| #412 live | `GET /api/budget/grid` → 400 bare, 200 with `from`/`to`/`view` |
+| #413 live | authenticated `GET /mcp/sse` → 200, stream held open |
+| Routing regression guard | `pnpm run test:pr 416` against production — 18 passed, 0 failed |
+| Health session | 76 success / 10 degraded / 5 failure — same failure set as before the deploy, all pre-existing data-quality, AI-spend and Tesla-telemetry items; nothing routing- or startup-related |
+
+No 10021. The deploy itself is the first successful production deploy since
+2026-09-03 15:42 UTC.
