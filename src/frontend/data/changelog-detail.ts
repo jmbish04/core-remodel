@@ -396,9 +396,15 @@ curl -s -X POST -H "cookie: $COOKIE" "$BASE/api/health/session" \\
 --- api_route_registry, POST /api/health/session on both workers ---
 
 preview (this branch, fixed probe):
-  SUCCESS — 96 mount prefix(es), all imported cleanly; 276 route(s)/middleware
-  on the parent app across 206 distinct paths.
+  SUCCESS — 96 mount prefix(es), 96 dispatched; 276 route(s)/middleware on the
+  parent app across 206 distinct paths. Every router imported cleanly.
   session counts: {success: 76, degraded: 10, failure: 5}
+
+  (Review caught that the first version of this string was SHARED with the
+  failure branch, so a failing run would have read "all imported cleanly"
+  immediately before listing the imports that failed. Split: the counts are
+  shared, "Every router imported cleanly" is said only where it is true. The
+  line above is the re-run after that change.)
 
 production (eager mounting, original probe):
   SUCCESS — 1064 route(s)/middleware registered on the Hono app across 729 distinct paths.

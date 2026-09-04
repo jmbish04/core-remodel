@@ -207,19 +207,22 @@ export const HEALTH_PROBES: HealthProbe[] = [
         );
       }
 
-      const details =
-        `${MOUNT_PREFIXES.length} mount prefix(es), all imported cleanly; ` +
+      // Counts only. Whether the imports actually succeeded is stated once, in
+      // the branch that knows — a shared prefix claiming "all imported cleanly"
+      // would contradict the very failure list printed after it.
+      const counts =
+        `${MOUNT_PREFIXES.length} mount prefix(es), ${dispatched.length} dispatched; ` +
         `${routes.length} route(s)/middleware on the parent app across ${paths.size} distinct paths.`;
       if (problems.length > 0) {
-        return failure(`${details} Problems: ${problems.join("; ")}.`);
+        return failure(`${counts} Problems: ${problems.join("; ")}.`);
       }
       if (dispatched.length < MOUNT_PREFIX_FLOOR) {
         return degraded(
-          `${details} Below the expected floor of ${MOUNT_PREFIX_FLOOR} mount prefixes — routers were probably ` +
+          `${counts} Below the expected floor of ${MOUNT_PREFIX_FLOOR} mount prefixes — routers were probably ` +
             "removed from the MOUNTS table, which shows up as 404s on a subset of the API.",
         );
       }
-      return ok(details);
+      return ok(`${counts} Every router imported cleanly.`);
     },
   }),
 
