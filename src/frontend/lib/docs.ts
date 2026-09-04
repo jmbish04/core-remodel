@@ -67,7 +67,8 @@ const homeownersPages: DocsPageDefinition[] = [
     audience: "homeowners",
     audienceLabel: "For Homeowners",
     status: "live",
-    summary: "Set up the project brief, define the first rooms, and give contractors a usable starting point.",
+    summary:
+      "Set up the project brief, define the first rooms, and give contractors a usable starting point.",
     overview:
       "Use Remodel Mission Control as the first shared brief for your project. The goal is not to finish every decision on day one. The goal is to give contractors enough context to understand the house, the rooms in scope, and the budget direction you want to protect.",
     highlights: [
@@ -152,7 +153,8 @@ const homeownersPages: DocsPageDefinition[] = [
     audience: "homeowners",
     audienceLabel: "For Homeowners",
     status: "live",
-    summary: "Turn a whole-project number into room targets, decision gates, and revision-safe budget updates.",
+    summary:
+      "Turn a whole-project number into room targets, decision gates, and revision-safe budget updates.",
     overview:
       "Budgeting is iterative in this product by design. Start with a room-level split, then refine it into clearer material, labor, and option decisions as contractors react to what is realistic and what is not.",
     highlights: [
@@ -190,7 +192,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "decision-gates",
         title: "Refine room targets into decision gates",
-        summary: "Budget clarity improves when each room separates hard requirements from flexible options.",
+        summary:
+          "Budget clarity improves when each room separates hard requirements from flexible options.",
         paragraphs: [
           "As the remodel brief matures, room budgets usually need a second layer: categories, options, and bottlenecks. That is where the homeowner starts distinguishing between structural work, finish materials, alternates, and future-phase ideas.",
           "This matters because contractors need to know which line items are price-sensitive and which ones can shift if labor, trade discounts, or product availability changes the best path.",
@@ -204,7 +207,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "rebalance",
         title: "Rebalance after estimates arrive",
-        summary: "The budget should react to real bids instead of pretending the first guess was final.",
+        summary:
+          "The budget should react to real bids instead of pretending the first guess was final.",
         paragraphs: [
           "Once estimates start showing up, the homeowner can compare the current budget direction to live pricing. Some rooms may need more budget, some may need scope reduction, and some material choices may need alternates.",
           "The important thing is to keep those changes revision-safe. Remodel Mission Control is designed so the budget conversation stays attached to the same project context the contractor is already reviewing.",
@@ -225,7 +229,8 @@ const homeownersPages: DocsPageDefinition[] = [
     audience: "homeowners",
     audienceLabel: "For Homeowners",
     status: "live",
-    summary: "Capture the existing house, add inspiration, and attach product evidence that contractors can react to.",
+    summary:
+      "Capture the existing house, add inspiration, and attach product evidence that contractors can react to.",
     overview:
       "Visual context is the fastest way to reduce bad assumptions in a remodel quote. Homeowners should use the upload, photo, review, mood board, and supporting document surfaces together so each room has clear as-is conditions and a believable target direction.",
     highlights: [
@@ -273,7 +278,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "inspiration",
         title: "Save inspiration that explains intent",
-        summary: "Inspiration is most useful when it says what the homeowner is trying to achieve, not just what they like.",
+        summary:
+          "Inspiration is most useful when it says what the homeowner is trying to achieve, not just what they like.",
         paragraphs: [
           "Mood boards and photo reviews help homeowners collect target looks, layouts, and finish styles. The best inspiration sets explain why a reference matters: tile pattern, millwork profile, vanity size, lighting mood, or storage concept.",
           "That context lets the contractor suggest practical substitutions when a product is unavailable, overpriced, or not a good trade fit.",
@@ -294,7 +300,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "products-and-quotes",
         title: "Attach product links, quotes, and source evidence",
-        summary: "Materials become decision-ready when the contractor can see the exact source and price context.",
+        summary:
+          "Materials become decision-ready when the contractor can see the exact source and price context.",
         paragraphs: [
           "When the homeowner has a tile, fixture, or finish in mind, that choice should be documented with a link, quote, screenshot, PDF, or note in the supporting documents workspace. This is where the app becomes more than a picture gallery.",
           "A contractor can then respond with practical guidance. They may confirm the product works, note lead-time risk, or recommend a similar option that qualifies for a trade discount.",
@@ -315,7 +322,8 @@ const homeownersPages: DocsPageDefinition[] = [
     audience: "homeowners",
     audienceLabel: "For Homeowners",
     status: "live",
-    summary: "Live room-aware questionnaire that surfaces build questions before they become costly misses, with AI-suggested room mappings the homeowner controls.",
+    summary:
+      "Live room-aware questionnaire that surfaces build questions before they become costly misses, with AI-suggested room mappings the homeowner controls.",
     overview:
       "The standalone questionnaire is shipped at /questionnaire. Each section is parametric — adding new sections or questions in the database hydrates the UI automatically — and every committed answer can cascade into the budget tracker as a shadow item with cents-enforced estimates.",
     highlights: [
@@ -367,7 +375,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "ai-flagging",
         title: "AI surfaces the right prompts at the right time",
-        summary: "Question relevance is derived from the room data the homeowner is already entering.",
+        summary:
+          "Question relevance is derived from the room data the homeowner is already entering.",
         paragraphs: [
           "The rationale workflow watches the room brief, visual references, and uploaded materials, then proposes question-to-room mappings. A media-wall reference triggers blocking and power questions. A shower layout triggers waterproofing, niche, or fixture questions.",
           "Every AI suggestion is reviewable: confirming locks it as user_confirmed, dismissing it flips it to user_disassociated, and the workflow respects both states forever on subsequent runs.",
@@ -388,7 +397,8 @@ const homeownersPages: DocsPageDefinition[] = [
     audience: "homeowners",
     audienceLabel: "For Homeowners",
     status: "live",
-    summary: "Iteratively modify remodel photos, choose rendering strategy, and index revision embeddings.",
+    summary:
+      "Iteratively modify remodel photos, choose rendering strategy, and index revision embeddings.",
     overview:
       "The In-Photo Editing pipeline enables homeowners to run iterative AI-powered transformations on listing photos and inspiration images. It tracks full revision branches in D1, supports advanced cropping and visual compare tools, and generates multi-modal pooled vector embeddings stored in Vectorize for quick semantic search.",
     highlights: [
@@ -410,7 +420,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         href: "/docs/homeowners/render-studio",
         label: "Read the Render Studio Guide",
-        description: "Go deeper with the staged blank-canvas pipeline, multi-angle renders, and mood boards.",
+        description:
+          "Go deeper with the staged blank-canvas pipeline, multi-angle renders, and mood boards.",
       },
     ],
     sections: [
@@ -503,7 +514,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         href: "/admin/builder",
         label: "Open Render Studio",
-        description: "Configure a design and run the staged base, rough-in, and finish pipeline on a room.",
+        description:
+          "Configure a design and run the staged base, rough-in, and finish pipeline on a room.",
       },
       {
         href: "/admin/gallery",
@@ -525,7 +537,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "fidelity-first",
         title: "Fidelity first: edit the real room, never invent one",
-        summary: "The single most important design principle is that renders stay architecturally faithful to your actual space.",
+        summary:
+          "The single most important design principle is that renders stay architecturally faithful to your actual space.",
         paragraphs: [
           "The number one rule of the Render Studio is fidelity. A homeowner and contractor can only make decisions from a render if the rendered room is genuinely their room. Text-to-image generation is unreliable for this: ask a model for 'a renovated kitchen' and it will happily relocate the sink wall, widen the window, raise the ceiling, and re-crop the framing. None of those choices are real, and pricing a fantasy room wastes everyone's time.",
           "To prevent that drift, the Studio always performs an EDIT on the real, existing photo of your room rather than generating from scratch. The starting image is a 'blank canvas' — your listing photo with the existing furniture and clutter stripped out — so the model only ever has to add what you asked for on top of true architecture, never reconstruct the space.",
@@ -546,7 +559,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "staged-pipeline",
         title: "The staged pipeline: blank canvas to photoreal finish",
-        summary: "Renovations are built in deliberate stages so each layer can be reviewed, reused, and re-edited.",
+        summary:
+          "Renovations are built in deliberate stages so each layer can be reviewed, reused, and re-edited.",
         paragraphs: [
           "Rather than asking for a finished kitchen in one shot, the Studio composes the renovation in stages, and every stage output is saved so you can build on it later. Thinking of the room as a model being dressed, each stage adds another layer of the outfit.",
           "It begins with the blank canvas: your real listing photo with existing furniture and fixtures removed, leaving true walls, floor, windows, and openings. From there the pipeline runs three main stages.",
@@ -565,7 +579,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "state-tree",
         title: "The render state tree: branch, reuse, and rewind",
-        summary: "Every stage output is a saved node, so edits reuse cached work and branch cleanly instead of starting over.",
+        summary:
+          "Every stage output is a saved node, so edits reuse cached work and branch cleanly instead of starting over.",
         paragraphs: [
           "Each stage output is persisted as a node in a render state tree. Nodes record their stage, their parent, the prompt and model used, the lighting profile, and the resulting image. Because the lineage is preserved, the Studio can be smart about where an edit should attach — and that distinction is what keeps iteration fast and consistent.",
           "Edits fall into two kinds. A micro-edit changes a surface detail — swapping a countertop material, trying a different cabinet color — and it reuses the latest finish node as its starting point, so only the requested finish is re-rendered while everything else stays identical. A macro-edit changes the room's composition — moving the island, relocating a fixture — and it rewinds to the base node and creates a new branch, because a structural change cannot safely be patched on top of a finish that assumed the old layout.",
@@ -581,7 +596,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "multi-angle",
         title: "Multi-angle consistency with hero and reference",
-        summary: "One design renders across every camera angle of a room so it reads as the same space throughout.",
+        summary:
+          "One design renders across every camera angle of a room so it reads as the same space throughout.",
         paragraphs: [
           "A room is usually photographed from several angles, and a design is only believable if it looks like the same room from each one. The Studio achieves this with a hero-and-reference technique rather than rendering each angle independently and hoping they match.",
           "First, one angle is chosen as the hero and rendered through the full staged pipeline to a finished result. Then every other angle is rendered with the hero's finished image attached as a consistency reference, with an instruction that amounts to: 'this is the same kitchen — render it from this viewpoint and match its materials, layout, cabinetry, and fixtures exactly, while keeping this angle's real walls, windows, and openings unchanged.'",
@@ -597,7 +613,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "lighting-inspiration-synthesis",
         title: "Lighting, inspiration extraction, and multi-image synthesis",
-        summary: "Tune the mood with day or night lighting and pull precise details from inspiration photos.",
+        summary:
+          "Tune the mood with day or night lighting and pull precise details from inspiration photos.",
         paragraphs: [
           "Renders carry a lighting profile so you can see a room in different conditions. Beyond the default, day and night profiles let you preview how the same finish reads in bright daylight versus warm evening light — useful for judging paint colors, cabinet tones, and how fixtures glow after dark.",
           "Inspiration extraction lets you borrow a specific detail instead of a whole photo. On an inspiration image, you draw a bounding box around the exact region you care about — a tile pattern, a faucet form, a cabinet profile — and that selection is recorded as a reference tied to the render. In the gallery, inspiration chips can highlight the selected region back on the original inspiration image so it is clear what was borrowed and from where.",
@@ -613,7 +630,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "models-and-resilience",
         title: "Models, the AI gateway, and graceful failover",
-        summary: "A proven default engine with a swappable, observable model registry behind every stage.",
+        summary:
+          "A proven default engine with a swappable, observable model registry behind every stage.",
         paragraphs: [
           "The default engine for every stage is Gemini 3 Pro Image (also known as Nano Banana Pro). It was chosen because, with the output configuration pinned to a fixed aspect ratio and a high-resolution target, it produces controlled, architecturally faithful, multi-reference edits — exactly the behavior fidelity demands. Every model call, regardless of provider, is routed through the Cloudflare AI Gateway so the team gets unified observability, caching, and key management.",
           "The engine is not hard-wired. A per-stage model registry makes each stage's model swappable, which supports A/B comparison and provider flexibility. Through the gateway's Fal path the Studio can reach a base editor, a conversational interaction model, a finish model, a multi-image synthesis model, and a faster rough-in alternate, with an additional edit model available for try-on. Through the gateway's Replicate path it can reach a depth-locked rough-in model and a premium finish model; Replicate runs asynchronously, so those calls create a job and then wait for or poll the result.",
@@ -652,7 +670,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         id: "mood-boards",
         title: "Mood boards: auto-generated and on demand",
-        summary: "Professional flatlay mood boards generated from prompts, images, or both — and linked to finished renders.",
+        summary:
+          "Professional flatlay mood boards generated from prompts, images, or both — and linked to finished renders.",
         paragraphs: [
           "A mood board captures the feel of a design as a single, organized flatlay image. The Studio can create one in three ways: from a prompt only, from one or more images only, or from a prompt combined with images, in which case the prompt acts as context that guides how the supplied images are arranged and interpreted. Each mood board is stored together with the request that produced it, so the inputs behind a board are never lost.",
           "Most importantly, mood boards are generated automatically. When a finish render completes, the system composes a mood board from that design and links it back to the render, giving every finished room a ready-made companion board with no extra effort. Boards are servable by room, by floor, and by keywords, so the right inspiration surfaces in the right context across the app.",
@@ -706,7 +725,8 @@ const homeownersPages: DocsPageDefinition[] = [
     audience: "homeowners",
     audienceLabel: "For Homeowners",
     status: "live",
-    summary: "Understand how the permits pipeline tracks DBI records and extracts contractor workloads.",
+    summary:
+      "Understand how the permits pipeline tracks DBI records and extracts contractor workloads.",
     overview:
       "The Permits Intelligence Pipeline autonomously monitors the San Francisco Department of Building Inspection (SF DBI) databases to track the status of your remodeling permits and evaluate contractor workloads in real-time.",
     highlights: [
@@ -718,7 +738,8 @@ const homeownersPages: DocsPageDefinition[] = [
       {
         href: "/admin/permits",
         label: "Open Permits Dashboard",
-        description: "View active building permits, block/lot configurations, and contractor details.",
+        description:
+          "View active building permits, block/lot configurations, and contractor details.",
       },
     ],
     sections: [
@@ -749,7 +770,8 @@ const contractorsPages: DocsPageDefinition[] = [
     audience: "contractors",
     audienceLabel: "For Contractors",
     status: "live",
-    summary: "Use the home workspace as the current project brief before opening any individual room or estimate tool.",
+    summary:
+      "Use the home workspace as the current project brief before opening any individual room or estimate tool.",
     overview:
       "The contractor-facing home page is supposed to orient the job quickly. It highlights the latest project updates, homeowner messages, and the recommended route through the rest of the workspace so the contractor can understand the brief before reacting with pricing or scope feedback.",
     highlights: [
@@ -822,7 +844,8 @@ const contractorsPages: DocsPageDefinition[] = [
     audience: "contractors",
     audienceLabel: "For Contractors",
     status: "live",
-    summary: "Start from the floorplan, drill into room visuals, and compare the current house to the target direction.",
+    summary:
+      "Start from the floorplan, drill into room visuals, and compare the current house to the target direction.",
     overview:
       "The room review workflow is where contractors should understand what exists, what the homeowner wants, and what evidence supports that decision. It uses the floorplan gallery, listing photos, supporting documents, and decision room together.",
     highlights: [
@@ -856,7 +879,8 @@ const contractorsPages: DocsPageDefinition[] = [
       {
         id: "start-from-floorplan",
         title: "Start from the floorplan",
-        summary: "Room dots on the plan help a contractor understand scope without guessing which photos belong where.",
+        summary:
+          "Room dots on the plan help a contractor understand scope without guessing which photos belong where.",
         paragraphs: [
           "The gallery page is designed to make the floorplan the first navigation layer. It lets the contractor see which rooms are in play and jump directly into room-specific visuals instead of browsing an undifferentiated image list.",
           "This is especially useful when the project spans multiple floors or when similar rooms need to be distinguished before pricing begins.",
@@ -870,7 +894,8 @@ const contractorsPages: DocsPageDefinition[] = [
       {
         id: "photos-to-intent",
         title: "Move from existing-condition photos to design intent",
-        summary: "The contractor should understand both the current room and the target feel before suggesting solutions.",
+        summary:
+          "The contractor should understand both the current room and the target feel before suggesting solutions.",
         paragraphs: [
           "Listing photos describe the real room. Inspiration photos, reviews, and mood boards describe what the homeowner wants the room to become. Both are needed before you can recommend sequence, alternates, or price-sensitive adjustments.",
           "Decision Room then puts those visual layers together so a contractor can assess whether the target feels feasible in that space and what supporting scope might be missing.",
@@ -905,7 +930,8 @@ const contractorsPages: DocsPageDefinition[] = [
     audience: "contractors",
     audienceLabel: "For Contractors",
     status: "live",
-    summary: "Track revisions, connect pricing back to rooms, and carry approved scope into contracts with audit history intact.",
+    summary:
+      "Track revisions, connect pricing back to rooms, and carry approved scope into contracts with audit history intact.",
     overview:
       "After the project brief is understood, the estimate and contract workspaces become the structured record for pricing, negotiation, and agreement management. These screens are meant to preserve revision history rather than replacing one version with another and losing the why.",
     highlights: [
@@ -948,7 +974,8 @@ const contractorsPages: DocsPageDefinition[] = [
       {
         id: "room-mapping",
         title: "Use room mappings and attached documents",
-        summary: "Estimates are easier to trust when the priced work is tied back to rooms and source evidence.",
+        summary:
+          "Estimates are easier to trust when the priced work is tied back to rooms and source evidence.",
         paragraphs: [
           "Room mapping helps the contractor and homeowner answer a simple question: which part of the house does this price belong to? That is especially important when the remodel covers several rooms with different priorities and option levels.",
           "Supporting documents, extracted source content, and attached files turn a bid into something the homeowner can review with more confidence.",
@@ -986,7 +1013,8 @@ const sharedPages: DocsPageDefinition[] = [
     audience: "shared",
     audienceLabel: "Shared Workflow",
     status: "live",
-    summary: "Keep every major room decision attached to visual evidence, documents, and revision history.",
+    summary:
+      "Keep every major room decision attached to visual evidence, documents, and revision history.",
     overview:
       "A remodel becomes hard to manage when decisions get separated from the reasons behind them. The shared decision trace in this app depends on supporting documents, reviewed images, and promoted room candidates staying connected instead of living in disconnected folders.",
     highlights: [
@@ -1029,7 +1057,8 @@ const sharedPages: DocsPageDefinition[] = [
       {
         id: "promoted-candidates",
         title: "Use promoted visuals to show direction",
-        summary: "Promoted candidates make it clear which images are active contenders instead of loose inspiration.",
+        summary:
+          "Promoted candidates make it clear which images are active contenders instead of loose inspiration.",
         paragraphs: [
           "Decision Room compares listing photos, inspiration, and AI render candidates so the team can decide what should move forward. Promoted images become the clearest visual shorthand for where a room is heading.",
           "That is useful during contractor discussions because it reduces the chance that someone is pricing against the wrong reference image.",
@@ -1064,7 +1093,8 @@ const sharedPages: DocsPageDefinition[] = [
     audience: "shared",
     audienceLabel: "Shared Workflow",
     status: "live",
-    summary: "Understand how the app is meant to support the full loop from first brief through estimates, contracts, and ongoing room clarification.",
+    summary:
+      "Understand how the app is meant to support the full loop from first brief through estimates, contracts, and ongoing room clarification.",
     overview:
       "The product goal is to be a one-stop shop during the remodel, not just a gallery or a budget sheet. Homeowners feed the system with room goals, visuals, budget signals, and documents. Contractors review that information, respond with pricing and guidance, and help tighten the brief until it is buildable.",
     highlights: [
@@ -1093,7 +1123,8 @@ const sharedPages: DocsPageDefinition[] = [
       {
         id: "loop-overview",
         title: "How the homeowner-to-contractor loop should work",
-        summary: "The homeowner enters intent, the contractor reacts, and both sides refine the brief.",
+        summary:
+          "The homeowner enters intent, the contractor reacts, and both sides refine the brief.",
         paragraphs: [
           "A homeowner starts by entering room goals, initial budgets, existing-condition photos, and inspiration. That creates enough context for a contractor to understand the house and begin responding with clarifications, pricing, and feasibility feedback.",
           "The homeowner then revises the brief using what they learned. The cycle repeats until the rooms, materials, and budget direction are clear enough to support a dependable estimate and later a contract.",
@@ -1107,7 +1138,8 @@ const sharedPages: DocsPageDefinition[] = [
       {
         id: "multi-contractor",
         title: "Support multi-contractor estimating",
-        summary: "The shared workspace should make it easier to get multiple estimates without rewriting the project every time.",
+        summary:
+          "The shared workspace should make it easier to get multiple estimates without rewriting the project every time.",
         paragraphs: [
           "Best practice is to gather more than one estimate. That only works well if each contractor sees a comparable version of the project brief. The app is meant to preserve that consistency by keeping rooms, documents, and budget context centralized.",
           "Contractor-specific pricing can diverge later in the estimate workspace, but the underlying homeowner brief should remain readable and stable across bidders.",
@@ -1121,7 +1153,8 @@ const sharedPages: DocsPageDefinition[] = [
       {
         id: "in-progress-capabilities",
         title: "Capabilities still in progress",
-        summary: "Some of the collaboration model is already present, and some of it is explicitly planned next.",
+        summary:
+          "Some of the collaboration model is already present, and some of it is explicitly planned next.",
         paragraphs: [
           "The current product already covers room visuals, budget tracking, supporting documents, decision comparisons, estimates, and contracts. The upcoming questionnaire workflow extends that system by surfacing room-specific build questions before they become change orders or missed scope.",
           "That planned addition fits the existing architecture because the contractor should eventually see questionnaire answers inside the same room context used for photos, documents, and budget review.",
@@ -1147,6 +1180,163 @@ const sharedPages: DocsPageDefinition[] = [
  * operator a precise mental model (with Mermaid diagrams) before extending it.
  */
 const platformPages: DocsPageDefinition[] = [
+  {
+    slug: ["platform", "worker-startup-cpu-debrief"],
+    href: "/docs/platform/worker-startup-cpu-debrief",
+    shortTitle: "Startup CPU outage",
+    title: "The Day Nobody Could Deploy — Worker Startup CPU (10021)",
+    audience: "platform",
+    audienceLabel: "Platform & Systems",
+    status: "live",
+    summary:
+      "For roughly a day in September 2026 every deploy of this Worker was rejected before it served a single request. This is what broke, why the obvious suspects were wrong, and the three defects the fix itself introduced.",
+    overview:
+      "On 2026-09-03 every attempt to deploy the Worker — production or preview, any branch — failed validation with `Script startup exceeded CPU time limit [code: 10021]`. Nothing shipped for about eighteen hours, which is why four already-merged pull requests sat dark. The cause was not a bug anyone wrote that day: the app had simply grown until the code that runs before the first request no longer fitted in the one second of CPU Cloudflare allows for it. This page is the debrief — what the limit actually is, why the size numbers were a red herring, how the cost was measured, what the fix was, and the three defects the fix introduced that ordinary testing could not see.",
+    highlights: [
+      "It was never a size problem: 6.15 MB gzipped against a 10 MB cap, and undeployable anyway.",
+      "The cost was module-scope Zod schema construction — 231 z.object() calls across 109 eagerly imported routers, plus 219 MCP tool modules.",
+      "Fixed by deferring with dynamic import(): startup CPU fell from 314 to about 120 samples.",
+      "It is a threshold, not a cliff — the same commit failed five deploys one day and passed six the next.",
+      "The fix silently disarmed a HIGH-severity health check that watches for unauthenticated admin routes.",
+    ],
+    actions: [
+      {
+        href: "/admin/changelog/lazy-router-mounting-startup-cpu",
+        label: "Changelog — the fix",
+        description: "The engineering record for the change itself, with the profile and the code.",
+      },
+      {
+        href: "/admin/changelog/lazy-router-mounting-review-followup",
+        label: "Changelog — the follow-up",
+        description: "The nine review findings that landed after the fix merged.",
+      },
+      {
+        href: "/admin/system/health",
+        label: "System health",
+        description: "Where the api_route_registry probe discussed below reports.",
+      },
+    ],
+    sections: [
+      {
+        id: "what-broke",
+        title: "What broke",
+        summary:
+          "A limit almost nobody has heard of, and a set of numbers that point the wrong way.",
+        paragraphs: [
+          "A Cloudflare Worker has to parse and execute its top-level code — everything outside a request handler — within one second of CPU time. Cloudflare checks this at deploy time, before the Worker ever serves traffic, and rejects the upload if it takes too long. That is error 10021.",
+          "The instinct is to look at size, and every size number said the app was fine: 6.15 MB compressed against a 10 MB cap, 31 MB uncompressed against 64 MB. Comfortable on paper, completely undeployable in practice. The limit being hit measures work, not bytes.",
+          "The work in question was schema construction. This codebase describes the shape of every API request and response with hand-written validators, and building those descriptions costs real CPU. There were 231 of them being built at startup, spread across 109 route modules that the API index imported all at once, plus 219 modules of tool definitions pulled in by a background service. None of it was needed to answer the first request; all of it ran before the first request could be answered.",
+        ],
+        bullets: [
+          "46.5% of startup — the API index and the 109 routers it imported.",
+          "13.1% — the tool registry, dragged in by a Durable Object export.",
+          "30.6% — garbage collection, which is downstream of allocating all of the above.",
+          "12.6% — a database schema module defining 359 tables.",
+        ],
+        note: {
+          title: "It is a threshold, not a cliff",
+          body: "The same unchanged commit failed five consecutive deploys on one day and passed six on the next. Once you are close to the limit, whether a deploy succeeds depends on which machine happens to validate it. That is why 'it deployed' was never evidence the problem was solved, and why the goal was headroom rather than a single passing run.",
+        },
+      },
+      {
+        id: "measuring-it",
+        title: "Measuring it, and the measurement that was wrong",
+        summary:
+          "The first diagnosis named the wrong second-biggest cost, using a method that looked reasonable.",
+        paragraphs: [
+          "Cloudflare's tooling can record what the Worker was doing during that startup second — a long list of samples saying which line of the bundled code was executing. The bundle is a single generated file, so those line numbers have to be translated back to the original source files before they mean anything.",
+          "The first diagnosis translated them by looking for path comments the bundler leaves in its output and crediting each region of the file to the comment above it. That is wrong, and quietly so: the bundler does not emit one comment per module, so a region gets credited to whichever comment happened to come first. Measured that way, the tool registry was reported as 0.0% of startup — and the write-up told the next engineer not to bother with it. Translated properly, through the bundler's own source map, it was 13.1%: the second-largest single cost in the whole profile.",
+          "There is a second, subtler trap in reading these profiles. The naive view attributes each sample to the code that was literally running, which reports that the validation library is expensive. True, and useless — it never says whose schemas were being built. The useful view asks which modules were anywhere on the call stack, because that is what answers the only question that matters: what would deferring this actually save?",
+        ],
+        diagrams: [
+          {
+            code: `flowchart LR
+    P["Startup CPU profile<br/>(one sample per moment)"] --> A{"Translate line numbers<br/>back to source"}
+    A -->|"bundler path comments<br/>(what was tried first)"| W["Tool registry: 0.0%<br/>WRONG — comments are not<br/>emitted per module"]
+    A -->|"the bundle's source map"| R["Tool registry: 13.1%<br/>2nd largest cost"]
+    R --> V{"Which view?"}
+    V -->|"self time"| S["'the validation library is expensive'<br/>true, and useless"]
+    V -->|"inclusive: what is on the stack"| I["'the API index causes 46.5%'<br/>the answer you can act on"]`,
+            caption:
+              "Two forks where the same profile yields a confident wrong answer. The tool built during this incident takes the right branch at both.",
+          },
+        ],
+        note: {
+          title: "The numbers are noisier than they look",
+          body: "Five runs of identical code produced anywhere from 110 to 131 samples. The original write-up — including an earlier draft of this one — quoted a single run as though it were a constant. Treat the after figure as roughly 120 give or take 10, against a before figure of 314. The improvement is many times larger than the noise, so the direction is not in doubt; the exact percentage was never that precise.",
+        },
+      },
+      {
+        id: "the-fix",
+        title: "The fix: do the work later",
+        summary:
+          "Nothing was deleted. It was moved off the path that runs before the first request.",
+        paragraphs: [
+          "None of this code was wasteful in itself — it was just running too early. The fix was to load each piece the first time something actually needs it, instead of all of it at boot. The bundler cooperates: a module that is only ever loaded on demand gets wrapped so its top-level code runs on first use. The catch is that a single ordinary import anywhere pulls it back to startup, so the property has to be maintained deliberately rather than assumed.",
+          "Three groups moved. The 109 API route modules now load when a request first touches their part of the API. The tool registry loads when a chat session actually starts. And fifteen scheduled-job services now load inside the scheduled handler, each cron branch importing only what it runs — the every-minute job was previously paying, on every cold start, for a weekly price refresh it never calls.",
+          "One group could not move. Cloudflare resolves Durable Object and Workflow classes as named exports of the entry file, so exporting them evaluates their modules and everything they import, unavoidably. That is what keeps the 359-table database schema on the startup path, and why it was left there rather than chased.",
+        ],
+        diagrams: [
+          {
+            code: `flowchart TB
+  subgraph B["Before — everything at startup"]
+    W1["entry point"] --> A1["API index"] --> R1["109 routers<br/>231 schemas"]
+    W1 --> M1["chat service"] --> G1["219 tool modules"]
+    W1 --> C1["15 cron services"]
+    W1 --> X1["30 Durable Object exports"]
+  end
+  subgraph A["After — on first use"]
+    W2["entry point"] --> A2["API index<br/>(a table of loaders)"]
+    A2 -. "first request to that path" .-> R2["109 routers"]
+    W2 --> M2["chat service"]
+    M2 -. "when a session starts" .-> G2["219 tool modules"]
+    W2 -. "when a cron fires" .-> C2["15 cron services"]
+    W2 --> X2["30 Durable Object exports<br/>(cannot be deferred)"]
+  end`,
+            caption:
+              "What still runs before the first request, before and after. Roughly 490 of 941 modules left the startup path.",
+          },
+        ],
+      },
+      {
+        id: "what-the-fix-broke",
+        title: "Three things the fix broke that testing could not see",
+        summary: "The routing was correct throughout. That is exactly why these got through.",
+        paragraphs: [
+          "The change was verified by walking 90 API paths on a preview deployment and on production and comparing every response code. They matched. Type checking was clean, linting was clean. Three real defects still got through, and the reason is worth keeping: all three were invisible to a test that only asks whether routing still works.",
+          "The first was caught by that comparison, on a single path. Loading routers on demand meant handing each request to its route module, and the first version trimmed the URL prefix off on the way — which is what the framework's own equivalent feature does. Two routes read the full path directly. One derives a storage key from it and started answering 'invalid key' instead of 'not found'. The other decides whether a request may skip the admin login by checking the full path against a list — and with the prefix trimmed it stopped matching, which would have put two externally-called webhooks behind a browser cookie they cannot send. Only the first showed up as a failing check; reading into why led to the second, which nothing was testing.",
+          "The third was found by review after the change had already shipped, and is the one worth remembering. This platform runs a self-check that watches for admin routes being served without a login requirement. It proved the protection was in place by looking for any handler registered under the admin path — and the new on-demand loading registers exactly such a handler for every path prefix. The check was satisfied by the thing it was supposed to be checking. Removing the login requirement entirely would have left it reporting green. A second half of the same check counted registered routes against a floor of 50; that count dropped from 1064 to 276 and stayed green while no longer measuring anything at all.",
+        ],
+        bullets: [
+          "Nothing was actually left unprotected — but the alarm had been quietly disconnected from what it alarms on.",
+          "The check now compares the identity of the login function itself, which nothing else can satisfy by accident.",
+          "Where it used to count, it now does the work: it loads every deferred module and names any that fail.",
+        ],
+        note: {
+          title: "The lesson that generalises",
+          body: "When you change how something loads, go and read whatever monitors it. A check written against the old shape can keep passing against the new one while measuring nothing — and type checking, linting and a 90-path response comparison all went straight through this one.",
+        },
+      },
+      {
+        id: "how-it-ended",
+        title: "How it ended, and what is different now",
+        summary:
+          "Production had been frozen for a day. The tooling built along the way outlasts the incident.",
+        paragraphs: [
+          "Production was deployed on 2026-09-04, the first successful deploy since 15:42 UTC the previous day, shipping the seven changes that had been stuck behind the blockage. It was verified against the live site rather than a green build badge: the deployment record, the six scheduled jobs still registered, the repaired self-check reporting all 96 route groups loading cleanly, and the 90-path comparison run once more against production.",
+          "An honest caveat belongs here. By the time the fix was ready, an unmodified copy of the pre-fix code also deployed successfully — six times in a row. So the fix cannot be credited with turning a failing deploy into a passing one on that particular day. What it can be credited with is headroom: from 314 samples of startup work down to about 120. Given the same code failed five times one day and passed six the next, sitting close to the limit is the explanation that fits both days, and headroom is the fix for that.",
+          "Two things survive the incident. A profiling tool now ships with the repo that takes the correct fork at both of the measurement traps described above, and refuses to compare two profiles unless given the right translation table for each — the first version of it silently misattributed a comparison and reported two on-demand modules as having grown. And the workstation's engineering guide gained a section on this failure so the next Worker that hits it starts from the answer instead of the symptoms.",
+        ],
+        actions: [
+          {
+            href: "/admin/system/health",
+            label: "System health",
+            description: "The repaired self-check reports here, under api_route_registry.",
+          },
+        ],
+      },
+    ],
+  },
   {
     slug: ["platform", "deep-research-overview"],
     href: "/docs/platform/deep-research-overview",
@@ -1229,7 +1419,8 @@ const platformPages: DocsPageDefinition[] = [
     showroom_store_products ||--o{ product_images : imagery
     showroom_store_products ||--o{ product_specs : specs
     showroom_store_products ||--o{ store_product_rating : homeowner`,
-            caption: "Showroom sourcing data model — findings, images, specs, and ratings hang off stores and products.",
+            caption:
+              "Showroom sourcing data model — findings, images, specs, and ratings hang off stores and products.",
           },
         ],
         note: {
@@ -1304,7 +1495,8 @@ const platformPages: DocsPageDefinition[] = [
         AG->>VEC: embed summary chunks
     end
     AG-->>FE: counts`,
-            caption: "As-built sweep — no plan review, no per-artifact gate. Review is store-level rating after the fact.",
+            caption:
+              "As-built sweep — no plan review, no per-artifact gate. Review is store-level rating after the fact.",
           },
         ],
       },
@@ -1328,7 +1520,8 @@ const platformPages: DocsPageDefinition[] = [
     Th -- no --> NC["Build negative constraints from ratingNotes"]
     NC --> Sweep["deepSweepCategory"]
     Sweep --> One["Max 1 sweep per tick"]`,
-            caption: "The rejection loop: a ruled-out showroom's reason feeds the next autonomous category sweep.",
+            caption:
+              "The rejection loop: a ruled-out showroom's reason feeds the next autonomous category sweep.",
           },
         ],
       },
@@ -1392,7 +1585,8 @@ const platformPages: DocsPageDefinition[] = [
     AG->>BR: Scrape candidate images
     BR-->>U: Image candidates
     U->>D1: Approve / reject each image (gate 3)`,
-            caption: "Intended flow with three human gates: plan approval, per-fact review, and per-image review.",
+            caption:
+              "Intended flow with three human gates: plan approval, per-fact review, and per-image review.",
           },
         ],
       },
@@ -1413,7 +1607,8 @@ const platformPages: DocsPageDefinition[] = [
     Rejected --> Constraints: Feeds negative constraints
     Applied --> [*]
     Constraints --> [*]`,
-            caption: "A proposed artifact's lifecycle — approval applies it, rejection sharpens the next sweep.",
+            caption:
+              "A proposed artifact's lifecycle — approval applies it, rejection sharpens the next sweep.",
           },
         ],
       },
@@ -1447,25 +1642,29 @@ export const docsAudienceGroups: DocsAudienceGroup[] = [
   {
     id: "homeowners",
     title: "For Homeowners",
-    summary: "Plan scope, capture visual intent, and give contractors a clear project brief to react to.",
+    summary:
+      "Plan scope, capture visual intent, and give contractors a clear project brief to react to.",
     pages: homeownersPages,
   },
   {
     id: "contractors",
     title: "For Contractors",
-    summary: "Review the brief, inspect rooms, price responsibly, and keep revisions tied to the underlying evidence.",
+    summary:
+      "Review the brief, inspect rooms, price responsibly, and keep revisions tied to the underlying evidence.",
     pages: contractorsPages,
   },
   {
     id: "shared",
     title: "Shared Workflows",
-    summary: "Understand the common decision trail that should survive from first concept through pricing and agreement.",
+    summary:
+      "Understand the common decision trail that should survive from first concept through pricing and agreement.",
     pages: sharedPages,
   },
   {
     id: "platform",
     title: "Platform & Systems",
-    summary: "How the deep-research sourcing engine works under the hood — what runs today and the intended human-in-the-loop roadmap.",
+    summary:
+      "How the deep-research sourcing engine works under the hood — what runs today and the intended human-in-the-loop roadmap.",
     pages: platformPages,
   },
 ];

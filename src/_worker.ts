@@ -70,6 +70,24 @@ export { RemodelMcpAgent } from "./backend/mcp/agent";
  * never swallows the distinct legacy `/admin/showrooms/...` route, and `/measure`
  * never swallows `/measurements`.
  */
+/**
+ * Redirects that must match the path EXACTLY, never as a prefix.
+ *
+ * `/docs/<audience>` is a bare audience index with no page of its own, so it
+ * collapses to the docs home. It cannot live in LEGACY_REDIRECTS: that list
+ * matches `startsWith(from + "/")` and carries the remainder across, which
+ * turned every real documentation page — `/docs/platform/deep-research-overview`
+ * and 17 others — into `/docs/deep-research-overview`, i.e. straight into the
+ * uploaded-FILE viewer, which answered "document not found". The whole
+ * documentation site was unreachable that way.
+ */
+const EXACT_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
+  ["/docs/homeowners", "/docs"],
+  ["/docs/contractors", "/docs"],
+  ["/docs/platform", "/docs"],
+  ["/docs/shared", "/docs"],
+];
+
 const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   ["/admin/showroom", "/admin/shopping"],
   ["/admin/shopping-journal", "/admin/shopping/journal"],
@@ -126,10 +144,6 @@ const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   // routes are deleted (SITEMAP.md "Deleted routes"); land them on the new /docs.
   // Safe alongside the dynamic /docs/[id] viewer — document ids are UUIDs, never
   // these audience slugs.
-  ["/docs/homeowners", "/docs"],
-  ["/docs/contractors", "/docs"],
-  ["/docs/platform", "/docs"],
-  ["/docs/shared", "/docs"],
 ];
 
 const legacyHandler: ExportedHandler<Env> = {
@@ -166,6 +180,12 @@ const legacyHandler: ExportedHandler<Env> = {
 
     // Legacy-path 301s (rebrand + admin-route normalization). Runs before auth so
     // old bookmarks land on the new URL (and then hit the /admin auth gate there).
+    for (const [from, to] of EXACT_REDIRECTS) {
+      if (url.pathname === from) {
+        return Response.redirect(`${url.origin}${to}${url.search}`, 301);
+      }
+    }
+
     for (const [from, to] of LEGACY_REDIRECTS) {
       if (url.pathname === from || url.pathname.startsWith(`${from}/`)) {
         const rest = url.pathname.slice(from.length);
