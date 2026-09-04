@@ -2,123 +2,34 @@
  * @fileoverview Main Hono API router
  *
  * This file sets up the main Hono application with all API routes and middleware.
+ *
+ * ROUTERS ARE MOUNTED LAZILY, ON PURPOSE. A Worker must parse and execute its
+ * global scope inside a 1-second CPU budget; eagerly importing all 109 routers
+ * here built 231 module-scope `z.object()` schemas and 116 `createRoute()` calls
+ * before a single request was served, and the deploy started failing validation
+ * with `Script startup exceeded CPU time limit [code: 10021]`. Measured against
+ * the bundle's sourcemap, this module alone accounted for 46.5% of startup CPU
+ * samples (zod schema construction plus the garbage collection it provokes).
+ *
+ * So `MOUNTS` below holds a DYNAMIC `import()` per router instead of a static
+ * one. esbuild wraps a module that is only dynamically imported in a lazy
+ * `__esm()` initialiser, so its schemas are built on the first request that
+ * touches its prefix and never at startup. Keep it that way: a static
+ * `import { xRouter } from "./routes/x"` anywhere in this file drags that
+ * router — and everything it imports — back onto the startup path.
+ *
+ * Routing semantics are unchanged. See `lazyDispatcher` for how the 404 sentinel
+ * reproduces Hono's fall-through between routers sharing a prefix.
  */
+
+import type { Context, ErrorHandler } from "hono";
 
 import { requireAccessAuth } from "@backend/utils/access";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
-import { accessRouter } from "./routes/access";
-import { adminRouter } from "./routes/admin";
-import { adminAgentsRouter } from "./routes/admin-agents";
-import { adminConfigRouter } from "./routes/admin-config";
-import { driveAuthProbeRouter } from "./routes/admin-drive-auth-probe";
-import { driveIngestRouter } from "./routes/admin-drive-ingest";
-import { adminIntegrationsRouter } from "./routes/admin-integrations";
-import { adminPermitsRouter } from "./routes/admin-permits";
-import { adminPlansRouter } from "./routes/admin-plans";
-import { adminPropertiesRouter } from "./routes/admin-properties";
-import { adminWorkflowsRouter } from "./routes/admin-workflows";
-import { aiRouter } from "./routes/ai";
-import { alertsRouter } from "./routes/alerts";
-import { analyticsRouter } from "./routes/analytics";
-import { artifactsRouter } from "./routes/artifacts";
-import { authRouter } from "./routes/auth";
-import { bidPortfolioPublicRouter } from "./routes/bid-portfolio-public";
-import { bidPortfoliosRouter } from "./routes/bid-portfolios";
-import { brandsRouter } from "./routes/brands";
-import { budgetAgentRouter } from "./routes/budget-agent";
-import { budgetAssumptionsRouter } from "./routes/budget-assumptions";
-import { budgetComplianceRouter } from "./routes/budget-compliance";
-import { budgetDataRouter } from "./routes/budget-data";
-import { budgetGridRouter } from "./routes/budget-grid";
-import { budgetReallocationsRouter } from "./routes/budget-reallocations";
-import { budgetReconciliationRouter } from "./routes/budget-reconciliation";
-import { budgetScenariosRouter } from "./routes/budget-scenarios";
-import { budgetSnapshotRouter } from "./routes/budget-snapshot";
-import { budgetTrackerRouter } from "./routes/budget-tracker";
-import { budgetWorkbenchRouter } from "./routes/budget-workbench";
-import { changelogRouter } from "./routes/changelog";
-import { clickupRouter } from "./routes/clickup";
-import { companyCrmRouter } from "./routes/company-crm";
-import { configRouter } from "./routes/config";
-import { configTaxRouter } from "./routes/config-tax";
-import { constructionChecklistRouter } from "./routes/construction-checklist";
-import { contractsRouter } from "./routes/contracts";
-import { dashboardRouter } from "./routes/dashboard";
-import { dialerRouter } from "./routes/dialer";
-import { documentViewsRouter } from "./routes/document-views";
-import { documentsRouter } from "./routes/documents";
-import driveListsRouter from "./routes/drive-lists";
-import { emailRouter } from "./routes/email";
-import { estimateCompaniesRouter } from "./routes/estimate-companies";
-import { estimateContactsRouter } from "./routes/estimate-contacts";
-import { estimateStatusesRouter } from "./routes/estimate-statuses";
-import { estimatesRouter } from "./routes/estimates";
-import { floorplanRegionsRouter } from "./routes/floorplan-regions";
-import { gmailRouter } from "./routes/gmail";
-import { googlePhotosRouter } from "./routes/google-photos";
-import { guestRouter } from "./routes/guest";
-import { healthRouter } from "./routes/health";
-import { imagesRouter } from "./routes/images";
-import { intakeRouter } from "./routes/intake";
-import { listingPhotosRouter } from "./routes/listing-photos";
-import { materialsRouter } from "./routes/materials";
-import mcpRouter from "./routes/mcp";
-import mcpCatalogRouter from "./routes/mcp-catalog";
-import mcpOpsRouter from "./routes/mcp-ops";
-import { measurementsRouter } from "./routes/measurements";
-import moodBoardRouter from "./routes/mood-board";
-import { moodBoardsRouter } from "./routes/moodboards";
-import { notesSharedRouter } from "./routes/notes-shared";
-import { notificationsRouter } from "./routes/notifications";
-import { openapiRouter } from "./routes/openapi";
-import pascalRouter from "./routes/pascal";
 import { PASCAL_API_MOUNT_PATH } from "./routes/pascal-paths";
-import { photoEditsRouter } from "./routes/photo-edits";
-import { photoReviewsRouter } from "./routes/photo-reviews";
-import { photoViewerNotesRouter } from "./routes/photo-viewer-notes";
-import { placesRouter } from "./routes/places";
-import { planningRouter } from "./routes/planning";
-import { planningExtendedRouter } from "./routes/planning-extended";
-import { pmoRouter } from "./routes/pmo";
-import { portalRouter } from "./routes/portal";
-import { productPhotosRouter } from "./routes/product-photos";
-import { productsCatalogRouter } from "./routes/products-catalog";
-import renderRouter from "./routes/render";
-import { researchRouter } from "./routes/research";
-import { researchJobsRouter } from "./routes/research-jobs";
-import { roomsRouter } from "./routes/rooms";
-import { roomsExtendedRouter } from "./routes/rooms-extended";
-import { servicesRouter } from "./routes/services";
-import { shoppingJournalRouter } from "./routes/shopping-journal";
-import { showroomBackfillRouter } from "./routes/showroom-backfill";
-import { showroomCatalogRouter } from "./routes/showroom-catalog";
-import { showroomContactsRouter } from "./routes/showroom-contacts";
-import showroomExclusionsRouter from "./routes/showroom-exclusions";
-import { showroomGapsRouter } from "./routes/showroom-gaps";
-import showroomHitlQueueRouter from "./routes/showroom-hitl-queue";
-import { showroomProductsRouter } from "./routes/showroom-products";
-import { showroomSalesRouter } from "./routes/showroom-sales";
-import { showroomScanRouter } from "./routes/showroom-scan";
-import { showroomScoutRouter } from "./routes/showroom-scout";
-import showroomSearchesRouter from "./routes/showroom-searches";
-import { showroomSeedRouter } from "./routes/showroom-seed";
-import { showroomStoresRouter } from "./routes/showroom-stores";
-import showroomVisitLogsRouter from "./routes/showroom-visit-logs";
-import studioRouter from "./routes/studio";
-import { supportingDocumentsRouter } from "./routes/supporting-documents";
-import { syncRouter } from "./routes/sync";
-import { systemHealthRouter } from "./routes/system-health";
-import { systemObservabilityRouter } from "./routes/system-observability";
-import teslaRouter from "./routes/tesla";
-import { threadsRouter } from "./routes/threads";
-import { truthTableRouter } from "./routes/truth-table";
-import { visionNodesRouter } from "./routes/vision-nodes";
-import { wishlistRouter } from "./routes/wishlist";
-import { workerEmailsRouter } from "./routes/worker-emails";
-import { workshopRouter } from "./routes/workshop";
 
 export type Variables = {
   userId?: number;
@@ -149,12 +60,14 @@ app.use("*", async (c, next) => {
 
 // A thrown/unhandled error bypasses the middleware above, so guarantee the same
 // no-store on the 500 it produces (and give a JSON body instead of Hono's plain
-// text default).
-app.onError((err, c) => {
+// text default). Shared with every lazily-mounted sub-router, which handles its
+// own errors and would otherwise fall back to Hono's plain-text default.
+const apiOnError: ErrorHandler<{ Bindings: Env; Variables: Variables }> = (err, c) => {
   console.error("Unhandled API error:", err);
   c.header("Cache-Control", "no-store");
   return c.json({ error: "Internal server error" }, 500);
-});
+};
+app.onError(apiOnError);
 app.use("/api/admin/*", requireAccessAuth);
 // ClickUp task mirror (0009): admin-only — API token + task mutations behind auth.
 app.use("/api/clickup", requireAccessAuth);
@@ -258,133 +171,355 @@ app.use("/api/bid-portfolios/*", async (c, next) => {
 // Health check
 app.get("/api/ping", (c) => c.json({ status: "ok", timestamp: Date.now() }));
 
+/** Any router mountable under this app — plain Hono or an OpenAPIHono. */
+// biome-ignore lint: routers are constructed with varying Env/Variables generics.
+type MountableRouter = Hono<any, any, any>;
+type RouterLoader = () => Promise<MountableRouter>;
+type Mounts = ReadonlyArray<readonly [string, RouterLoader]>;
+
+/**
+ * Marks a response as "no router under this prefix claimed the path", so the
+ * dispatcher can fall through to the next matching handler instead of ending
+ * the request with a 404. It never reaches a client: `lazyDispatcher` consumes
+ * the response and calls `next()`, leaving the final 404 to the parent app —
+ * which is exactly what eager `app.route()` mounting did.
+ */
+const LAZY_MISS_HEADER = "x-lazy-mount-miss";
+
+/** Distinct prefixes, in first-declaration order. */
+function orderedPrefixes(mounts: Mounts): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const [prefix] of mounts) {
+    if (!seen.has(prefix)) {
+      seen.add(prefix);
+      out.push(prefix);
+    }
+  }
+  return out;
+}
+
+/** `c.executionCtx` throws when there is no execution context (e.g. in tests). */
+function executionCtxOf(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+): ExecutionContext | undefined {
+  try {
+    return c.executionCtx;
+  } catch {
+    return undefined;
+  }
+}
+
+const loaded = new Map<string, Promise<MountableRouter>>();
+
+/**
+ * Loads every router declared at `prefix` and merges them into one Hono — in
+ * declaration order, and mounted at the SAME absolute prefix they used before.
+ *
+ * Mounting at the full prefix, rather than stripping it and dispatching a
+ * rewritten request (what Hono's own `mount()` does), is deliberate: handlers
+ * see the absolute path exactly as they did under eager `app.route()`. Several
+ * read it directly — `routes/artifacts.ts` derives its R2 key with
+ * `c.req.path.replace(/^\/api\/artifacts\//, "")` — and a stripped path
+ * silently turned that route's 404 into a 400. Do not "optimise" this back
+ * into a prefix-stripping rewrite.
+ *
+ * Cached per isolate, so only the first request to a prefix pays for the import.
+ */
+function loadPrefix(prefix: string, mounts: Mounts): Promise<MountableRouter> {
+  let pending = loaded.get(prefix);
+  if (pending) return pending;
+
+  pending = (async () => {
+    const routers = await Promise.all(
+      mounts.filter(([p]) => p === prefix).map(([, load]) => load()),
+    );
+    const merged = new Hono<{ Bindings: Env; Variables: Variables }>();
+    merged.onError(apiOnError);
+    merged.notFound(
+      () => new Response(null, { status: 404, headers: { [LAZY_MISS_HEADER]: "1" } }),
+    );
+    for (const router of routers) {
+      merged.route(prefix, router);
+    }
+    return merged;
+  })().catch((err: unknown) => {
+    // Evict on failure, or a single transient import error would be cached as a
+    // permanently rejected promise and that prefix would 500 for the rest of the
+    // isolate's life. The rejection still propagates to this request (the parent
+    // app's onError turns it into the usual 500); the next one retries the import.
+    loaded.delete(prefix);
+    throw err;
+  });
+
+  loaded.set(prefix, pending);
+  return pending;
+}
+
+/**
+ * Runs the untouched request against the merged router for `prefix`. A miss
+ * falls through to the next matching handler, so nested prefixes (/api/admin,
+ * then /api/admin/permits) resolve in declaration order and an unrecognised
+ * path ends at the parent app's 404 rather than this group's.
+ */
+function lazyDispatcher(prefix: string, mounts: Mounts) {
+  return async (c: Context<{ Bindings: Env; Variables: Variables }>, next: () => Promise<void>) => {
+    const router = await loadPrefix(prefix, mounts);
+    const res = await router.fetch(c.req.raw, c.env, executionCtxOf(c));
+    if (res.status === 404 && res.headers.get(LAZY_MISS_HEADER)) {
+      await next();
+      return;
+    }
+    return res;
+  };
+}
+
 // Mount routers
-app.route("/api/auth", authRouter);
-app.route("/api/access", accessRouter);
-app.route("/api/admin", adminRouter);
-app.route("/api/admin/permits", adminPermitsRouter);
-app.route("/api/admin/workflows", adminWorkflowsRouter);
-app.route("/api/admin/config", adminConfigRouter);
-app.route("/api/admin/drive-auth-probe", driveAuthProbeRouter);
-app.route("/api/admin/drive", driveIngestRouter);
-app.route("/api/admin/properties", adminPropertiesRouter);
-app.route("/api/admin/research", researchRouter);
-app.route("/api/admin/dialer", dialerRouter);
-app.route("/api/dashboard", dashboardRouter);
-app.route("/api/threads", threadsRouter);
-app.route("/api/health", healthRouter);
-app.route("/api/system/health", systemHealthRouter);
-app.route("/api/system", systemObservabilityRouter);
-app.route("/api/notifications", notificationsRouter);
-app.route("/api/alerts", alertsRouter);
-app.route("/api/ai", aiRouter);
-app.route("/api/documents", documentsRouter);
-app.route("/api/images", imagesRouter);
-app.route("/api/google-photos", googlePhotosRouter);
-app.route("/api/moodboards", moodBoardsRouter);
-app.route("/api/listing-photos", listingPhotosRouter);
-app.route("/api/photo-reviews", photoReviewsRouter);
-app.route("/api/images", photoViewerNotesRouter);
-app.route("/api/photo-edits", photoEditsRouter);
-app.route("/api/render", renderRouter);
-app.route("/api/mood-board", moodBoardRouter);
-app.route("/api/mcp", mcpRouter);
-// Public MCP tool catalog (no auth) — feeds the /mcp/tools docs page.
-app.route("/api/mcp-docs", mcpCatalogRouter);
-app.route("/api/mcp-ops", mcpOpsRouter);
-app.route("/api/studio", studioRouter);
-app.route("/api/drive-lists", driveListsRouter);
-app.route("/api/showroom-visit-logs", showroomVisitLogsRouter);
-app.route("/api/showroom-hitl-queue", showroomHitlQueueRouter);
-app.route("/api/showroom-searches", showroomSearchesRouter);
-app.route("/api/showroom-exclusions", showroomExclusionsRouter);
-// Tesla/Tessie: /status + /navigate are admin-gated inside the router; /webhook
-// is public but secret-verified (Tessie can't send the admin cookie).
-app.route("/api/tesla", teslaRouter);
-app.route("/api/portal", portalRouter);
-app.route("/api/guest", guestRouter);
-app.route("/api/planning", planningRouter);
-app.route("/api/planning", planningExtendedRouter);
-// rooms-extended mounts BEFORE roomsRouter so /:roomId/budget-items and
-// /code/:roomCode/options-summary take priority over the broader /:id catch-all.
-app.route("/api/rooms", roomsExtendedRouter);
-app.route("/api/rooms", roomsRouter);
-app.route("/api/floorplan-regions", floorplanRegionsRouter);
-app.route(PASCAL_API_MOUNT_PATH, pascalRouter);
-app.route("/api/measurements", measurementsRouter);
-app.route("/api/estimate-statuses", estimateStatusesRouter);
-app.route("/api/estimate-companies", estimateCompaniesRouter);
-app.route("/api/estimate-contacts", estimateContactsRouter);
-app.route("/api/estimates", estimatesRouter);
-app.route("/api/contracts", contractsRouter);
-app.route("/api/construction-checklist", constructionChecklistRouter);
-app.route("/api/budget-agent", budgetAgentRouter);
-app.route("/api/budget-tracker", budgetTrackerRouter);
-app.route("/api/budget", budgetGridRouter);
-app.route("/api/budget", budgetWorkbenchRouter);
-app.route("/api/budget", budgetReconciliationRouter);
-app.route("/api/budget", budgetReallocationsRouter);
-app.route("/api/budget", budgetComplianceRouter);
-app.route("/api/budget-data", budgetDataRouter);
-app.route("/api/budget-scenarios", budgetScenariosRouter);
-app.route("/api/budget-assumptions", budgetAssumptionsRouter);
-app.route("/api/budget-snapshot", budgetSnapshotRouter);
-app.route("/api/sync", syncRouter);
-app.route("/api/artifacts", artifactsRouter);
-app.route("/api/supporting-documents", supportingDocumentsRouter);
-// Mounted at a distinct top-level path (not /api/documents/views) because
-// /api/documents is already taken by the unrelated PlateJS notes router
-// (documentsRouter, mounted above). Write routes (POST/PATCH/DELETE) are
-// individually guarded with requireAccessAuth via each route's `middleware`
-// option in document-views.ts; GET routes are intentionally open (mirroring
-// supporting-documents' public-read posture) with per-request visibility
-// filtering applied inside the handlers.
-app.route("/api/document-views", documentViewsRouter);
-app.route("/api/vision-nodes", visionNodesRouter);
-app.route("/api/bid-portfolios/public", bidPortfolioPublicRouter);
-app.route("/api/bid-portfolios", bidPortfoliosRouter);
-app.route("/api/analytics", analyticsRouter);
-app.route("/api/truth-table", truthTableRouter);
-app.route("/api/shopping-journal", shoppingJournalRouter);
-app.route("/api/showroom-stores", showroomStoresRouter);
-app.route("/api/showroom-products", showroomProductsRouter);
-app.route("/api/showroom-sales", showroomSalesRouter);
-app.route("/api/config/tax", configTaxRouter);
-app.route("/api/showroom-scout", showroomScoutRouter);
-app.route("/api/product-photos", productPhotosRouter);
-app.route("/api/intake", intakeRouter);
-app.route("/api/products", productsCatalogRouter);
-app.route("/api/config", configRouter);
-app.route("/api/brands", brandsRouter);
-app.route("/api/showroom-stores", showroomSeedRouter);
-app.route("/api/showroom-stores", showroomGapsRouter);
-app.route("/api/showroom-stores", showroomCatalogRouter);
-app.route("/api/showroom-stores", showroomScanRouter);
-app.route("/api/showroom-stores", showroomBackfillRouter);
-app.route("/api/showroom-contacts", showroomContactsRouter);
-app.route("/api/research-jobs", researchJobsRouter);
-app.route("/api/materials", materialsRouter);
-app.route("/api/services", servicesRouter);
-app.route("/api/wishlist", wishlistRouter);
-// Worker-email HITL inbox API (invoices / contracts / receipts / staged
-// companies). Mounting this is what makes /admin/inbox show emails.
-app.route("/api/worker-emails", workerEmailsRouter);
-app.route("/api/email", emailRouter);
-app.route("/api/changelog", changelogRouter);
-app.route("/api/places", placesRouter);
-// adminIntegrationsRouter mounts under /api/admin/integrations — already covered
-// by the /api/admin/* requireAccessAuth middleware above.
-app.route("/api/admin/integrations", adminIntegrationsRouter);
-app.route("/api/admin/plans", adminPlansRouter);
-app.route("/api/pmo", pmoRouter);
-// Agent Ops — the first readers of the agent_runs ledger. Inherits
-// requireAccessAuth from the /api/admin/* middleware registered above.
-app.route("/api/admin/agents", adminAgentsRouter);
-app.route("/api/clickup", clickupRouter);
-app.route("/api/companies", companyCrmRouter);
-app.route("/api/notes", notesSharedRouter);
-app.route("/api/gmail", gmailRouter);
-app.route("/api/workshop", workshopRouter);
-app.route("/", openapiRouter);
+//
+// Declaration order is load-bearing and matches the previous eager
+// `app.route(...)` order exactly: where two routers share a prefix (/api/budget
+// has five, /api/showroom-stores six) or one prefix nests inside another
+// (/api/admin and /api/admin/permits), Hono runs the matching handlers in
+// registration order and the first one with a route for the path wins.
+const MOUNTS: ReadonlyArray<readonly [string, RouterLoader]> = [
+  ["/api/auth", async () => (await import("./routes/auth")).authRouter],
+  ["/api/access", async () => (await import("./routes/access")).accessRouter],
+  ["/api/admin", async () => (await import("./routes/admin")).adminRouter],
+  ["/api/admin/permits", async () => (await import("./routes/admin-permits")).adminPermitsRouter],
+  [
+    "/api/admin/workflows",
+    async () => (await import("./routes/admin-workflows")).adminWorkflowsRouter,
+  ],
+  ["/api/admin/config", async () => (await import("./routes/admin-config")).adminConfigRouter],
+  [
+    "/api/admin/drive-auth-probe",
+    async () => (await import("./routes/admin-drive-auth-probe")).driveAuthProbeRouter,
+  ],
+  ["/api/admin/drive", async () => (await import("./routes/admin-drive-ingest")).driveIngestRouter],
+  [
+    "/api/admin/properties",
+    async () => (await import("./routes/admin-properties")).adminPropertiesRouter,
+  ],
+  ["/api/admin/research", async () => (await import("./routes/research")).researchRouter],
+  ["/api/admin/dialer", async () => (await import("./routes/dialer")).dialerRouter],
+  ["/api/dashboard", async () => (await import("./routes/dashboard")).dashboardRouter],
+  ["/api/threads", async () => (await import("./routes/threads")).threadsRouter],
+  ["/api/health", async () => (await import("./routes/health")).healthRouter],
+  ["/api/system/health", async () => (await import("./routes/system-health")).systemHealthRouter],
+  [
+    "/api/system",
+    async () => (await import("./routes/system-observability")).systemObservabilityRouter,
+  ],
+  ["/api/notifications", async () => (await import("./routes/notifications")).notificationsRouter],
+  ["/api/alerts", async () => (await import("./routes/alerts")).alertsRouter],
+  ["/api/ai", async () => (await import("./routes/ai")).aiRouter],
+  ["/api/documents", async () => (await import("./routes/documents")).documentsRouter],
+  ["/api/images", async () => (await import("./routes/images")).imagesRouter],
+  ["/api/google-photos", async () => (await import("./routes/google-photos")).googlePhotosRouter],
+  ["/api/moodboards", async () => (await import("./routes/moodboards")).moodBoardsRouter],
+  [
+    "/api/listing-photos",
+    async () => (await import("./routes/listing-photos")).listingPhotosRouter,
+  ],
+  ["/api/photo-reviews", async () => (await import("./routes/photo-reviews")).photoReviewsRouter],
+  ["/api/images", async () => (await import("./routes/photo-viewer-notes")).photoViewerNotesRouter],
+  ["/api/photo-edits", async () => (await import("./routes/photo-edits")).photoEditsRouter],
+  ["/api/render", async () => (await import("./routes/render")).default],
+  ["/api/mood-board", async () => (await import("./routes/mood-board")).default],
+  ["/api/mcp", async () => (await import("./routes/mcp")).default],
+  // Public MCP tool catalog (no auth) — feeds the /mcp/tools docs page.
+  ["/api/mcp-docs", async () => (await import("./routes/mcp-catalog")).default],
+  ["/api/mcp-ops", async () => (await import("./routes/mcp-ops")).default],
+  ["/api/studio", async () => (await import("./routes/studio")).default],
+  ["/api/drive-lists", async () => (await import("./routes/drive-lists")).default],
+  ["/api/showroom-visit-logs", async () => (await import("./routes/showroom-visit-logs")).default],
+  ["/api/showroom-hitl-queue", async () => (await import("./routes/showroom-hitl-queue")).default],
+  ["/api/showroom-searches", async () => (await import("./routes/showroom-searches")).default],
+  ["/api/showroom-exclusions", async () => (await import("./routes/showroom-exclusions")).default],
+  // Tesla/Tessie: /status + /navigate are admin-gated inside the router; /webhook
+  // is public but secret-verified (Tessie can't send the admin cookie).
+  ["/api/tesla", async () => (await import("./routes/tesla")).default],
+  ["/api/portal", async () => (await import("./routes/portal")).portalRouter],
+  ["/api/guest", async () => (await import("./routes/guest")).guestRouter],
+  ["/api/planning", async () => (await import("./routes/planning")).planningRouter],
+  [
+    "/api/planning",
+    async () => (await import("./routes/planning-extended")).planningExtendedRouter,
+  ],
+  // rooms-extended mounts BEFORE roomsRouter so /:roomId/budget-items and
+  // /code/:roomCode/options-summary take priority over the broader /:id catch-all.
+  ["/api/rooms", async () => (await import("./routes/rooms-extended")).roomsExtendedRouter],
+  ["/api/rooms", async () => (await import("./routes/rooms")).roomsRouter],
+  [
+    "/api/floorplan-regions",
+    async () => (await import("./routes/floorplan-regions")).floorplanRegionsRouter,
+  ],
+  [PASCAL_API_MOUNT_PATH, async () => (await import("./routes/pascal")).default],
+  ["/api/measurements", async () => (await import("./routes/measurements")).measurementsRouter],
+  [
+    "/api/estimate-statuses",
+    async () => (await import("./routes/estimate-statuses")).estimateStatusesRouter,
+  ],
+  [
+    "/api/estimate-companies",
+    async () => (await import("./routes/estimate-companies")).estimateCompaniesRouter,
+  ],
+  [
+    "/api/estimate-contacts",
+    async () => (await import("./routes/estimate-contacts")).estimateContactsRouter,
+  ],
+  ["/api/estimates", async () => (await import("./routes/estimates")).estimatesRouter],
+  ["/api/contracts", async () => (await import("./routes/contracts")).contractsRouter],
+  [
+    "/api/construction-checklist",
+    async () => (await import("./routes/construction-checklist")).constructionChecklistRouter,
+  ],
+  ["/api/budget-agent", async () => (await import("./routes/budget-agent")).budgetAgentRouter],
+  [
+    "/api/budget-tracker",
+    async () => (await import("./routes/budget-tracker")).budgetTrackerRouter,
+  ],
+  ["/api/budget", async () => (await import("./routes/budget-grid")).budgetGridRouter],
+  ["/api/budget", async () => (await import("./routes/budget-workbench")).budgetWorkbenchRouter],
+  [
+    "/api/budget",
+    async () => (await import("./routes/budget-reconciliation")).budgetReconciliationRouter,
+  ],
+  [
+    "/api/budget",
+    async () => (await import("./routes/budget-reallocations")).budgetReallocationsRouter,
+  ],
+  ["/api/budget", async () => (await import("./routes/budget-compliance")).budgetComplianceRouter],
+  ["/api/budget-data", async () => (await import("./routes/budget-data")).budgetDataRouter],
+  [
+    "/api/budget-scenarios",
+    async () => (await import("./routes/budget-scenarios")).budgetScenariosRouter,
+  ],
+  [
+    "/api/budget-assumptions",
+    async () => (await import("./routes/budget-assumptions")).budgetAssumptionsRouter,
+  ],
+  [
+    "/api/budget-snapshot",
+    async () => (await import("./routes/budget-snapshot")).budgetSnapshotRouter,
+  ],
+  ["/api/sync", async () => (await import("./routes/sync")).syncRouter],
+  ["/api/artifacts", async () => (await import("./routes/artifacts")).artifactsRouter],
+  [
+    "/api/supporting-documents",
+    async () => (await import("./routes/supporting-documents")).supportingDocumentsRouter,
+  ],
+  // Mounted at a distinct top-level path (not /api/documents/views) because
+  // /api/documents is already taken by the unrelated PlateJS notes router
+  // (documentsRouter, mounted above). Write routes (POST/PATCH/DELETE) are
+  // individually guarded with requireAccessAuth via each route's `middleware`
+  // option in document-views.ts; GET routes are intentionally open (mirroring
+  // supporting-documents' public-read posture) with per-request visibility
+  // filtering applied inside the handlers.
+  [
+    "/api/document-views",
+    async () => (await import("./routes/document-views")).documentViewsRouter,
+  ],
+  ["/api/vision-nodes", async () => (await import("./routes/vision-nodes")).visionNodesRouter],
+  [
+    "/api/bid-portfolios/public",
+    async () => (await import("./routes/bid-portfolio-public")).bidPortfolioPublicRouter,
+  ],
+  [
+    "/api/bid-portfolios",
+    async () => (await import("./routes/bid-portfolios")).bidPortfoliosRouter,
+  ],
+  ["/api/analytics", async () => (await import("./routes/analytics")).analyticsRouter],
+  ["/api/truth-table", async () => (await import("./routes/truth-table")).truthTableRouter],
+  [
+    "/api/shopping-journal",
+    async () => (await import("./routes/shopping-journal")).shoppingJournalRouter,
+  ],
+  [
+    "/api/showroom-stores",
+    async () => (await import("./routes/showroom-stores")).showroomStoresRouter,
+  ],
+  [
+    "/api/showroom-products",
+    async () => (await import("./routes/showroom-products")).showroomProductsRouter,
+  ],
+  [
+    "/api/showroom-sales",
+    async () => (await import("./routes/showroom-sales")).showroomSalesRouter,
+  ],
+  ["/api/config/tax", async () => (await import("./routes/config-tax")).configTaxRouter],
+  [
+    "/api/showroom-scout",
+    async () => (await import("./routes/showroom-scout")).showroomScoutRouter,
+  ],
+  [
+    "/api/product-photos",
+    async () => (await import("./routes/product-photos")).productPhotosRouter,
+  ],
+  ["/api/intake", async () => (await import("./routes/intake")).intakeRouter],
+  ["/api/products", async () => (await import("./routes/products-catalog")).productsCatalogRouter],
+  ["/api/config", async () => (await import("./routes/config")).configRouter],
+  ["/api/brands", async () => (await import("./routes/brands")).brandsRouter],
+  ["/api/showroom-stores", async () => (await import("./routes/showroom-seed")).showroomSeedRouter],
+  ["/api/showroom-stores", async () => (await import("./routes/showroom-gaps")).showroomGapsRouter],
+  [
+    "/api/showroom-stores",
+    async () => (await import("./routes/showroom-catalog")).showroomCatalogRouter,
+  ],
+  ["/api/showroom-stores", async () => (await import("./routes/showroom-scan")).showroomScanRouter],
+  [
+    "/api/showroom-stores",
+    async () => (await import("./routes/showroom-backfill")).showroomBackfillRouter,
+  ],
+  [
+    "/api/showroom-contacts",
+    async () => (await import("./routes/showroom-contacts")).showroomContactsRouter,
+  ],
+  ["/api/research-jobs", async () => (await import("./routes/research-jobs")).researchJobsRouter],
+  ["/api/materials", async () => (await import("./routes/materials")).materialsRouter],
+  ["/api/services", async () => (await import("./routes/services")).servicesRouter],
+  ["/api/wishlist", async () => (await import("./routes/wishlist")).wishlistRouter],
+  // Worker-email HITL inbox API (invoices / contracts / receipts / staged
+  // companies). Mounting this is what makes /admin/inbox show emails.
+  ["/api/worker-emails", async () => (await import("./routes/worker-emails")).workerEmailsRouter],
+  ["/api/email", async () => (await import("./routes/email")).emailRouter],
+  ["/api/changelog", async () => (await import("./routes/changelog")).changelogRouter],
+  ["/api/places", async () => (await import("./routes/places")).placesRouter],
+  // adminIntegrationsRouter mounts under /api/admin/integrations — already covered
+  // by the /api/admin/* requireAccessAuth middleware above.
+  [
+    "/api/admin/integrations",
+    async () => (await import("./routes/admin-integrations")).adminIntegrationsRouter,
+  ],
+  ["/api/admin/plans", async () => (await import("./routes/admin-plans")).adminPlansRouter],
+  ["/api/pmo", async () => (await import("./routes/pmo")).pmoRouter],
+  // Agent Ops — the first readers of the agent_runs ledger. Inherits
+  // requireAccessAuth from the /api/admin/* middleware registered above.
+  ["/api/admin/agents", async () => (await import("./routes/admin-agents")).adminAgentsRouter],
+  ["/api/clickup", async () => (await import("./routes/clickup")).clickupRouter],
+  ["/api/companies", async () => (await import("./routes/company-crm")).companyCrmRouter],
+  ["/api/notes", async () => (await import("./routes/notes-shared")).notesSharedRouter],
+  ["/api/gmail", async () => (await import("./routes/gmail")).gmailRouter],
+  ["/api/workshop", async () => (await import("./routes/workshop")).workshopRouter],
+];
+
+for (const prefix of orderedPrefixes(MOUNTS)) {
+  const dispatch = lazyDispatcher(prefix, MOUNTS);
+  // Both forms are needed: `/api/clickup/*` does not match the bare
+  // `/api/clickup`, which several routers serve as their `/` route.
+  app.all(prefix, dispatch);
+  app.all(`${prefix}/*`, dispatch);
+}
+
+// The docs router mounts at "/" and would swallow every path as a wildcard, so
+// its handful of absolute paths are registered individually. `/docs` is listed
+// for parity with the old `app.route("/", openapiRouter)` even though
+// `src/_worker.ts` only forwards the other four to this app.
+for (const path of ["/openapi.json", "/swagger", "/scalar", "/docs", "/context"] as const) {
+  app.get(path, async (c) => {
+    const { openapiRouter } = await import("./routes/openapi");
+    return openapiRouter.fetch(c.req.raw, c.env, executionCtxOf(c));
+  });
+}
 
 export { app };

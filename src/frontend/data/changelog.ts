@@ -77,6 +77,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "orca/fix-cpu-load-time",
+    title: "Worker startup CPU — routers, the MCP registry and cron jobs load on demand",
+    summary:
+      "Deploys had started failing validation with `Script startup exceeded CPU time limit [code: 10021]`. A Worker must parse and execute its global scope inside a 1-second CPU budget, and this one no longer did — not a size problem (6.15 MB gzipped against a 10 MB cap). Profiling `wrangler check startup` and mapping every CPU sample back through the bundle's sourcemap put the cost in module-scope Zod schema construction and the garbage collection it provokes: `src/backend/api/index.ts` eagerly imported 109 routers building 231 module-scope z.object() schemas (46.5% of samples, inclusive), the RemodelMcpAgent Durable Object pulled all 219 MCP tool modules (13.1%), and `src/_worker.ts` statically imported 15 cron-only services whose reach included the email pipeline, business-card OCR and the whole Drizzle schema barrel. All three now load on demand — routers through a table of dynamic imports dispatched per prefix, the tool registry inside the DO's init(), the cron services inside scheduled(). Startup CPU samples fell 314 to 124 (-61%), garbage collection 96 to 24, eagerly-reachable modules 941 to 452. No public API change: 90 paths return identical statuses on preview and production and /openapi.json enumerates the same path set. No migration.",
+    date: "2026-09-04",
+    status: "staged",
+    prNumber: 416,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/416",
+  },
+  {
     branch: "claude/mcp-tools-auth-availability-2efca8",
     title: "MCP connector — zero tools fixed, API-key auth, and Code Mode on /mcp",
     summary:
@@ -503,6 +513,47 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "lazy-router-mounting-startup-cpu",
+    branch: "orca/fix-cpu-load-time",
+    date: "2026-09-04",
+    tag: "perf",
+    area: "Worker startup",
+    title: "Routers, the MCP registry and cron jobs load on demand",
+    summary:
+      "Nobody could deploy: every deploy, any branch, failed validation with 10021 — the 1-second startup CPU limit. The cost was 231 module-scope Zod schemas across 109 eagerly-imported routers, plus 219 MCP tool modules dragged in by a Durable Object export, plus 15 cron-only services in the Worker entry point. Everything moved behind a dynamic import. Startup CPU samples 314 to 124; the public API surface is byte-for-byte the same.",
+    changes: [
+      {
+        kind: "changed",
+        text: "`src/backend/api/index.ts` mounts its 109 routers through a `MOUNTS` table of dynamic `import()`s instead of 109 static ones. esbuild wraps a dynamic-only module in a lazy `__esm()` initialiser, so a router's schemas are built on the first request to its prefix rather than at startup.",
+      },
+      {
+        kind: "changed",
+        text: "Routers sharing a prefix (/api/budget has five, /api/showroom-stores six) are merged into one Hono per prefix, mounted at their own absolute path, in the original declaration order. A 404 sentinel on that merged router falls through to the next matching handler, so nested prefixes — /api/admin declared before /api/admin/permits — resolve exactly as they did under eager `app.route()`.",
+      },
+      {
+        kind: "fixed",
+        text: "The first cut stripped the mount prefix before dispatch, the way Hono's own `mount()` does. Two routers read the absolute path and broke: `artifacts.ts` derives its R2 key from `c.req.path` (GET /api/artifacts answered 400 instead of 404), and `tesla.ts` gates auth on `SECRET_GATED_PATHS.has(c.req.path)`, which would have put the secret-verified Tessie webhooks behind an admin cookie they cannot send. The request is now dispatched untouched.",
+      },
+      {
+        kind: "changed",
+        text: "`mcp/agent.ts` imports the tool registry inside `init()`, per MCP session, instead of at module scope. The class is exported from `src/_worker.ts` as a Durable Object, so the static import put all 219 tool modules on the startup path. `ai/agents/showroom-scout/index.ts` had the same shape and the same fix.",
+      },
+      {
+        kind: "changed",
+        text: "`src/_worker.ts` imports its 15 cron-only services inside `scheduled()`. Those imports reached most of the backend — `gmail/inbox-label` pulls the email pipeline, showroom contacts and business-card OCR; `showroom/places-backfill` pulls the whole Drizzle schema barrel through `google/maps`.",
+      },
+      {
+        kind: "added",
+        text: "`scripts/perf/attribute-startup.py` attributes a `wrangler check startup` profile back to source modules through the bundle's sourcemap. It replaces counting bytes between esbuild banners, which mis-attributes — esbuild does not emit one banner per module, and that method reported the MCP registry at 0.0% of startup when it was 13.1%.",
+      },
+      {
+        kind: "added",
+        text: "`scripts/qc/pr_416.mjs` — walks 90 paths plus six deliberate misses on preview and production and fails on any status difference; checks 404-not-500 on unmounted paths, nested-prefix precedence, shared-prefix fall-through, auth, the no-store header on a sub-router 4xx, and that /openapi.json still enumerates the same paths including the now lazily-imported pascal routes.",
+      },
+    ],
+    status: "staged",
+  },
   {
     id: "mcp-tool-list-auth-and-code-mode",
     branch: "claude/mcp-tools-auth-availability-2efca8",

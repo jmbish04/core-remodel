@@ -142,6 +142,354 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "lazy-router-mounting-startup-cpu": {
+    slug: "lazy-router-mounting-startup-cpu",
+    subtitle: "Worker startup CPU — the 10021 deploy block",
+    branch: "orca/fix-cpu-load-time",
+    prNumber: 416,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/416",
+
+    introduction: `For a stretch of 2026-09-03 **nobody could deploy this Worker** — production
+or preview, any branch, every attempt rejected before it ever served a request:
+
+    Error: Script startup exceeded CPU time limit. [code: 10021]
+
+This is the account of where that CPU was actually going, the two plausible
+fixes that were measured and thrown away, one real regression the fix
+introduced and how it was caught, and an honest note about what the evidence
+does and does not prove.`,
+
+    problem: `**It is not a size problem.** The bundle is 6.15 MB gzipped against a 10 MB
+cap and 31 MB raw against 64 MB. The limit being hit is a different one: a
+Worker must parse and execute its **global scope inside 1 second of CPU**.
+
+Startup was profiled with \`npx wrangler check startup\` and every CPU sample
+mapped back to the module that owns it **through the bundle's sourcemap**:
+
+| share of samples | where |
+| --- | --- |
+| 46.5% | \`src/backend/api/index.ts\` (inclusive) — 109 eagerly imported routers |
+| 13.1% | \`src/backend/mcp/registry.ts\` (inclusive) — 219 tool modules |
+| 30.6% | garbage collection, downstream of allocating all those schema objects |
+| 12.6% | \`src/backend/db/schema/index.ts\` — 359 Drizzle tables behind one barrel |
+
+What ran before a single request was served: **231 module-scope \`z.object()\`
+schemas**, **116 \`createRoute()\` calls**, 359 table definitions, and 219 MCP
+tool modules. This is exactly the failure Cloudflare's own docs name —
+*"generating or consuming a large schema at the top level is a common cause of
+exceeding this limit."*
+
+There is an irony worth recording: \`CLAUDE.md\` mandates hand-written Zod v4
+everywhere, because drizzle-zod breaks the build. That rule is correct, and it
+is also what put 231 schema constructions on the startup path.
+
+**Two fixes were measured and rejected.**
+
+1. *Split the frontend into its own Worker.* The frontend is **1.4%** of
+   startup. Worth doing on its own merits; the backend Worker would keep
+   essentially all of the cost and still fail.
+2. *Finish the code-mode MCP work first.* Rejected in the original diagnosis on
+   the grounds that the MCP registry was 0.0% of startup — see the correction
+   below. It is still the wrong lever: Code Mode changes what a client is told
+   about, not what the Worker builds at startup.
+
+Shiki was the obvious suspect (8 TextMate grammars, ~0.5 MB of \`JSON.parse\`
+literals) and has **zero frames** in the profile. Bundle weight, not startup CPU.`,
+
+    approach: `**Everything expensive moves behind a dynamic \`import()\`.** esbuild wraps a
+module that is *only* dynamically imported in a lazy \`__esm()\` initialiser, so
+its top-level code runs on first use instead of at startup. The constraint that
+makes this work is also the one that makes it fragile: a single static import
+anywhere drags the module back onto the startup path.
+
+**1. The API routers.** \`src/backend/api/index.ts\` swaps 109
+\`app.route(prefix, router)\` calls for a \`MOUNTS\` table of loaders. Routing has
+to come out identical, which takes two details:
+
+- *Shared and nested prefixes.* Five routers sit on \`/api/budget\`, six on
+  \`/api/showroom-stores\`, and \`/api/admin\` is declared before
+  \`/api/admin/permits\`. Each prefix's routers are merged into one Hono in the
+  original declaration order, and a **404 sentinel** on that merged router falls
+  through to the next matching handler — so a path no router claims still ends
+  at the parent app's 404 rather than the group's, and a handler that
+  deliberately returns 404 with a body is returned untouched.
+- *The absolute path.* Hono's own \`mount()\` strips the prefix. Copying that was
+  the one real regression this change introduced; see below.
+
+**2. The MCP tool registry.** \`RemodelMcpAgent\` is exported from
+\`src/_worker.ts\` as a Durable Object, so its module — and all 219 tool modules
+behind it — evaluated at startup. \`getAllTools()\` is now imported inside
+\`init()\`, which runs per MCP session. \`ShowroomScout\` had the same shape.
+
+**3. The cron services.** \`src/_worker.ts\` statically imported 15 modules only
+\`scheduled()\` ever calls, and their reach was enormous: \`gmail/inbox-label\`
+pulls the email pipeline, showroom contacts and business-card OCR;
+\`showroom/places-backfill\` pulls the whole Drizzle schema barrel through
+\`google/maps\`. They move into one \`Promise.all\` of dynamic imports at the top
+of the handler. Cron ticks are not latency-sensitive and modules stay cached for
+the life of the isolate.
+
+**The Drizzle barrel stays.** 359 tables across 161 files behind one export is
+real startup cost, but the barrel is reached from the Durable Object and
+Workflow classes that \`src/_worker.ts\` *must* export by name — a runtime
+requirement, not a choice. Deferring the cron imports took it off the entry
+point's own path; taking it off the DOs' would mean rewriting 161 files' import
+style, which is not worth it at 12.6%.
+
+**Correcting the diagnosis on one number.** The original write-up attributed
+samples by counting bytes between esbuild's \`// <path>\` banners and reported the
+MCP registry at **0.0%** of startup. esbuild does not emit one banner per
+module, so a region is credited to whichever banner preceded it. Re-attributing
+through the sourcemap puts the registry at **13.1%** — the second-largest single
+cost. \`scripts/perf/attribute-startup.py\` is that tool, committed so the next
+person does not repeat the mistake.
+
+**The regression, and how it was caught.** Stripping the mount prefix changed
+two routes' behaviour, both invisible to a type checker:
+
+- \`routes/artifacts.ts\` builds its R2 key with
+  \`c.req.path.replace(/^\\/api\\/artifacts\\//, "")\`. Stripped, the replace matched
+  nothing: \`GET /api/artifacts\` answered **400 "Invalid artifact key"** instead
+  of **404 "Artifact not found"**.
+- \`routes/tesla.ts\` gates auth on
+  \`SECRET_GATED_PATHS.has(c.req.path)\` for \`/api/tesla/webhook\` and
+  \`/api/tesla/telemetry\`. A stripped path misses that Set, which would have put
+  the secret-verified Tessie webhooks behind the admin cookie they cannot send.
+
+Only the first showed up as a failing check — the QC script diffs **every**
+route's status against production, and that one path disagreed. Reading why led
+to the second, which nothing was testing. The fix removes the class rather than
+the two instances: each router is mounted at its own absolute prefix inside the
+merged Hono and the request is dispatched untouched.
+
+**What the evidence proves, and what it does not.** The preview deploys
+cleanly. But a control deploy of clean \`origin/main\` — a scratch worktree at
+\`0929384e\`, its own preview worker — **also passed**, then passed five more
+\`versions upload\` startup validations in a row. So the 10021 failure is not
+reproducing on Cloudflare's side right now, and this change cannot be credited
+with flipping a failing deploy to a passing one *today*. What is measured is
+headroom: startup CPU samples 314 to 124 on the same machine and the same
+wrangler. Given that the same Worker failed five consecutive deploys yesterday
+and passes six today, "sitting right at the 1-second limit, where the outcome
+depends on which machine validates" is the reading that fits both days — and
+headroom is exactly the fix for that.`,
+
+    apiChanges: [
+      "No change. Every path keeps its method, shape and auth — verified by diffing the status of 90 paths on the preview against production.",
+      "GET /openapi.json — unchanged output, but now assembles from a lazily imported openapi router; the QC asserts the path set is identical to production, pascal routes included.",
+    ],
+
+    filesTouched: [
+      "src/backend/api/index.ts — 109 static router imports replaced by a MOUNTS table of dynamic imports, plus loadPrefix/lazyDispatcher and the shared apiOnError handler",
+      "src/backend/mcp/agent.ts — registry imported inside init(); getAllTools becomes a type-only import",
+      "src/backend/ai/agents/showroom-scout/index.ts — registry imported inside execute()",
+      "src/_worker.ts — 15 cron-only service imports moved into scheduled()",
+      "scripts/perf/attribute-startup.py — new; sourcemap-based startup profile attribution",
+      "scripts/qc/pr_416.mjs — new; routing regression guard (named for the PR so `pnpm run test:pr 416` and `--all` pick it up)",
+      "src/frontend/data/changelog.ts, src/frontend/data/changelog-detail.ts",
+    ],
+
+    migrations: [],
+
+    code: [
+      {
+        title: "src/backend/api/index.ts — the mount table (109 entries, three shown)",
+        lang: "ts",
+        code: `const MOUNTS: ReadonlyArray<readonly [string, RouterLoader]> = [
+  ["/api/auth", async () => (await import("./routes/auth")).authRouter],
+  ["/api/admin", async () => (await import("./routes/admin")).adminRouter],
+  ["/api/admin/permits", async () => (await import("./routes/admin-permits")).adminPermitsRouter],
+  // … 106 more, in the original app.route() order
+];
+
+for (const prefix of orderedPrefixes(MOUNTS)) {
+  const dispatch = lazyDispatcher(prefix, MOUNTS);
+  // Both forms are needed: \`/api/clickup/*\` does not match the bare
+  // \`/api/clickup\`, which several routers serve as their \`/\` route.
+  app.all(prefix, dispatch);
+  app.all(\\\`\\\${prefix}/*\\\`, dispatch);
+}`,
+      },
+      {
+        title: "Merged per-prefix router + the 404 sentinel that preserves fall-through",
+        lang: "ts",
+        code: `const LAZY_MISS_HEADER = "x-lazy-mount-miss";
+
+function loadPrefix(prefix: string, mounts: Mounts): Promise<MountableRouter> {
+  let pending = loaded.get(prefix);
+  if (pending) return pending;
+
+  pending = (async () => {
+    const routers = await Promise.all(
+      mounts.filter(([p]) => p === prefix).map(([, load]) => load()),
+    );
+    const merged = new Hono<{ Bindings: Env; Variables: Variables }>();
+    merged.onError(apiOnError);
+    merged.notFound(() => new Response(null, { status: 404, headers: { [LAZY_MISS_HEADER]: "1" } }));
+    // Mounted at the ABSOLUTE prefix, and the request is dispatched untouched —
+    // routes/artifacts.ts and routes/tesla.ts both read c.req.path.
+    for (const router of routers) merged.route(prefix, router);
+    return merged;
+  })();
+
+  loaded.set(prefix, pending);
+  return pending;
+}
+
+function lazyDispatcher(prefix: string, mounts: Mounts) {
+  return async (c: Context<{ Bindings: Env; Variables: Variables }>, next: () => Promise<void>) => {
+    const router = await loadPrefix(prefix, mounts);
+    const res = await router.fetch(c.req.raw, c.env, executionCtxOf(c));
+    if (res.status === 404 && res.headers.get(LAZY_MISS_HEADER)) {
+      await next();
+      return;
+    }
+    return res;
+  };
+}`,
+      },
+      {
+        title: "src/backend/mcp/agent.ts — the registry leaves the startup path",
+        lang: "ts",
+        code: `// TYPE-ONLY on purpose. This class is exported from src/_worker.ts as a Durable
+// Object, so a value import would build all 219 tool modules' Zod schemas during
+// Worker startup.
+import type { getAllTools } from "./registry";
+
+async init(): Promise<void> {
+  const server = new McpServer({ name: "core-remodel", version: "1.0.0" });
+  const { getAllTools } = await import("./registry");
+  const tools = getAllTools();
+  if (this.props?.codeMode) this.registerCodeTool(server, tools);
+  else this.registerRegistryTools(server, tools);
+  this.server = server;
+}`,
+      },
+      {
+        title: "Measuring it — the profile, and attribution through the sourcemap",
+        lang: "bash",
+        code: `npx wrangler deploy --outdir /tmp/bundled --dry-run   # bundle size + sourcemap
+npx wrangler check startup --outfile /tmp/startup.cpuprofile
+
+python3 scripts/perf/attribute-startup.py \\
+  /tmp/startup.cpuprofile /tmp/bundled/_worker.js.map
+
+# before                             after
+# total samples: 314                 total samples: 124
+#   28.9%  garbage collection          19.4%  garbage collection
+#   25.2%  zod                         17.7%  zod
+#   15.6%  backend routes               0.0%  backend routes
+#   12.7%  mcp registry                 0.0%  mcp registry
+#    7.0%  db schema                    2.4%  db schema`,
+      },
+    ],
+
+    diagrams: [
+      {
+        caption: "What evaluates at startup, before and after",
+        title: "Startup module graph",
+        description: `Left: every box evaluated before the Worker could serve a request. Right: the
+same graph after three dynamic-import boundaries. The Durable Object and
+Workflow classes stay eager because the runtime resolves them as named exports —
+which is also why the Drizzle barrel is still on the startup path.`,
+        code: `flowchart LR
+  subgraph BEFORE["before — 941 modules eager, 314 CPU samples"]
+    W1["_worker.ts"] --> A1["api/index.ts"]
+    A1 --> R1["109 routers<br/>231 z.object()"]
+    R1 --> Z1["zod"]
+    W1 --> M1["mcp/agent.ts (DO)"]
+    M1 --> G1["registry<br/>219 tool modules"]
+    G1 --> Z1
+    W1 --> C1["15 cron services"]
+    C1 --> D1["db barrel<br/>359 tables"]
+    W1 --> X1["30 DO + Workflow exports"]
+    X1 --> D1
+  end
+
+  subgraph AFTER["after — 452 modules eager, 124 CPU samples"]
+    W2["_worker.ts"] --> A2["api/index.ts<br/>MOUNTS table only"]
+    A2 -. "import() on first request" .-> R2["109 routers"]
+    W2 --> M2["mcp/agent.ts (DO)"]
+    M2 -. "import() in init()" .-> G2["registry"]
+    W2 -. "import() in scheduled()" .-> C2["15 cron services"]
+    W2 --> X2["30 DO + Workflow exports"]
+    X2 --> D2["db barrel<br/>359 tables"]
+  end`,
+      },
+      {
+        caption: "One request through a lazily mounted prefix",
+        title: "Request path",
+        description: `The sentinel is the whole trick: it is how a group that has no route for the
+path hands the request onward instead of ending it with its own 404, which is
+what eager \`app.route()\` mounting did implicitly.`,
+        code: `sequenceDiagram
+  participant C as Client
+  participant A as Hono app
+  participant L as lazyDispatcher("/api/admin")
+  participant M as merged router (cached)
+  participant R as adminRouter
+
+  C->>A: GET /api/admin/permits/foo
+  A->>A: cors, logger, requireAccessAuth
+  A->>L: first handler whose prefix matches
+  L->>M: loadPrefix — dynamic import, once per isolate
+  M->>R: dispatch, absolute path unchanged
+  R-->>M: no route
+  M-->>L: 404 + x-lazy-mount-miss
+  L->>A: next()
+  A->>A: /api/admin/permits dispatcher
+  A-->>C: adminPermitsRouter's response`,
+      },
+    ],
+
+    verification: {
+      qcScript: "scripts/qc/pr_416.mjs",
+      command: "node scripts/qc/pr_416.mjs --compare",
+      ranAt: "2026-09-04",
+      source: `// One representative GET per mounted prefix — 90 in all. A 401/404 is a fine
+// answer; the assertion is that preview and production AGREE.
+const diffs = [...PATHS, ...MUST_404].filter((p) => prodSeen[p] !== seen[p]);
+checks.ok(
+  "every path returns the same status on preview and production",
+  diffs.length === 0,
+  diffs.map((p) => \\\`\\\${p}: prod=\\\${prodSeen[p]} preview=\\\${seen[p]}\\\`).join("; "),
+);
+
+// Handlers that read the ABSOLUTE request path must still see it.
+const artifact = await client.get("/api/artifacts");
+checks.ok("/api/artifacts sees the absolute path (404, not 400)", artifact.status === 404);`,
+      output: `QC: lazy router mounting — https://wcrp-orca-fix-cpu-load-time.hacolby.workers.dev
+
+  ✓ target reachable (https://wcrp-orca-fix-cpu-load-time.hacolby.workers.dev)
+  ✓ /api/rooms/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/budget/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/admin/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/showroom-stores/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/__qc_no_such_prefix__ → 404 (not 500)
+  ✓ /api/__qc_no_such_prefix__/deeper/still → 404 (not 500)
+    5xx paths: /api/showroom-products
+  ✓ /api/artifacts sees the absolute path (404, not 400)
+  ✓ /api/admin/permits resolves (nested prefix not shadowed by /api/admin)
+  ✓ /api/showroom-stores fall-through reaches later routers in the group
+  ✓ unauthenticated /api/admin/config → 401
+  ✓ 4xx from a lazily-mounted router still carries Cache-Control: no-store
+  ✓ /openapi.json enumerates routes
+  ✓ /openapi.json still carries the lazily-imported pascal routes
+    63 paths in the spec
+
+  comparing against production (https://core-remodel.hacolby.workers.dev)
+
+  ✓ every path returns the same status on preview and production
+  ✓ /openapi.json path set is identical to production
+
+16 passed, 0 failed`,
+      previewWorker: {
+        name: "wcrp-orca-fix-cpu-load-time",
+        status: "deleted",
+        note: "Torn down 2026-09-04 once the review was addressed and the QC was green, in the same turn as the merge. Verified gone: GET /api/ping on its URL returns 404.",
+      },
+    },
+  },
   "mcp-tool-list-auth-and-code-mode": {
     slug: "mcp-tool-list-auth-and-code-mode",
     subtitle: "The MCP connector — /mcp, /mcp/direct, and the OAuth + API-key doors",

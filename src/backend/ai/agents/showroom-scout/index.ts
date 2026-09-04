@@ -1,3 +1,7 @@
+import type { McpProps } from "@backend/mcp/types";
+
+import { run, setTracingDisabled, tool, type AgentInputItem } from "@openai/agents";
+import { Agent as OpenAIAgent } from "@openai/agents";
 /**
  * @fileoverview Showroom Scout — Durable Object agent.
  *
@@ -21,20 +25,15 @@
  * into the state timeline, which is what actually drives the UI anyway.
  */
 import { Agent, callable } from "agents";
-import { run, setTracingDisabled, tool, type AgentInputItem } from "@openai/agents";
-import { Agent as OpenAIAgent } from "@openai/agents";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
-
-import { getAllTools } from "@backend/mcp/registry";
-import type { McpProps } from "@backend/mcp/types";
 
 import { extractOfferableDetours, findMissedDetours, type OfferableDetour } from "./detours";
 import { buildInstructions } from "./instructions";
 import { bridgeTools, type ToolEvent } from "./mcp-bridge";
 import { createScoutModel, resolveScoutModelConfig } from "./model";
-import { routePlanSchema, showroomCandidateSchema } from "./schemas";
 import { SCOUT_RETRY } from "./retry";
+import { routePlanSchema, showroomCandidateSchema } from "./schemas";
 import { resolveWindow, type CaWindow } from "./time";
 import { createWebSearchTool } from "./tools/web-search";
 
@@ -222,7 +221,10 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
   }
 
   /** Build tools, run the OpenAI agent loop, fold the outcome into state. */
-  private async execute(instructions: string, userMessage: string): Promise<{ reply: string; state: ScoutState }> {
+  private async execute(
+    instructions: string,
+    userMessage: string,
+  ): Promise<{ reply: string; state: ScoutState }> {
     const onEvent = (event: ToolEvent) => {
       // Capture the planner's detour options so publish_route can verify they
       // were considered rather than silently dropped.
@@ -231,7 +233,11 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
       }
 
       if (event.status === "start") {
-        this.push({ kind: "tool", tool: event.tool, message: `${event.tool} …${event.detail ? ` ${event.detail}` : ""}` });
+        this.push({
+          kind: "tool",
+          tool: event.tool,
+          message: `${event.tool} …${event.detail ? ` ${event.detail}` : ""}`,
+        });
         return;
       }
       this.push({
@@ -253,6 +259,11 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
       props: { userId: "showroom-scout", scope: "remodel", kind: "worker" } as McpProps,
     };
 
+    // Dynamic import: this class is a Durable Object exported from
+    // `src/_worker.ts`, so a static import of the registry would build all 219
+    // tool modules' Zod schemas during Worker startup — the 10021 startup-CPU
+    // budget. The scout only needs them once it is actually running.
+    const { getAllTools } = await import("@backend/mcp/registry");
     const tools = [
       createWebSearchTool(this.env, onEvent),
       ...bridgeTools(getAllTools(), SCOUT_TOOL_ALLOWLIST, { ctx, onEvent }),
@@ -349,7 +360,10 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
           status: "ok",
           detail: `${candidate.name} (${candidate.aiScore})`,
         });
-        this.push({ kind: "result", message: `Published ${candidate.name} [${candidate.aiScore}]` });
+        this.push({
+          kind: "result",
+          message: `Published ${candidate.name} [${candidate.aiScore}]`,
+        });
         return `Published ${candidate.name}. ${candidates.length} total so far.`;
       },
     });
@@ -479,7 +493,10 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
           status: "ok",
           detail: `${payload.route.stops.length} stops`,
         });
-        this.push({ kind: "result", message: `Published route: ${payload.route.stops.length} stops` });
+        this.push({
+          kind: "result",
+          message: `Published route: ${payload.route.stops.length} stops`,
+        });
         return `Published a ${payload.route.stops.length}-stop route.`;
       },
     });
