@@ -243,7 +243,14 @@ function loadPrefix(prefix: string, mounts: Mounts): Promise<MountableRouter> {
       merged.route(prefix, router);
     }
     return merged;
-  })();
+  })().catch((err: unknown) => {
+    // Evict on failure, or a single transient import error would be cached as a
+    // permanently rejected promise and that prefix would 500 for the rest of the
+    // isolate's life. The rejection still propagates to this request (the parent
+    // app's onError turns it into the usual 500); the next one retries the import.
+    loaded.delete(prefix);
+    throw err;
+  });
 
   loaded.set(prefix, pending);
   return pending;

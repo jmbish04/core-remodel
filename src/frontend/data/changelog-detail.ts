@@ -285,7 +285,7 @@ headroom is exactly the fix for that.`,
       "src/backend/ai/agents/showroom-scout/index.ts — registry imported inside execute()",
       "src/_worker.ts — 15 cron-only service imports moved into scheduled()",
       "scripts/perf/attribute-startup.py — new; sourcemap-based startup profile attribution",
-      "scripts/qc/pr_lazy_router_mounting.mjs — new; routing regression guard",
+      "scripts/qc/pr_416.mjs — new; routing regression guard (named for the PR so `pnpm run test:pr 416` and `--all` pick it up)",
       "src/frontend/data/changelog.ts, src/frontend/data/changelog-detail.ts",
     ],
 
@@ -443,8 +443,8 @@ what eager \`app.route()\` mounting did implicitly.`,
     ],
 
     verification: {
-      qcScript: "scripts/qc/pr_lazy_router_mounting.mjs",
-      command: "node scripts/qc/pr_lazy_router_mounting.mjs --compare",
+      qcScript: "scripts/qc/pr_416.mjs",
+      command: "node scripts/qc/pr_416.mjs --compare",
       ranAt: "2026-09-04",
       source: `// One representative GET per mounted prefix — 90 in all. A 401/404 is a fine
 // answer; the assertion is that preview and production AGREE.

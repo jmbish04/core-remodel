@@ -23,9 +23,13 @@
  * behave exactly as before.
  *
  * Run:
- *   pnpm run test:pr lazy_router_mounting -- --preview   # this branch
- *   pnpm run test:pr lazy_router_mounting               # production baseline
- *   node scripts/qc/pr_lazy_router_mounting.mjs --compare  # both, diffed
+ *   pnpm run test:pr 416 -- --preview   # this branch's preview
+ *   pnpm run test:pr 416                # production baseline
+ *   node scripts/qc/pr_416.mjs --compare  # hits both and diffs them
+ *
+ * `--compare` is the mode that actually earns its keep: a single-target run can
+ * only say "this status looks plausible", while the diff says "production and
+ * this branch answer identically", which is the whole claim being made.
  */
 import {
   createClient,
@@ -232,8 +236,7 @@ async function main() {
   const upsert = await client.post("/api/changelog/branches", {
     branch: "qc/lazy-router-mounting-probe",
     title: "QC probe — lazy router mounting",
-    summary:
-      "Written by scripts/qc/pr_lazy_router_mounting.mjs to prove a POST body survives a lazy mount.",
+    summary: "Written by scripts/qc/pr_416.mjs to prove a POST body survives a lazy mount.",
     date: "2026-09-04",
     status: "open",
   });

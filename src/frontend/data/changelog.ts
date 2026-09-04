@@ -549,7 +549,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       },
       {
         kind: "added",
-        text: "`scripts/qc/pr_lazy_router_mounting.mjs` — walks 90 paths plus six deliberate misses on preview and production and fails on any status difference; checks 404-not-500 on unmounted paths, nested-prefix precedence, shared-prefix fall-through, auth, the no-store header on a sub-router 4xx, and that /openapi.json still enumerates the same paths including the now lazily-imported pascal routes.",
+        text: "`scripts/qc/pr_416.mjs` — walks 90 paths plus six deliberate misses on preview and production and fails on any status difference; checks 404-not-500 on unmounted paths, nested-prefix precedence, shared-prefix fall-through, auth, the no-store header on a sub-router 4xx, and that /openapi.json still enumerates the same paths including the now lazily-imported pascal routes.",
       },
     ],
     status: "staged",
