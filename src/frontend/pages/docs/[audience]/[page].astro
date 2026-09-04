@@ -1,0 +1,150 @@
+---
+/**
+ * Renders one documentation page from `src/frontend/lib/docs.ts`.
+ *
+ * WHY THIS FILE EXISTS. `lib/docs.ts` has carried a full documentation site —
+ * audiences, pages, sections, Mermaid diagrams — and the public sidebar has
+ * linked to every one of them, but nothing ever rendered a `DocsPageDefinition`.
+ * All of those links resolved into `/docs/[id].astro`, the uploaded-FILE viewer,
+ * which answered "document not found" for a docs slug. Authoring a page in
+ * `lib/docs.ts` was therefore write-only until this route existed.
+ *
+ * Deliberately NOT a React island. The content is static prose that benefits
+ * from server rendering, and shipping the whole docs blob to the client to
+ * render text would be pure waste. The one interactive part is the Mermaid
+ * diagram, which mounts as its own island per diagram.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { MermaidDiagram } from "@/components/docs/MermaidDiagram";
+import { getDocsPageBySlug } from "@/lib/docs";
+
+const { audience, page } = Astro.params;
+const doc = getDocsPageBySlug([audience ?? "", page ?? ""]);
+
+if (!doc) {
+  return Astro.redirect("/docs");
+}
+
+const statusLabel = doc.status === "live" ? "Live" : "Planned";
+const statusClass =
+  doc.status === "live"
+    ? "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20"
+    : "bg-amber-500/10 text-amber-400 ring-amber-500/20";
+---
+
+<BaseLayout title={`${doc.title} — 126 Colby Remodel`} description={doc.summary}>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <span
+          class="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-border"
+          >{doc.audienceLabel}</span
+        >
+        <span class={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${statusClass}`}
+          >{statusLabel}</span
+        >
+      </div>
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          class="size-6 shrink-0 text-muted-foreground"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 7v14"></path>
+          <path
+            d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"
+          ></path>
+        </svg>
+        {doc.title}
+      </h1>
+      <p class="text-muted-foreground">{doc.summary}</p>
+    </div>
+
+    <article class="max-w-3xl space-y-10">
+      <p class="text-base leading-7 text-foreground/90">{doc.overview}</p>
+
+      {
+        doc.highlights.length > 0 && (
+          <ul class="space-y-2 rounded-lg border border-border bg-card/50 p-5">
+            {doc.highlights.map((item) => (
+              <li class="flex gap-3 text-sm leading-6 text-foreground/90">
+                <span class="mt-2 size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+
+      {
+        doc.actions.length > 0 && (
+          <nav class="grid gap-3 sm:grid-cols-2" aria-label="Related tools">
+            {doc.actions.map((action) => (
+              <a
+                href={action.href}
+                class="rounded-lg border border-border bg-card/50 p-4 transition-colors hover:border-primary/50 hover:bg-card"
+              >
+                <span class="block text-sm font-medium">{action.label}</span>
+                <span class="mt-1 block text-xs leading-5 text-muted-foreground">
+                  {action.description}
+                </span>
+              </a>
+            ))}
+          </nav>
+        )
+      }
+
+      {
+        doc.sections.map((section) => (
+          <section id={section.id} class="scroll-mt-24 space-y-4">
+            <div>
+              <h2 class="text-xl font-semibold tracking-tight">{section.title}</h2>
+              <p class="mt-1 text-sm text-muted-foreground">{section.summary}</p>
+            </div>
+
+            {section.paragraphs.map((paragraph) => (
+              <p class="text-sm leading-7 text-foreground/90">{paragraph}</p>
+            ))}
+
+            {section.bullets && section.bullets.length > 0 && (
+              <ul class="space-y-2">
+                {section.bullets.map((bullet) => (
+                  <li class="flex gap-3 text-sm leading-6 text-foreground/90">
+                    <span
+                      class="mt-2 size-1.5 shrink-0 rounded-full bg-muted-foreground/60"
+                      aria-hidden="true"
+                    />
+                    <span>{bullet}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {section.diagrams?.map((diagram) => (
+              <MermaidDiagram client:only="react" code={diagram.code} caption={diagram.caption} />
+            ))}
+
+            {section.note && (
+              <aside
+                class={`rounded-lg border p-4 text-sm leading-6 ${
+                  section.note.tone === "planned"
+                    ? "border-amber-500/30 bg-amber-500/5"
+                    : "border-border bg-muted/40"
+                }`}
+              >
+                <p class="font-medium">{section.note.title}</p>
+                <p class="mt-1 text-muted-foreground">{section.note.body}</p>
+              </aside>
+            )}
+          </section>
+        ))
+      }
+    </article>
+  </main>
+</BaseLayout>
