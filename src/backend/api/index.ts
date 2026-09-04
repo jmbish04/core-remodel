@@ -213,10 +213,18 @@ function executionCtxOf(
 const loaded = new Map<string, Promise<MountableRouter>>();
 
 /**
- * Loads every router declared at `prefix` and merges them into one Hono, in
- * declaration order — the same shape Hono ends up with when several routers are
- * `app.route()`d onto the same path. Cached per isolate, so only the first
- * request to a prefix pays for the import.
+ * Loads every router declared at `prefix` and merges them into one Hono — in
+ * declaration order, and mounted at the SAME absolute prefix they used before.
+ *
+ * Mounting at the full prefix, rather than stripping it and dispatching a
+ * rewritten request (what Hono's own `mount()` does), is deliberate: handlers
+ * see the absolute path exactly as they did under eager `app.route()`. Several
+ * read it directly — `routes/artifacts.ts` derives its R2 key with
+ * `c.req.path.replace(/^\/api\/artifacts\//, "")` — and a stripped path
+ * silently turned that route's 404 into a 400. Do not "optimise" this back
+ * into a prefix-stripping rewrite.
+ *
+ * Cached per isolate, so only the first request to a prefix pays for the import.
  */
 function loadPrefix(prefix: string, mounts: Mounts): Promise<MountableRouter> {
   let pending = loaded.get(prefix);
@@ -232,7 +240,7 @@ function loadPrefix(prefix: string, mounts: Mounts): Promise<MountableRouter> {
       () => new Response(null, { status: 404, headers: { [LAZY_MISS_HEADER]: "1" } }),
     );
     for (const router of routers) {
-      merged.route("/", router);
+      merged.route(prefix, router);
     }
     return merged;
   })();
@@ -242,17 +250,15 @@ function loadPrefix(prefix: string, mounts: Mounts): Promise<MountableRouter> {
 }
 
 /**
- * Rewrites the request with `prefix` stripped and runs it against the merged
- * router — the same rewrite Hono's own `mount()` performs. A miss falls through
- * to the next matching handler so nested prefixes (/api/admin, then
- * /api/admin/permits) still resolve in declaration order.
+ * Runs the untouched request against the merged router for `prefix`. A miss
+ * falls through to the next matching handler, so nested prefixes (/api/admin,
+ * then /api/admin/permits) resolve in declaration order and an unrecognised
+ * path ends at the parent app's 404 rather than this group's.
  */
 function lazyDispatcher(prefix: string, mounts: Mounts) {
   return async (c: Context<{ Bindings: Env; Variables: Variables }>, next: () => Promise<void>) => {
     const router = await loadPrefix(prefix, mounts);
-    const url = new URL(c.req.url);
-    url.pathname = url.pathname.slice(prefix.length) || "/";
-    const res = await router.fetch(new Request(url, c.req.raw), c.env, executionCtxOf(c));
+    const res = await router.fetch(c.req.raw, c.env, executionCtxOf(c));
     if (res.status === 404 && res.headers.get(LAZY_MISS_HEADER)) {
       await next();
       return;
