@@ -421,8 +421,8 @@ success on the preview is this probe now doing its job.
   SELECT count(*) WHERE branch LIKE 'qc/%'  ->  0`,
       previewWorker: {
         name: "wcrp-orca-startup-cpu-followup",
-        status: "deployed",
-        note: "Live for review. Tear down with `pnpm run preview:delete` in the same turn as the merge.",
+        status: "deleted",
+        note: "Torn down 2026-09-04 in the same turn as the merge. Verified at the Cloudflare API, not just by the delete command: GET the script returns `This Worker does not exist on your account.` The workers.dev URL still answered 200 for a moment afterwards — edge lag, not a failed delete — and now returns 404.",
       },
     },
   },
