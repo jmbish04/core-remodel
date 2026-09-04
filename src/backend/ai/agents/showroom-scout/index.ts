@@ -1,7 +1,3 @@
-import type { McpProps } from "@backend/mcp/types";
-
-import { run, setTracingDisabled, tool, type AgentInputItem } from "@openai/agents";
-import { Agent as OpenAIAgent } from "@openai/agents";
 /**
  * @fileoverview Showroom Scout — Durable Object agent.
  *
@@ -24,6 +20,10 @@ import { Agent as OpenAIAgent } from "@openai/agents";
  * broken traces we disable that exporter and emit our own structured events
  * into the state timeline, which is what actually drives the UI anyway.
  */
+import type { McpProps } from "@backend/mcp/types";
+
+import { run, setTracingDisabled, tool, type AgentInputItem } from "@openai/agents";
+import { Agent as OpenAIAgent } from "@openai/agents";
 import { Agent, callable } from "agents";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";

@@ -172,7 +172,8 @@ app.use("/api/bid-portfolios/*", async (c, next) => {
 app.get("/api/ping", (c) => c.json({ status: "ok", timestamp: Date.now() }));
 
 /** Any router mountable under this app — plain Hono or an OpenAPIHono. */
-// biome-ignore lint: routers are constructed with varying Env/Variables generics.
+// Routers are constructed with varying Env/Variables generics; this alias is the
+// one place that has to be permissive about it.
 type MountableRouter = Hono<any, any, any>;
 type RouterLoader = () => Promise<MountableRouter>;
 type Mounts = ReadonlyArray<readonly [string, RouterLoader]>;
@@ -183,6 +184,14 @@ type Mounts = ReadonlyArray<readonly [string, RouterLoader]>;
  * the request with a 404. It never reaches a client: `lazyDispatcher` consumes
  * the response and calls `next()`, leaving the final 404 to the parent app —
  * which is exactly what eager `app.route()` mounting did.
+ *
+ * THE COROLLARY, for anyone writing a route handler: a handler must return its
+ * own 404 (`return c.json({ error: "..." }, 404)`), never `c.notFound()`.
+ * `c.notFound()` runs the merged router's notFound, which stamps this sentinel —
+ * so a deliberate "not found" would be read as "this prefix has no such route"
+ * and fall through to the NEXT matching prefix's dispatcher instead of ending
+ * the request. No handler does this today (nothing under `routes/` calls
+ * `c.notFound()`), and this note is why it should stay that way.
  */
 const LAZY_MISS_HEADER = "x-lazy-mount-miss";
 
@@ -520,6 +529,36 @@ for (const path of ["/openapi.json", "/swagger", "/scalar", "/docs", "/context"]
     const { openapiRouter } = await import("./routes/openapi");
     return openapiRouter.fetch(c.req.raw, c.env, executionCtxOf(c));
   });
+}
+
+/**
+ * Every distinct mount prefix, in declaration order. Exported for the
+ * `api_route_registry` health probe: `app.routes` no longer contains the
+ * sub-routers' own routes, so the probe cannot see them there.
+ */
+export const MOUNT_PREFIXES: readonly string[] = orderedPrefixes(MOUNTS);
+
+/**
+ * Forces every lazily-mounted router to import and merge, and reports which
+ * ones failed. This is what restores the guarantee the route-count check used
+ * to give: under eager mounting a router that threw at import took the whole
+ * Worker down loudly, whereas a lazy one 500s only its own prefix, only once a
+ * request reaches it. The health probe calls this so the failure is found by
+ * monitoring rather than by a user.
+ *
+ * Deliberately NOT called on the request path — it defeats the entire point of
+ * lazy mounting.
+ */
+export async function loadAllMounts(): Promise<{ prefix: string; error: string }[]> {
+  const failures: { prefix: string; error: string }[] = [];
+  for (const prefix of MOUNT_PREFIXES) {
+    try {
+      await loadPrefix(prefix, MOUNTS);
+    } catch (err) {
+      failures.push({ prefix, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return failures;
 }
 
 export { app };

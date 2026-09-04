@@ -320,49 +320,23 @@ const legacyHandler: ExportedHandler<Env> = {
     await handleInboundEmail(message, env, ctx);
   },
   async scheduled(event, env, ctx) {
-    // EVERY cron job is imported here, not at module scope. These services reach
-    // most of the backend — the Gmail inbox-label chain alone pulls the email
-    // pipeline, showroom contacts and business-card OCR; the Places backfill
-    // pulls the whole Drizzle schema barrel — and a static import would build
-    // all of it during Worker startup, against the 1s startup CPU budget that
-    // was failing deploys with 10021. Cron ticks are not latency-sensitive and
-    // the modules are cached for the life of the isolate, so paying the import
-    // here costs nothing that matters. See the comment in
-    // `src/backend/api/index.ts` for the same reasoning on the API routers.
-    const [
-      { pruneAgentRuns, sweepAbandonedRuns },
-      { startRun },
-      { runPermitSync },
-      { ingestInboxLabel },
-      { runIngestGate },
-      { ingestCompanyEmails },
-      { emptySummary, ingestDriveFolder, listActiveRootsForCron, ScanInProgressError },
-      { autoHealImageUploads },
-      { startClearanceSweep },
-      { refreshPricingCatalog },
-      { monitorShowroomSourcingCoverage },
-      { backfillShowroomPlacesData },
-      { pollVehicleForActiveDrive },
-      { enforceStreamWindow },
-      { dispatchDueWorkflows },
-    ] = await Promise.all([
-      import("./backend/services/agent-run-retention.js"),
-      import("./backend/services/agent-runs"),
-      import("./backend/services/dbi/permits-sync.js"),
-      import("./backend/services/gmail/inbox-label"),
-      import("./backend/services/gmail/ingest-gate"),
-      import("./backend/services/gmail/ingestion"),
-      import("./backend/services/google/drive-ingest"),
-      import("./backend/services/image-processor/auto-heal"),
-      import("./backend/services/jules/clearance-sweep"),
-      import("./backend/services/pricing/catalog"),
-      import("./backend/services/showroom-sourcing-monitor"),
-      import("./backend/services/showroom/places-backfill"),
-      import("./backend/services/tesla-poller"),
-      import("./backend/services/tesla/gating"),
-      import("./backend/services/workflow-dispatcher"),
-    ]);
-
+    // Cron services are imported per BRANCH, not at module scope and not all at
+    // once. Two separate reasons:
+    //
+    // 1. Not at module scope: these reach most of the backend — the Gmail
+    //    inbox-label chain pulls the email pipeline, showroom contacts and
+    //    business-card OCR; the Places backfill pulls the whole Drizzle schema
+    //    barrel — and a static import builds all of it during Worker startup,
+    //    against the 1s startup CPU budget that was failing deploys with 10021.
+    //    See the comment in `src/backend/api/index.ts` for the same reasoning on
+    //    the API routers.
+    // 2. Not all at once: the master tick runs EVERY MINUTE. Importing the whole
+    //    set up front would make the cheapest, most frequent trigger pay, on
+    //    every cold isolate, for the weekly price refresh and the daily ledger
+    //    sweep it will never call. Each branch imports only what it runs.
+    //
+    // Modules stay cached for the life of the isolate, so a warm isolate pays
+    // nothing either way.
     // Gate by cron expression so each registered trigger fires its own job.
     // The existing 14:00 UTC trigger runs the permit sync; the new master-tick
     // "* * * * *" reads `system_cron_schedules` and fires any due workflows.
@@ -370,10 +344,15 @@ const legacyHandler: ExportedHandler<Env> = {
     // daily job: it hits four external endpoints and must not share a failure
     // budget with the permit sync.
     if (event.cron === "0 9 * * 1") {
+      const { refreshPricingCatalog } = await import("./backend/services/pricing/catalog");
       ctx.waitUntil(refreshPricingCatalog(env).then(() => undefined));
       return;
     }
     if (event.cron === "0 14 * * *") {
+      const [{ runPermitSync }, { pruneAgentRuns, sweepAbandonedRuns }] = await Promise.all([
+        import("./backend/services/dbi/permits-sync.js"),
+        import("./backend/services/agent-run-retention.js"),
+      ]);
       ctx.waitUntil(runPermitSync(env));
       // Prune the agent run ledger. Daily, not per-minute: a sweep that finds
       // nothing 1,439 times a day is pure waste, and an append-only ledger
@@ -387,6 +366,21 @@ const legacyHandler: ExportedHandler<Env> = {
       return;
     }
     if (event.cron === "* * * * *") {
+      const [
+        { dispatchDueWorkflows },
+        { autoHealImageUploads },
+        { monitorShowroomSourcingCoverage },
+        { enforceStreamWindow },
+        { pollVehicleForActiveDrive },
+        { backfillShowroomPlacesData },
+      ] = await Promise.all([
+        import("./backend/services/workflow-dispatcher"),
+        import("./backend/services/image-processor/auto-heal"),
+        import("./backend/services/showroom-sourcing-monitor"),
+        import("./backend/services/tesla/gating"),
+        import("./backend/services/tesla-poller"),
+        import("./backend/services/showroom/places-backfill"),
+      ]);
       ctx.waitUntil(dispatchDueWorkflows(env));
       // Self-heal image uploads stranded by transient Workers AI capacity
       // errors (or whose workflow never started) without manual reprocessing.
@@ -435,6 +429,11 @@ const legacyHandler: ExportedHandler<Env> = {
       return;
     }
     if (event.cron === "15 */4 * * *") {
+      const [{ ingestCompanyEmails }, { ingestInboxLabel }, { runIngestGate }] = await Promise.all([
+        import("./backend/services/gmail/ingestion"),
+        import("./backend/services/gmail/inbox-label"),
+        import("./backend/services/gmail/ingest-gate"),
+      ]);
       // Gmail comms hub (0013 P3-07): bounded ingestion every 4 hours — see
       // wrangler.jsonc for why this is a dedicated trigger rather than
       // piggybacking the per-minute master tick.
@@ -479,6 +478,7 @@ const legacyHandler: ExportedHandler<Env> = {
       return;
     }
     if (event.cron === "30 13 * * 1") {
+      const { startClearanceSweep } = await import("./backend/services/jules/clearance-sweep");
       // Weekly showroom sale/clearance sweep. First runs plain-fetch discovery to
       // register any new clearance/sale/outlet links across the whole directory
       // (sitemap.xml, or the homepage when a site has none), then hands the
@@ -499,6 +499,13 @@ const legacyHandler: ExportedHandler<Env> = {
       return;
     }
     if (event.cron === "0 11 * * *") {
+      const [
+        { startRun },
+        { emptySummary, ingestDriveFolder, listActiveRootsForCron, ScanInProgressError },
+      ] = await Promise.all([
+        import("./backend/services/agent-runs"),
+        import("./backend/services/google/drive-ingest"),
+      ]);
       ctx.waitUntil(
         (async () => {
           // Reuses the shared agent-run ledger rather than a bespoke scan-run

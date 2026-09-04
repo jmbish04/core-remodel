@@ -24,11 +24,16 @@ import {
   readSecret,
   type HealthProbe,
 } from "@backend/services/health/types";
+import { requireAccessAuth } from "@backend/utils/access";
 
 const FILE = "src/backend/api/health.ts";
 
-/** Fewer registered routes than this means the mount list did not fully load. */
-const ROUTE_COUNT_FLOOR = 50;
+/**
+ * Fewer distinct mount prefixes than this means the MOUNTS table in
+ * src/backend/api/index.ts did not fully load. It is a floor, not the exact
+ * count, so adding or removing one router does not turn the probe red.
+ */
+const MOUNT_PREFIX_FLOOR = 60;
 
 export const HEALTH_PROBES: HealthProbe[] = [
   defineProbe({
@@ -67,7 +72,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
       const key = await readSecret(env.WORKER_API_KEY);
       if (!key) {
         return failure(
-          "WORKER_API_KEY is unreadable or empty. The access-cookie hash resolves to \"\", so EVERY authed route " +
+          'WORKER_API_KEY is unreadable or empty. The access-cookie hash resolves to "", so EVERY authed route ' +
             "is unreachable and the admin UI cannot be logged into. Check the secrets_store_secrets binding in " +
             "wrangler.jsonc and `npx wrangler secrets-store secret list`.",
         );
@@ -96,7 +101,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
       "returns ok — which is exactly why a plain API ping is not a sufficient health check.",
     troubleshootingSteps:
       "1. Confirm the `assets` block in wrangler.jsonc names a `directory` that the build actually produces, and " +
-      "declares `binding: \"ASSETS\"`. 2. Confirm the build ran: `pnpm run build` and check the output directory " +
+      'declares `binding: "ASSETS"`. 2. Confirm the build ran: `pnpm run build` and check the output directory ' +
       "exists and is non-empty before deploying — `pnpm run deploy` runs build first for this reason. " +
       "3. Redeploy: `pnpm run deploy` from `main`. " +
       "4. Verify a real page loads: `curl -sI https://core-remodel.hacolby.workers.dev/admin/system/health`. " +
@@ -123,23 +128,26 @@ export const HEALTH_PROBES: HealthProbe[] = [
     name: "api_route_registry",
     displayName: "Hono route registry populated",
     description:
-      `Imports the Hono app from src/backend/api/index.ts and asserts it has at least ${ROUTE_COUNT_FLOOR} ` +
-      "registered routes, that /api/ping is among them, and that admin auth middleware is registered.",
+      "Imports src/backend/api/index.ts, then FORCES EVERY lazily-mounted router to import and merge " +
+      `(loadAllMounts) and reports any that threw. Also asserts at least ${MOUNT_PREFIX_FLOOR} mount prefixes are ` +
+      "dispatched, /api/ping is registered, and requireAccessAuth itself is registered on /api/admin/*.",
     healthTsFilepath: FILE,
     bindingTypesTested: [],
     whatSuccessMeans:
-      "Every `app.route(...)` mount in src/backend/api/index.ts loaded without throwing and the router holds a " +
-      "full complement of routes, including the /api/admin/* auth middleware. The API surface is intact.",
+      "Every entry in the MOUNTS table imported and merged without throwing, the full complement of prefixes is " +
+      "dispatched, and requireAccessAuth is registered on /api/admin/*. The API surface is intact and gated.",
     whatFailureMeans:
-      "A router module threw at import (a bad top-level statement, a circular import, a missing export), so the " +
-      "whole app module failed to load and every request 500s. A route count that is low but non-zero is the more " +
-      "insidious case: some mounts loaded and others did not, producing 404s on a subset of the API while the rest " +
-      "looks fine. A missing auth middleware registration would mean admin routes are being served UNGATED.",
+      "A router module threw at import (a bad top-level statement, a circular import, a missing export). Routers " +
+      "are mounted LAZILY, so this no longer takes the whole app down loudly — it 500s only that one prefix, and " +
+      "only once a request reaches it. That is precisely why this probe loads them all itself rather than counting " +
+      "app.routes: the count cannot see a sub-router's routes any more, so it could never notice a broken one. " +
+      "A missing auth middleware registration would mean admin routes are being served UNGATED.",
     troubleshootingSteps:
       "1. Read the details string — it reports the count and names what was missing. " +
       "2. Reproduce the import locally: `npx tsc --noEmit` catches missing exports that the esbuild build does not. " +
       "3. `npx wrangler tail` and hit any route; a module-load throw prints on every request with the offending file. " +
-      "4. If the count is low, diff the `app.route(...)` list in src/backend/api/index.ts against the routers under " +
+      "4. If a prefix is named as failing, import that router module directly — the message carries the throw. " +
+      "If the prefix COUNT is low, diff the MOUNTS table in src/backend/api/index.ts against the routers under " +
       "src/backend/api/routes/ — a router that exists but is never mounted is a silent 404. " +
       "5. If an auth middleware line is missing, treat it as a security defect: fix and deploy before anything else. " +
       "6. Verify: `curl -s https://core-remodel.hacolby.workers.dev/api/ping`.",
@@ -151,8 +159,10 @@ export const HEALTH_PROBES: HealthProbe[] = [
     severity: "HIGH",
     run: async () => {
       let app: (typeof import("./index"))["app"];
+      let MOUNT_PREFIXES: (typeof import("./index"))["MOUNT_PREFIXES"];
+      let loadAllMounts: (typeof import("./index"))["loadAllMounts"];
       try {
-        ({ app } = await import("./index"));
+        ({ app, MOUNT_PREFIXES, loadAllMounts } = await import("./index"));
       } catch (e) {
         return failure(
           `The Hono app failed to load: ${e instanceof Error ? e.message : String(e)}. A router module threw at ` +
@@ -164,24 +174,55 @@ export const HEALTH_PROBES: HealthProbe[] = [
       const paths = new Set(routes.map((r) => r.path));
       const problems: string[] = [];
       if (!paths.has("/api/ping")) problems.push("/api/ping is not registered");
+
+      // Identity check on the MIDDLEWARE ITSELF, not on "something is registered
+      // under /api/admin". Since routers are mounted lazily, the dispatcher
+      // registers `app.all("/api/admin/*", …)` — which satisfies any
+      // path-and-method test, so a path/method check would stay green even if
+      // `app.use("/api/admin/*", requireAccessAuth)` were deleted outright.
+      // Comparing the handler reference is the only form that cannot be
+      // accidentally satisfied.
       const guardsAdmin = routes.some(
-        (r) => r.path.startsWith("/api/admin") && r.method.toUpperCase() === "ALL",
+        (r) => r.path === "/api/admin/*" && r.handler === requireAccessAuth,
       );
       if (!guardsAdmin) {
-        problems.push("no middleware registered on /api/admin/* — admin routes may be UNGATED");
-      }
-
-      const details = `${routes.length} route(s)/middleware registered on the Hono app across ${paths.size} distinct paths.`;
-      if (problems.length > 0) {
-        return failure(`${details} Problems: ${problems.join("; ")}.`);
-      }
-      if (routes.length < ROUTE_COUNT_FLOOR) {
-        return degraded(
-          `${details} Below the expected floor of ${ROUTE_COUNT_FLOOR} — some routers probably failed to mount, ` +
-            "which shows up as 404s on a subset of the API.",
+        problems.push(
+          "requireAccessAuth is NOT registered on /api/admin/* — admin routes are being served UNGATED",
         );
       }
-      return ok(details);
+
+      // Every prefix must have a dispatcher, and every router behind it must
+      // actually import. This is the part that replaces counting app.routes.
+      const dispatched = MOUNT_PREFIXES.filter((prefix) => paths.has(`${prefix}/*`));
+      const undispatched = MOUNT_PREFIXES.filter((prefix) => !paths.has(`${prefix}/*`));
+      if (undispatched.length > 0) {
+        problems.push(`no dispatcher registered for: ${undispatched.join(", ")}`);
+      }
+
+      const failures = await loadAllMounts();
+      if (failures.length > 0) {
+        problems.push(
+          `router import failed for ${failures.length} prefix(es): ` +
+            failures.map((f) => `${f.prefix} (${f.error})`).join("; "),
+        );
+      }
+
+      // Counts only. Whether the imports actually succeeded is stated once, in
+      // the branch that knows — a shared prefix claiming "all imported cleanly"
+      // would contradict the very failure list printed after it.
+      const counts =
+        `${MOUNT_PREFIXES.length} mount prefix(es), ${dispatched.length} dispatched; ` +
+        `${routes.length} route(s)/middleware on the parent app across ${paths.size} distinct paths.`;
+      if (problems.length > 0) {
+        return failure(`${counts} Problems: ${problems.join("; ")}.`);
+      }
+      if (dispatched.length < MOUNT_PREFIX_FLOOR) {
+        return degraded(
+          `${counts} Below the expected floor of ${MOUNT_PREFIX_FLOOR} mount prefixes — routers were probably ` +
+            "removed from the MOUNTS table, which shows up as 404s on a subset of the API.",
+        );
+      }
+      return ok(`${counts} Every router imported cleanly.`);
     },
   }),
 
@@ -203,7 +244,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
       "not just the new entry. An empty `paths` map means the spec object loaded but lost its contents.",
     troubleshootingSteps:
       "1. Fetch it directly: `curl -s https://core-remodel.hacolby.workers.dev/openapi.json | jq '.paths | keys | length'`. " +
-      "2. If it 404s, the openapiRouter is no longer mounted at `/` — check the last `app.route(\"/\", openapiRouter)` " +
+      '2. If it 404s, the openapiRouter is no longer mounted at `/` — check the last `app.route("/", openapiRouter)` ' +
       "line in src/backend/api/index.ts. 3. If it 500s, `npx tsc --noEmit` over src/backend/api/routes/openapi.ts. " +
       "4. Remember this document is hand-maintained: routes added under src/backend/api/routes/ are ABSENT from it " +
       "until mirrored in openapi.ts, so a route missing from the spec is a docs gap, not an outage. " +

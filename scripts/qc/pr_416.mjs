@@ -195,13 +195,18 @@ async function main() {
     `got ${artifact.status} ${JSON.stringify(artifact.json)}`,
   );
 
-  // Nested prefixes: /api/admin is mounted before /api/admin/permits, and the
-  // permits router must still win for its own paths.
-  checks.ok(
-    "/api/admin/permits resolves (nested prefix not shadowed by /api/admin)",
-    seen["/api/admin/permits"] !== 404 || seen["/api/admin/config"] !== 404,
-    `permits=${seen["/api/admin/permits"]} config=${seen["/api/admin/config"]}`,
-  );
+  // Nested prefixes: /api/admin is declared before /api/admin/permits, so the
+  // /api/admin dispatcher gets first refusal on /api/admin/permits/* and has to
+  // fall through. Assert EACH nested path independently — an `||` across them
+  // (which this had) passes as soon as any one resolves, which is exactly the
+  // shadowing the check exists to catch.
+  for (const nested of ["/api/admin/permits", "/api/admin/config", "/api/admin/plans"]) {
+    checks.ok(
+      `${nested} resolves (nested prefix not shadowed by /api/admin)`,
+      seen[nested] !== 404,
+      `got ${seen[nested]}`,
+    );
+  }
 
   // Shared prefixes: six routers sit on /api/showroom-stores. If fall-through
   // broke, only the first one's routes would answer.
@@ -231,22 +236,22 @@ async function main() {
 
   // A request body has to survive the hop into the lazily-loaded sub-router.
   // This is the second thing a mount-style dispatch typically breaks, and no
-  // GET can catch it. The upsert is idempotent and keyed by branch, so running
-  // it against production is safe.
-  const upsert = await client.post("/api/changelog/branches", {
-    branch: "qc/lazy-router-mounting-probe",
-    title: "QC probe — lazy router mounting",
-    summary: "Written by scripts/qc/pr_416.mjs to prove a POST body survives a lazy mount.",
-    date: "2026-09-04",
-    status: "open",
-  });
+  // GET can catch it.
+  //
+  // Both probes are deliberately NON-DURABLE. An earlier version proved the
+  // happy path by upserting a real `changelog_branches` row: it works, but it
+  // leaves a QC artifact in the human-facing /admin/changelog record — and the
+  // mandated production run means leaving it there on production. A well-formed
+  // body aimed at a row that does not exist proves the same thing: the router
+  // received the body, parsed it, and looked it up.
+  const wellFormed = await client.post("/api/admin/drive/ingest", { rootId: 999_999 });
   checks.ok(
-    "POST body reaches a lazily-mounted router",
-    upsert.status === 201,
-    `got ${upsert.status}`,
+    "well-formed POST body reaches a lazily-mounted router (404 on a missing row, so it parsed)",
+    wellFormed.status === 404,
+    `got ${wellFormed.status} ${JSON.stringify(wellFormed.json)}`,
   );
 
-  const badBody = await client.post("/api/changelog/branches", { branch: 123 });
+  const badBody = await client.post("/api/admin/drive/ingest", { rootId: "not-a-number" });
   checks.ok(
     "malformed POST body is still validated (400, not 500)",
     badBody.status === 400,
