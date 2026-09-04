@@ -27,7 +27,13 @@
  *   pnpm run test:pr lazy_router_mounting               # production baseline
  *   node scripts/qc/pr_lazy_router_mounting.mjs --compare  # both, diffed
  */
-import { createClient, createChecks, assertReachable, previewBase, WORKER_BASE } from "../config.mjs";
+import {
+  createClient,
+  createChecks,
+  assertReachable,
+  previewBase,
+  WORKER_BASE,
+} from "../config.mjs";
 
 /**
  * One representative GET per mounted prefix. Chosen to be READ-ONLY and cheap;
@@ -205,7 +211,11 @@ async function main() {
 
   // Auth is a parent-app middleware and must still gate the sub-router.
   const noAuth = await client.get("/api/admin/config", { auth: false });
-  checks.ok("unauthenticated /api/admin/config → 401", noAuth.status === 401, `got ${noAuth.status}`);
+  checks.ok(
+    "unauthenticated /api/admin/config → 401",
+    noAuth.status === 401,
+    `got ${noAuth.status}`,
+  );
 
   // The parent's no-store stamping must still reach a sub-router's 4xx.
   const res = await fetch(`${client.base}/api/admin/config`);
@@ -213,6 +223,31 @@ async function main() {
     "4xx from a lazily-mounted router still carries Cache-Control: no-store",
     (res.headers.get("cache-control") || "").includes("no-store"),
     res.headers.get("cache-control") || "(absent)",
+  );
+
+  // A request body has to survive the hop into the lazily-loaded sub-router.
+  // This is the second thing a mount-style dispatch typically breaks, and no
+  // GET can catch it. The upsert is idempotent and keyed by branch, so running
+  // it against production is safe.
+  const upsert = await client.post("/api/changelog/branches", {
+    branch: "qc/lazy-router-mounting-probe",
+    title: "QC probe — lazy router mounting",
+    summary:
+      "Written by scripts/qc/pr_lazy_router_mounting.mjs to prove a POST body survives a lazy mount.",
+    date: "2026-09-04",
+    status: "open",
+  });
+  checks.ok(
+    "POST body reaches a lazily-mounted router",
+    upsert.status === 201,
+    `got ${upsert.status}`,
+  );
+
+  const badBody = await client.post("/api/changelog/branches", { branch: 123 });
+  checks.ok(
+    "malformed POST body is still validated (400, not 500)",
+    badBody.status === 400,
+    `got ${badBody.status}`,
   );
 
   // The spec is assembled at request time from a literal plus pascalRouter's
