@@ -658,7 +658,13 @@ python3 scripts/perf/attribute-startup.py \\
 #   25.2%  zod                         17.7%  zod
 #   15.6%  backend routes               0.0%  backend routes
 #   12.7%  mcp registry                 0.0%  mcp registry
-#    7.0%  db schema                    2.4%  db schema`,
+#    7.0%  db schema                    2.4%  db schema
+
+# HOW PRECISE IS THIS? Five runs of the fixed code on the same machine spanned
+# 110-131 samples, so read the "after" figure as ~125 with a +/-10 band, not as
+# a constant. The pre-fix number is a single run of 314. The gap is many times
+# the run-to-run variance, so the direction is solid; the exact percentage is
+# not worth quoting to two significant figures.`,
       },
     ],
 
