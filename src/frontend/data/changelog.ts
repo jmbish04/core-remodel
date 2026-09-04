@@ -77,6 +77,15 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "orca/startup-cpu-followup",
+    title:
+      "Review follow-up to the startup-CPU fix — the route-registry health probe, and four smaller defects",
+    summary:
+      'Eight findings from two reviews of #416, all of them landing after it merged. The one that matters: making router mounting lazy quietly defeated the `api_route_registry` health probe, a HIGH-severity check whose stated job is catching admin routes served UNGATED. It asserted `some route under /api/admin is registered with method ALL`, which the new `app.all("/api/admin/*", dispatch)` satisfies by itself — so deleting `app.use("/api/admin/*", requireAccessAuth)` would have left the probe green. It now compares the handler reference to `requireAccessAuth` directly, which nothing else can satisfy, and it force-loads every lazily-mounted router so an import failure is still found by monitoring rather than by a user hitting one broken prefix. Also: the QC\'s nested-prefix assertion used `||` and so passed whenever either path resolved; its POST probe wrote a permanent row into production\'s changelog record (row deleted); the per-minute cron tick imported all fifteen cron services rather than the six it runs; and the changelog\'s pasted verification output was a stale 16-check run. No migration.',
+    date: "2026-09-04",
+    status: "staged",
+  },
+  {
     branch: "orca/fix-cpu-load-time",
     title: "Worker startup CPU — routers, the MCP registry and cron jobs load on demand",
     summary:
@@ -513,6 +522,55 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "lazy-router-mounting-review-followup",
+    branch: "orca/startup-cpu-followup",
+    date: "2026-09-04",
+    tag: "perf",
+    area: "Worker startup",
+    title: "Review follow-up — the health probe lazy mounting quietly defeated",
+    summary:
+      "Making router mounting lazy turned a HIGH-severity health probe into one that passes unconditionally, including the part of it that watches for admin routes being served without authentication. That plus four smaller defects, all found by review after #416 merged.",
+    changes: [
+      {
+        kind: "fixed",
+        text: '`api_route_registry` checked `routes.some(r => r.path.startsWith("/api/admin") && r.method === "ALL")` to prove admin auth was registered. The lazy dispatcher registers `app.all("/api/admin/*", …)`, which satisfies that on its own — so removing `app.use("/api/admin/*", requireAccessAuth)` entirely would have left the probe green. It now compares the handler REFERENCE to `requireAccessAuth`, which no dispatcher can accidentally satisfy.',
+      },
+      {
+        kind: "fixed",
+        text: "The same probe's route-count check went vacuous: `app.routes` no longer contains any sub-router's routes, so a router module throwing at import — which now 500s only its own prefix, at request time — was invisible to it. The probe now calls a new `loadAllMounts()` that forces every lazily-mounted router to import and names the ones that fail, restoring the guarantee the count used to give.",
+      },
+      {
+        kind: "added",
+        text: "`MOUNT_PREFIXES` and `loadAllMounts()` exported from `src/backend/api/index.ts` for the probe. `loadAllMounts` is never called on the request path — that would defeat lazy mounting entirely.",
+      },
+      {
+        kind: "fixed",
+        text: "The QC's nested-prefix assertion was `permits !== 404 || config !== 404`. With `||` it passed whenever either path resolved, so the exact shadowing it exists to catch would have gone unnoticed. Now asserts each nested prefix independently.",
+      },
+      {
+        kind: "fixed",
+        text: "The QC's POST-body probe upserted a real `changelog_branches` row, and the mandated production run put a `qc/lazy-router-mounting-probe` branch permanently into the human-facing changelog. Both probes are now non-durable — a well-formed body against a row that does not exist proves the body was received and parsed just as well. The stray production row was deleted (verified: zero `qc/%` rows remain).",
+      },
+      {
+        kind: "changed",
+        text: "`scheduled()` imported all fifteen cron services in one `Promise.all` before the cron gate, so the per-minute master tick paid, on every cold isolate, for the weekly price refresh and the daily ledger sweep it never calls. Each cron branch now imports only what it runs.",
+      },
+      {
+        kind: "fixed",
+        text: "The pasted verification output on the previous entry was a stale 16-check run, missing the two POST-body checks the script had gained. Replaced with the real 18-check output. CLAUDE.md is explicit that this block is pasted, never paraphrased.",
+      },
+      {
+        kind: "fixed",
+        text: "Two nits: `showroom-scout/index.ts`'s `@fileoverview` docblock had been pushed below the imports when the registry import was removed, so it annotated an import statement instead of the file; and a `// biome-ignore` comment in `api/index.ts` was a no-op in a repo that lints with oxlint.",
+      },
+      {
+        kind: "added",
+        text: "Documented the second way to break lazy mounting, beside the static-import one already noted: a handler must return its own 404 and never call `c.notFound()`, which would stamp the fall-through sentinel and hand the request to the next matching prefix instead of ending it. Nothing under `routes/` does this today.",
+      },
+    ],
+    status: "staged",
+  },
   {
     id: "lazy-router-mounting-startup-cpu",
     branch: "orca/fix-cpu-load-time",

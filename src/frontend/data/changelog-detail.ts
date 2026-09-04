@@ -142,6 +142,284 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "lazy-router-mounting-review-followup": {
+    slug: "lazy-router-mounting-review-followup",
+    subtitle: "Review follow-up to #416 — what lazy mounting broke that nothing was watching",
+    branch: "orca/startup-cpu-followup",
+
+    introduction: `#416 cut Worker startup CPU by 61% and its own QC proved the API surface was
+unchanged: 90 paths, identical statuses on preview and production. Two reviews
+after it merged found **eight** things it missed, and the first one is the
+interesting one — because it is not a routing bug at all. It is a **monitoring**
+bug, and the QC could never have caught it.`,
+
+    problem: `**A HIGH-severity health probe was quietly defeated by the change it was
+watching.**
+
+\`api_route_registry\` exists to answer two questions. Both of its answers became
+worthless.
+
+*Question one: is admin auth registered?* The check was:
+
+    routes.some(r => r.path.startsWith("/api/admin") && r.method === "ALL")
+
+Under eager mounting the only thing matching that was
+\`app.use("/api/admin/*", requireAccessAuth)\`. Lazy mounting registers
+\`app.all("/api/admin", dispatch)\` and \`app.all("/api/admin/*", dispatch)\` — both
+start with \`/api/admin\`, both have method \`ALL\`. **The dispatcher satisfies the
+check by itself.** Delete the \`requireAccessAuth\` line entirely and the probe
+whose \`whatFailureMeans\` says *"admin routes are being served UNGATED"* stays
+green. Nothing was ungated — but the alarm had been disconnected from the thing
+it alarms on.
+
+*Question two: did every router load?* The check was \`routes.length >= 50\`, and
+\`app.routes\` no longer contains a single sub-router route. Measured on the two
+live workers:
+
+| | \`app.routes\` | distinct paths |
+| --- | --- | --- |
+| production (eager mounting) | **1064** | 729 |
+| this branch (lazy mounting) | **276** | 206 |
+
+Still over 50, so still green. But a router module that throws at import now
+500s only its own prefix, only when a request reaches it — and 276 is what you
+get whether every router is healthy or every single one is broken. The floor was
+measuring the parent app's middleware list and nothing else.
+
+**Five smaller ones, same review round:**
+
+- The QC's nested-prefix check was \`permits !== 404 || config !== 404\`. With
+  \`||\` it passes the moment either resolves — so \`/api/admin\` shadowing
+  \`/api/admin/permits\`, the exact failure it exists for, would pass silently.
+- The QC's POST-body probe upserted a real \`changelog_branches\` row, and the
+  house rule is that QC runs against production too. A \`qc/lazy-router-mounting-probe\`
+  branch was sitting in the human-facing changelog.
+- \`scheduled()\` imported all fifteen cron services in one \`Promise.all\` before
+  the cron gate. The master tick runs **every minute**; it was paying, on every
+  cold isolate, for the weekly price refresh and the daily ledger sweep.
+- The pasted \`verification.output\` on #416's entry was a stale 16-check run.
+  \`CLAUDE.md\`: *"Never fabricate or paraphrase results; paste what ran."*
+- \`showroom-scout/index.ts\`'s \`@fileoverview\` docblock ended up below the
+  imports when the registry import was removed, so it documented an import
+  statement; and a \`// biome-ignore\` in \`api/index.ts\` is a no-op in a repo
+  that lints with oxlint.`,
+
+    approach: `**The probe now asserts things a dispatcher cannot accidentally satisfy.**
+
+For auth, compare the handler **reference**:
+
+    routes.some(r => r.path === "/api/admin/*" && r.handler === requireAccessAuth)
+
+There is exactly one registration that can make this true. A path-and-method
+test can be satisfied by anything mounted nearby; an identity test cannot.
+
+For "did everything load", stop counting and **actually load them**.
+\`src/backend/api/index.ts\` now exports \`MOUNT_PREFIXES\` and \`loadAllMounts()\`;
+the probe calls the latter, which imports and merges every lazily-mounted router
+and returns the ones that threw, by prefix. That restores the guarantee the
+count used to give — and improves on it, because it names the offender instead
+of reporting a low number.
+
+\`loadAllMounts()\` is deliberately never called on the request path. Doing that
+would undo #416 entirely.
+
+**The rest, briefly.** The nested-prefix assertion asserts each prefix
+separately. Both POST probes are now non-durable — a well-formed body aimed at a
+row that does not exist proves the body was received and parsed just as well as
+a write does, without leaving anything behind; the stray production row was
+deleted and the table re-checked (zero \`qc/%\` rows). Each cron branch imports
+only the services it runs. The stale verification output was replaced with the
+real run. And the \`LAZY_MISS_HEADER\` docblock now records the **second** way to
+break lazy mounting: a handler must return its own 404 and never call
+\`c.notFound()\`, which would stamp the fall-through sentinel and hand the request
+to the next matching prefix instead of ending it. Nothing under \`routes/\` does
+this today, which is why it is a comment and not a fix.
+
+**On the review itself.** Both reviewers were right about everything they
+raised, and neither finding was reachable from the QC — the routing was correct,
+which is all the QC was ever asking. The probe defect in particular is the shape
+worth remembering: a change can be behaviourally perfect and still break the
+thing that watches it.`,
+
+    apiChanges: [
+      "No change to any HTTP route. `src/backend/api/index.ts` gains two exports — `MOUNT_PREFIXES` and `loadAllMounts()` — consumed only by the api_route_registry health probe.",
+    ],
+
+    filesTouched: [
+      "src/backend/api/health.ts — api_route_registry: handler-identity auth check, loadAllMounts(), prefix floor replacing the route-count floor",
+      "src/backend/api/index.ts — export MOUNT_PREFIXES + loadAllMounts; document the c.notFound() trap; drop a no-op biome-ignore",
+      "src/_worker.ts — cron imports scoped to the branch that runs them, instead of all fifteen up front",
+      "src/backend/ai/agents/showroom-scout/index.ts — @fileoverview docblock restored to the top of the file",
+      "scripts/qc/pr_416.mjs — per-prefix nested assertions; non-durable POST probes",
+      "src/frontend/data/changelog.ts, src/frontend/data/changelog-detail.ts — this entry, and #416's stale verification output replaced with the real run",
+    ],
+
+    migrations: [],
+
+    code: [
+      {
+        title: "src/backend/api/health.ts — an identity check, not a path-and-method one",
+        lang: "ts",
+        code: `// Identity check on the MIDDLEWARE ITSELF, not on "something is registered
+// under /api/admin". Since routers are mounted lazily, the dispatcher
+// registers \`app.all("/api/admin/*", …)\` — which satisfies any
+// path-and-method test, so a path/method check would stay green even if
+// \`app.use("/api/admin/*", requireAccessAuth)\` were deleted outright.
+const guardsAdmin = routes.some(
+  (r) => r.path === "/api/admin/*" && r.handler === requireAccessAuth,
+);
+
+// Every prefix must have a dispatcher, and every router behind it must
+// actually import. This is the part that replaces counting app.routes.
+const failures = await loadAllMounts();
+if (failures.length > 0) {
+  problems.push(
+    \\\`router import failed for \\\${failures.length} prefix(es): \\\` +
+      failures.map((f) => \\\`\\\${f.prefix} (\\\${f.error})\\\`).join("; "),
+  );
+}`,
+      },
+      {
+        title: "src/backend/api/index.ts — what the probe needs, and nothing the request path uses",
+        lang: "ts",
+        code: `export const MOUNT_PREFIXES: readonly string[] = orderedPrefixes(MOUNTS);
+
+/**
+ * Forces every lazily-mounted router to import and merge, and reports which
+ * ones failed. Deliberately NOT called on the request path — it defeats the
+ * entire point of lazy mounting.
+ */
+export async function loadAllMounts(): Promise<{ prefix: string; error: string }[]> {
+  const failures: { prefix: string; error: string }[] = [];
+  for (const prefix of MOUNT_PREFIXES) {
+    try {
+      await loadPrefix(prefix, MOUNTS);
+    } catch (err) {
+      failures.push({ prefix, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return failures;
+}`,
+      },
+      {
+        title: "src/_worker.ts — the per-minute tick stops paying for the weekly job",
+        lang: "ts",
+        code: `// Before: all fifteen, ahead of the gate, on every tick.
+// After: each branch imports only what it runs.
+if (event.cron === "* * * * *") {
+  const [
+    { dispatchDueWorkflows },
+    { autoHealImageUploads },
+    { monitorShowroomSourcingCoverage },
+    { enforceStreamWindow },
+    { pollVehicleForActiveDrive },
+    { backfillShowroomPlacesData },
+  ] = await Promise.all([
+    import("./backend/services/workflow-dispatcher"),
+    import("./backend/services/image-processor/auto-heal"),
+    import("./backend/services/showroom-sourcing-monitor"),
+    import("./backend/services/tesla/gating"),
+    import("./backend/services/tesla-poller"),
+    import("./backend/services/showroom/places-backfill"),
+  ]);
+  // …
+}`,
+      },
+    ],
+
+    diagrams: [
+      {
+        caption: "Why the old probe went blind",
+        title: "What app.routes can see, before and after",
+        description: `The probe read \`app.routes\`. Under eager mounting that list contained every
+sub-router's routes, so counting it meant something. Under lazy mounting the
+sub-routers are not in the parent app at all until a request arrives — so the
+probe has to go and load them itself.`,
+        code: `flowchart TB
+  subgraph B["eager — app.routes = 1064 entries / 729 paths"]
+    PA["parent app"] --> MW1["~78 use() middleware"]
+    PA --> RT1["every route of all 109 routers"]
+    P1["api_route_registry<br/>counts app.routes >= 50"] -.reads.-> PA
+    P1 -.->|"sees a broken router<br/>as a low count"| OK1["meaningful"]
+  end
+
+  subgraph A["lazy — app.routes = 276 entries / 206 paths"]
+    PA2["parent app"] --> MW2["~78 use() middleware"]
+    PA2 --> D2["2 dispatchers x 96 prefixes"]
+    D2 -. "import() on first request" .-> R2["the routers"]
+    P2["api_route_registry"] -.reads.-> PA2
+    P2 ==>|"loadAllMounts()<br/>forces every import"| R2
+  end`,
+      },
+    ],
+
+    verification: {
+      qcScript: "scripts/qc/pr_416.mjs",
+      command:
+        "node scripts/qc/pr_416.mjs --compare   +   POST /api/health/session on both workers",
+      ranAt: "2026-09-04",
+      source: `// The probe fix is not observable from the QC — it is a monitoring change — so
+// it was verified by running the real health session on both workers and reading
+// the api_route_registry line out of each.
+curl -s -X POST -H "cookie: $COOKIE" "$BASE/api/health/session" \\
+  | jq -r '.runs[] | select(.name=="api_route_registry") | "\\(.result) — \\(.details)"'`,
+      output: `QC: lazy router mounting — https://wcrp-orca-startup-cpu-followup.hacolby.workers.dev
+
+  ✓ target reachable (https://wcrp-orca-startup-cpu-followup.hacolby.workers.dev)
+  ✓ /api/rooms/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/budget/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/admin/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/showroom-stores/__qc_no_such_route__ → 404 (not 500)
+  ✓ /api/__qc_no_such_prefix__ → 404 (not 500)
+  ✓ /api/__qc_no_such_prefix__/deeper/still → 404 (not 500)
+    5xx paths: /api/showroom-products
+  ✓ /api/artifacts sees the absolute path (404, not 400)
+  ✓ /api/admin/permits resolves (nested prefix not shadowed by /api/admin)
+  ✓ /api/admin/config resolves (nested prefix not shadowed by /api/admin)
+  ✓ /api/admin/plans resolves (nested prefix not shadowed by /api/admin)
+  ✓ /api/showroom-stores fall-through reaches later routers in the group
+  ✓ unauthenticated /api/admin/config → 401
+  ✓ 4xx from a lazily-mounted router still carries Cache-Control: no-store
+  ✓ well-formed POST body reaches a lazily-mounted router (404 on a missing row, so it parsed)
+  ✓ malformed POST body is still validated (400, not 500)
+  ✓ /openapi.json enumerates routes
+  ✓ /openapi.json still carries the lazily-imported pascal routes
+    63 paths in the spec
+
+  comparing against production (https://core-remodel.hacolby.workers.dev)
+
+  ✓ every path returns the same status on preview and production
+  ✓ /openapi.json path set is identical to production
+
+20 passed, 0 failed
+
+--- api_route_registry, POST /api/health/session on both workers ---
+
+preview (this branch, fixed probe):
+  SUCCESS — 96 mount prefix(es), all imported cleanly; 276 route(s)/middleware
+  on the parent app across 206 distinct paths.
+  session counts: {success: 76, degraded: 10, failure: 5}
+
+production (eager mounting, original probe):
+  SUCCESS — 1064 route(s)/middleware registered on the Hono app across 729 distinct paths.
+  session counts: {success: 75, degraded: 10, failure: 5}
+
+1064 -> 276 is the finding in one line: the old floor of 50 was still cleared, so
+the check stayed green while measuring nothing but the parent app's middleware.
+Identical degraded/failure counts on both, so no health regression; the extra
+success on the preview is this probe now doing its job.
+
+--- stray QC row removed from production D1 ---
+  DELETE FROM changelog_branches WHERE branch = 'qc/lazy-router-mounting-probe';
+  rows_written: 1
+  SELECT count(*) WHERE branch LIKE 'qc/%'  ->  0`,
+      previewWorker: {
+        name: "wcrp-orca-startup-cpu-followup",
+        status: "deployed",
+        note: "Live for review. Tear down with `pnpm run preview:delete` in the same turn as the merge.",
+      },
+    },
+  },
   "lazy-router-mounting-startup-cpu": {
     slug: "lazy-router-mounting-startup-cpu",
     subtitle: "Worker startup CPU — the 10021 deploy block",
@@ -473,6 +751,8 @@ checks.ok("/api/artifacts sees the absolute path (404, not 400)", artifact.statu
   ✓ /api/showroom-stores fall-through reaches later routers in the group
   ✓ unauthenticated /api/admin/config → 401
   ✓ 4xx from a lazily-mounted router still carries Cache-Control: no-store
+  ✓ POST body reaches a lazily-mounted router
+  ✓ malformed POST body is still validated (400, not 500)
   ✓ /openapi.json enumerates routes
   ✓ /openapi.json still carries the lazily-imported pascal routes
     63 paths in the spec
@@ -482,7 +762,8 @@ checks.ok("/api/artifacts sees the absolute path (404, not 400)", artifact.statu
   ✓ every path returns the same status on preview and production
   ✓ /openapi.json path set is identical to production
 
-16 passed, 0 failed`,
+18 passed, 0 failed
+`,
       previewWorker: {
         name: "wcrp-orca-fix-cpu-load-time",
         status: "deleted",
